@@ -141,7 +141,7 @@ def selftest():
         if not mm.exists(): bad.append(f"找不到 Qt 多媒體外掛（{mm}）")
     except Exception as e: bad.append(f"Qt 外掛: {e}")
     try:
-        import TikTokLive; v = getattr(TikTokLive, "__version__", "?")
+        import importlib.metadata as md; v = md.version("TikTokLive")
     except Exception: v = "?"
     step("完成")
     out = {"ok": not bad, "launcher": LAUNCHER_VERSION, "tiktoklive": v, "bad": bad}
