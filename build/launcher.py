@@ -127,11 +127,13 @@ def selftest():
               "TikTokLive.events", "TikTokLive.client.web.web_client", "sqlite3", "ssl", "zlib", "wave", "ctypes.wintypes"):
         try: importlib.import_module(m)
         except Exception as e: bad.append(f"{m}: {e}")
-    try:
-        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-        from PySide6.QtWidgets import QApplication
-        app = QApplication.instance() or QApplication([]); app.quit()
-    except Exception as e: bad.append(f"QApplication: {e}")
+    try:   # 不開視窗（雲端沒有螢幕，Qt 出錯會跳對話框卡住）：只確認畫面外掛（qwindows.dll）有打包進來
+        from PySide6.QtCore import QLibraryInfo
+        pl = Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath)) / "platforms"
+        if not any(pl.glob("qwindows*.dll")): bad.append(f"找不到 Qt 畫面外掛 qwindows.dll（{pl}）")
+        mm = Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath)) / "multimedia"
+        if not mm.exists(): bad.append(f"找不到 Qt 多媒體外掛（{mm}）")
+    except Exception as e: bad.append(f"Qt 外掛: {e}")
     try:
         import TikTokLive; v = getattr(TikTokLive, "__version__", "?")
     except Exception: v = "?"

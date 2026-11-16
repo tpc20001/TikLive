@@ -57,8 +57,11 @@ jobs:
           --hidden-import _deps "${{ github.workspace }}\build\launcher.py"
       - name: 試一下 EXE（只檢查模組，不開主程式）
         shell: pwsh
+        timeout-minutes: 5
         run: |
-          $p = Start-Process -FilePath "work/dist/TikLiveMonitor/TikLiveMonitor.exe" -ArgumentList "--selftest" -Wait -PassThru
+          $p = Start-Process -FilePath "work/dist/TikLiveMonitor/TikLiveMonitor.exe" -ArgumentList "--selftest" -PassThru
+          if (-not $p.WaitForExit(120000)) { Stop-Process -Id $p.Id -Force; throw "EXE 自我測試 2 分鐘沒結束" }
+          if (-not (Test-Path "work/dist/TikLiveMonitor/selftest.json")) { throw "EXE 自我測試沒有寫出結果（exit $($p.ExitCode)）" }
           Get-Content "work/dist/TikLiveMonitor/selftest.json"
           Remove-Item "work/dist/TikLiveMonitor/selftest.json"
           if ($p.ExitCode -ne 0) { throw "EXE 自我測試沒過（exit $($p.ExitCode)）" }
