@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.14"
+APP_VERSION = "1.1.15"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -35948,7 +35948,12 @@ $r | ConvertTo-Json -Depth 4 -Compress
     def _cu_open(self, url, timeout=20):
         import ssl, urllib.request
         req = urllib.request.Request(url, headers={'User-Agent': f'TikLive-Updater/{APP_VERSION}', 'Accept': 'application/octet-stream, application/json'})
-        return urllib.request.urlopen(req, timeout=timeout, context=ssl.create_default_context())
+        # V1.1.15 Windows 內建憑證不一定有 GitHub 那串的根憑證（舊 EXE 會 CERTIFICATE_VERIFY_FAILED）→ 再加上 certifi 的憑證清單（httpx 本來就帶），一樣完整驗證
+        ctx = ssl.create_default_context()
+        try:
+            import certifi; ctx.load_verify_locations(cafile=certifi.where())
+        except Exception: pass
+        return urllib.request.urlopen(req, timeout=timeout, context=ctx)
 
     def _cu_check(self, manual=False):
         """背景：讀 update.json → 有沒有新版、要不要換 EXE。有新版只提示（同一版只提示一次；略過的那版不提示）."""

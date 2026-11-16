@@ -1,5 +1,12 @@
 [
  {
+  "version": "1.1.15",
+  "date": "2026-11-17",
+  "items": [
+   "☁ 修正：有些電腦連 GitHub 會出現 CERTIFICATE_VERIFY_FAILED（Windows 內建憑證缺 GitHub 那串的根憑證）→ 連線時再加上程式內建的 certifi 憑證清單，一樣完整驗證"
+  ]
+ },
+ {
   "version": "1.1.14",
   "date": "2026-11-17",
   "items": [
