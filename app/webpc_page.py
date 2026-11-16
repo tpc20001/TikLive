@@ -7804,7 +7804,8 @@ async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（�
     const Hs=j.hist||[],last=Hs[Hs.length-1]||{},cp=j.pass||{};
     const mineArr=Hs.map(x=>x.mine||0),recent=mineArr.length?mineArr.reduce((a,b)=>a+b,0)/mineArr.length:0;
     const avg=j.avg||(j.tot_s>0?j.tot_b/j.tot_s:0),used=s.used||0,pct=used?Math.min(100,j.copied_b/used*100):0;
-    const rate=(avg>1e5?avg:recent),left=Math.max(0,used-j.copied_b),eta=(ph==="copy"&&!j.paused&&rate>1e5)?left/rate:null;   /* V1.1.10 照開始到現在的平均（含讓路、暫停的時間）算 */
+    const rate=(j.eta_rate>1e5?j.eta_rate:recent>1e5?recent:avg),left=Math.max(0,used-j.copied_b),eta=(ph==="copy"&&!j.paused&&rate>1e5)?left/rate:null;   /* V1.1.17 照最近 1 小時真的在搬的速度（斷電、關程式、暫停那段不算）；不到 10 分鐘先照最近 6 分鐘 */
+    const rateTxt=j.eta_rate>1e5?`照最近 ${Math.round(Math.min(3600,j.eta_win||0)/60)} 分鐘 ${MB(rate)}`:recent>1e5?`照最近 6 分鐘 ${MB(rate)}，1 小時後改用 1 小時平均`:`照平均 ${MB(rate)}`;
     const leftN=Math.max(0,(j.src_files||0)-(j.copied_n||0));
     const pill={idle:["還沒開始","g"],copy:j.paused?["⏸ 暫停中","w"]:j.cur||j.curf?["▶ 搬移中","ok"]:j.why?["⏳ "+(j.why.length>14?"等待中":j.why),"w"]:["▶ 搬移中","ok"],final:["🔁 切換中","w"],handoff:["🔄 換新版接手中","w"],switched:["✔ 已切換","ok"],verify:["✔ 從 "+j.dst+" 執行中","ok"],cleaning:["🧹 清空中","w"],done:["✔ 搬完了","ok"]}[ph]||[ph,"g"];
     let h=`<div class="mgCard"><div class="mgRow1"><b>⚡ 傳輸速度</b><span class="mgBigV">${j.mbps} <small>MB/s</small></span><span class="mgChip">🧠 自動讓路</span></div>
@@ -7825,7 +7826,7 @@ async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（�
        <div><small>還剩</small><b>${G(left)}</b><i>${j.src_files?leftN.toLocaleString()+" 個（上一輪算的）":"第一輪還在算"}</i></div>
        <div><small>最近 6 分鐘速度</small><b>${MB(recent)}</b><i>${j.src} 讀 ${MB(last.srw?last.srw[0]:null)}</i></div>
        <div><small>平均速度</small><b>${MB(avg)}</b><i>${j.t_start?"已經跑了 "+H(now-j.t_start):""}</i></div>
-       <div class="${eta?"hi":""}"><small>預計完成</small><b>${eta?new Date((now+eta)*1000).toLocaleString("zh-TW",{hour12:false,month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}):"—"}</b><i>${eta?"還要 "+H(eta)+"（照平均 "+MB(rate)+"）":j.passes?"第一輪完成了，持續同步":"—"}</i></div>
+       <div class="${eta?"hi":""}"><small>預計完成</small><b>${eta?new Date((now+eta)*1000).toLocaleString("zh-TW",{hour12:false,month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}):"—"}</b><i>${eta?"還要 "+H(eta)+"（"+rateTxt+"）":j.passes?"第一輪完成了，持續同步":"—"}</i></div>
        <div><small>沒複製成</small><b class="${j.failed?"bad":""}">${j.failed||0}</b><i>原檔都還在 ${j.src}</i></div></div>
       <div class="mgSmall">${j.dst} 剩 ${G(d.free)}／${G(d.total)} · ${j.src} 用了 ${G(used)} · 已掃完 ${j.passes||0} 輪${cp.scanning?` · 🔎 掃描中（已看 ${(cp.files||0).toLocaleString()} 個）`:cp.todo?` · 這一輪要搬 ${cp.todo.toLocaleString()} 個，還剩 ${G(cp.todo_b)}（大檔先、小檔最後）`:""}</div></div>`;
     const cf=j.curf;

@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.16"
+APP_VERSION = "1.1.17"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -25990,6 +25990,32 @@ $r | ConvertTo-Json -Depth 4 -Compress
             self._wd_log('💽 搬硬碟：換成新版繼續複製')
         finally: rt['handing'] = False
 
+    def _mig_eta_loop(self):
+        """V1.1.17 預計完成用「最近 1 小時真的在搬的速度」：每 60 秒記一次已複製量（記憶體，留 3 小時）。
+        斷電、關程式、暫停那段沒有取樣（前後差超過 3 分鐘、或暫停中）→ 不算進去，不會被拉低."""
+        rt = self._mig_rt()
+        if rt.get('eh_on'): return
+        rt['eh_on'] = True
+        def run_():
+            try:
+                while not _app_closing():
+                    S = self._mig_load()
+                    if S.get('phase') != 'copy': break
+                    cf = rt.get('curf') or {}
+                    tb = int(S.get('tot_b') or 0) + int((rt.get('acc') or [0])[0]) + int(cf.get('done') or 0 if cf.get('stage') == '複製' else 0)
+                    E = rt.setdefault('eh', []); E.append((time.time(), tb, bool(S.get('paused')))); del E[:-200]
+                    time.sleep(60)
+            finally: rt['eh_on'] = False
+        threading.Thread(target=run_, name='TikLiveMigEta', daemon=True).start()
+
+    def _mig_eta_rate(self, win=3600):
+        """最近 win 秒內、真的在搬的那幾段的平均速度；回傳 (速度, 算進去幾秒)."""
+        E = list(self._mig_rt().get('eh') or []); now = time.time(); b = s = 0.0
+        for (t0, b0, p0), (t1, b1, p1) in zip(E, E[1:]):
+            if now - t1 > win or t1 - t0 > 180 or p0 or p1 or b1 < b0: continue
+            b += b1 - b0; s += t1 - t0
+        return (b / s if s > 0 else 0.0), s
+
     def _mig_sampler(self):
         """V1.1.08 頁面的圖：每 4 秒記一次兩顆硬碟的忙碌度、讀／寫速度、這邊複製的速度（留 6 分鐘）."""
         rt = self._mig_rt()
@@ -26183,6 +26209,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
             if S.get('phase') in ('copy', 'final', 'cleaning', 'handoff') and (not H_ or now - H_[-1]['t'] > 20):
                 if rt.get('samp_on') and H_ and now - H_[-1]['t'] > 30: rt['samp_on'] = False
                 self._mig_sampler()
+            if S.get('phase') == 'copy':
+                E_ = rt.get('eh') or []
+                if rt.get('eh_on') and E_ and now - E_[-1][0] > 150: rt['eh_on'] = False
+                self._mig_eta_loop()                                                # V1.1.17
         except Exception: pass
         c = rt.get('cache')
         if not c or now - c[0] > 10:
@@ -26210,6 +26240,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 'failed': len(rt.get('failed') or {}), 'tot_b': int(S.get('tot_b') or 0) + int((rt.get('acc') or [0])[0]), 'tot_s': float(S.get('tot_s') or 0) + float((rt.get('acc') or [0, 0])[1]), 'tot_n': int(S.get('tot_n') or 0) + int((rt.get('acc') or [0, 0, 0])[2]),
                 'src_files': int(S.get('src_files') or 0), 't_start': S.get('t_start'),
                 'avg': (cb / max(60.0, now - float(S.get('t_start') or now))) if S.get('t_start') else 0.0,
+                'eta_rate': (lambda r: r[0] if r[1] >= 600 else 0.0)(self._mig_eta_rate()), 'eta_win': self._mig_eta_rate()[1],   # V1.1.17 最近 1 小時真的在搬的速度（算進去 10 分鐘以上才用）
                 'v2_b': vb_, 'v2_n': vn_, 'vcur': dict(rt.get('vcur') or {}) or None, 'slow': rt.get('slow'), 'junk': S.get('junk'), 'junk_t': S.get('junk_t'),
                 'spd10': (lambda L: sum(x['size'] for x in L) / 600.0)([x for x in (rt.get('recent') or []) if now - x['t'] < 600]) if len(rt.get('recent') or []) < 40 else None}
 
@@ -43878,7 +43909,8 @@ async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（�
     const Hs=j.hist||[],last=Hs[Hs.length-1]||{},cp=j.pass||{};
     const mineArr=Hs.map(x=>x.mine||0),recent=mineArr.length?mineArr.reduce((a,b)=>a+b,0)/mineArr.length:0;
     const avg=j.avg||(j.tot_s>0?j.tot_b/j.tot_s:0),used=s.used||0,pct=used?Math.min(100,j.copied_b/used*100):0;
-    const rate=(avg>1e5?avg:recent),left=Math.max(0,used-j.copied_b),eta=(ph==="copy"&&!j.paused&&rate>1e5)?left/rate:null;   /* V1.1.10 照開始到現在的平均（含讓路、暫停的時間）算 */
+    const rate=(j.eta_rate>1e5?j.eta_rate:recent>1e5?recent:avg),left=Math.max(0,used-j.copied_b),eta=(ph==="copy"&&!j.paused&&rate>1e5)?left/rate:null;   /* V1.1.17 照最近 1 小時真的在搬的速度（斷電、關程式、暫停那段不算）；不到 10 分鐘先照最近 6 分鐘 */
+    const rateTxt=j.eta_rate>1e5?`照最近 ${Math.round(Math.min(3600,j.eta_win||0)/60)} 分鐘 ${MB(rate)}`:recent>1e5?`照最近 6 分鐘 ${MB(rate)}，1 小時後改用 1 小時平均`:`照平均 ${MB(rate)}`;
     const leftN=Math.max(0,(j.src_files||0)-(j.copied_n||0));
     const pill={idle:["還沒開始","g"],copy:j.paused?["⏸ 暫停中","w"]:j.cur||j.curf?["▶ 搬移中","ok"]:j.why?["⏳ "+(j.why.length>14?"等待中":j.why),"w"]:["▶ 搬移中","ok"],final:["🔁 切換中","w"],handoff:["🔄 換新版接手中","w"],switched:["✔ 已切換","ok"],verify:["✔ 從 "+j.dst+" 執行中","ok"],cleaning:["🧹 清空中","w"],done:["✔ 搬完了","ok"]}[ph]||[ph,"g"];
     let h=`<div class="mgCard"><div class="mgRow1"><b>⚡ 傳輸速度</b><span class="mgBigV">${j.mbps} <small>MB/s</small></span><span class="mgChip">🧠 自動讓路</span></div>
@@ -43899,7 +43931,7 @@ async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（�
        <div><small>還剩</small><b>${G(left)}</b><i>${j.src_files?leftN.toLocaleString()+" 個（上一輪算的）":"第一輪還在算"}</i></div>
        <div><small>最近 6 分鐘速度</small><b>${MB(recent)}</b><i>${j.src} 讀 ${MB(last.srw?last.srw[0]:null)}</i></div>
        <div><small>平均速度</small><b>${MB(avg)}</b><i>${j.t_start?"已經跑了 "+H(now-j.t_start):""}</i></div>
-       <div class="${eta?"hi":""}"><small>預計完成</small><b>${eta?new Date((now+eta)*1000).toLocaleString("zh-TW",{hour12:false,month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}):"—"}</b><i>${eta?"還要 "+H(eta)+"（照平均 "+MB(rate)+"）":j.passes?"第一輪完成了，持續同步":"—"}</i></div>
+       <div class="${eta?"hi":""}"><small>預計完成</small><b>${eta?new Date((now+eta)*1000).toLocaleString("zh-TW",{hour12:false,month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}):"—"}</b><i>${eta?"還要 "+H(eta)+"（"+rateTxt+"）":j.passes?"第一輪完成了，持續同步":"—"}</i></div>
        <div><small>沒複製成</small><b class="${j.failed?"bad":""}">${j.failed||0}</b><i>原檔都還在 ${j.src}</i></div></div>
       <div class="mgSmall">${j.dst} 剩 ${G(d.free)}／${G(d.total)} · ${j.src} 用了 ${G(used)} · 已掃完 ${j.passes||0} 輪${cp.scanning?` · 🔎 掃描中（已看 ${(cp.files||0).toLocaleString()} 個）`:cp.todo?` · 這一輪要搬 ${cp.todo.toLocaleString()} 個，還剩 ${G(cp.todo_b)}（大檔先、小檔最後）`:""}</div></div>`;
     const cf=j.curf;
