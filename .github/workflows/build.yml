@@ -60,7 +60,10 @@ jobs:
         timeout-minutes: 5
         run: |
           $p = Start-Process -FilePath "work/dist/TikLiveMonitor/TikLiveMonitor.exe" -ArgumentList "--selftest" -PassThru
-          if (-not $p.WaitForExit(120000)) { Stop-Process -Id $p.Id -Force; throw "EXE 自我測試 2 分鐘沒結束" }
+          $ok = $p.WaitForExit(120000)
+          if (Test-Path "work/dist/TikLiveMonitor/selftest_step.txt") { Get-Content "work/dist/TikLiveMonitor/selftest_step.txt"; Remove-Item "work/dist/TikLiveMonitor/selftest_step.txt" }
+          if (Test-Path "work/dist/TikLiveMonitor/LOG") { Get-ChildItem -Recurse "work/dist/TikLiveMonitor/LOG" | Get-Content; Remove-Item -Recurse "work/dist/TikLiveMonitor/LOG" }
+          if (-not $ok) { Get-Process | Where-Object { $_.MainWindowTitle } | Format-Table Id, ProcessName, MainWindowTitle; Stop-Process -Id $p.Id -Force; throw "EXE 自我測試 2 分鐘沒結束" }
           if (-not (Test-Path "work/dist/TikLiveMonitor/selftest.json")) { throw "EXE 自我測試沒有寫出結果（exit $($p.ExitCode)）" }
           Get-Content "work/dist/TikLiveMonitor/selftest.json"
           Remove-Item "work/dist/TikLiveMonitor/selftest.json"

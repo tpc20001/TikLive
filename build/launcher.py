@@ -8,7 +8,7 @@ TikLive 24 小時錄影：這裡不跳會擋住的視窗（沒人按「確定」
 import os, sys, json, shutil, zipfile, runpy, time, traceback, re
 from pathlib import Path
 
-import _deps  # noqa: F401  (讓 PyInstaller 把程式會用到的模組都包進 EXE)
+# 程式會用到的模組列在 build/_deps.py，打包時用 --hidden-import _deps 包進 EXE（執行時不先全部載入）
 
 LAUNCHER_VERSION = 2          # V1.1.13 雲端自動更新：設環境變數 TK_LAUNCHER，程式才知道 EXE 要不要換
 EXE_NAME = "TikLiveMonitor.exe"
@@ -122,11 +122,17 @@ def cleanup_shell():
 def selftest():
     """雲端打包完試一下這個 EXE：模組都在、Qt 能開（不開主程式）."""
     import importlib
-    bad = []
-    for m in ("PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets", "PySide6.QtMultimedia", "PySide6.QtNetwork", "httpx", "TikTokLive",
+    bad = []; prog = ROOT / "selftest_step.txt"
+    def step(s):
+        try:
+            with prog.open("a", encoding="utf-8") as f: f.write(f"{time.strftime('%H:%M:%S')} {s}\n")
+        except Exception: pass
+    step("開始")
+    for m in ("_deps", "PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets", "PySide6.QtMultimedia", "PySide6.QtNetwork", "httpx", "TikTokLive",
               "TikTokLive.events", "TikTokLive.client.web.web_client", "sqlite3", "ssl", "zlib", "wave", "ctypes.wintypes"):
+        step("載入 " + m)
         try: importlib.import_module(m)
-        except Exception as e: bad.append(f"{m}: {e}")
+        except BaseException as e: bad.append(f"{m}: {type(e).__name__}: {e}")
     try:   # 不開視窗（雲端沒有螢幕，Qt 出錯會跳對話框卡住）：只確認畫面外掛（qwindows.dll）有打包進來
         from PySide6.QtCore import QLibraryInfo
         pl = Path(QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath)) / "platforms"
@@ -137,6 +143,7 @@ def selftest():
     try:
         import TikTokLive; v = getattr(TikTokLive, "__version__", "?")
     except Exception: v = "?"
+    step("完成")
     out = {"ok": not bad, "launcher": LAUNCHER_VERSION, "tiktoklive": v, "bad": bad}
     (ROOT / "selftest.json").write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
     try:
@@ -172,4 +179,7 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try: rc = main()
+    except BaseException:
+        log("啟動器出錯\n" + traceback.format_exc()); rc = 3
+    sys.exit(rc)
