@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.13"
+APP_VERSION = "1.1.14"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -2988,6 +2988,13 @@ class MainWindow(QMainWindow):
             if not fl_.exists():
                 self._cfg_set_one('yt.order', 'old'); fl_.parent.mkdir(parents=True, exist_ok=True); fl_.write_text(str(time.time()), encoding='utf-8')
                 self._wd_log('YouTube：先傳改成「舊的場次先」，最近 3 天的場次先不傳（設定可以改）')
+        except Exception: pass
+        try:                                                                  # V1.1.14 換 EXE 後開起來了 → 告訴 BAT（它才刪舊的；沒回報又關掉就換回舊的）
+            if (Path(PACKAGE_ROOT) / '_internal_old').exists() or (Path(PACKAGE_ROOT) / (self.CU_EXE + '.old')).exists():
+                def ok_():
+                    try: (Path(PACKAGE_ROOT) / 'UPDATE' / 'shell_ok.flag').write_text(str(time.time()), encoding='utf-8'); self._wd_log(f'☁ 換 EXE 成功：啟動器第 {self._cu_launcher()} 版、V{APP_VERSION}')
+                    except Exception: pass
+                QTimer.singleShot(20000, ok_)
         except Exception: pass
         try: self._cu_loop()                                                  # V1.1.13 ☁ 雲端更新：1 分鐘後檢查，之後每 6 小時（只提示）
         except Exception: pass
@@ -36070,7 +36077,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
 
     def _cu_bat(self, shell_zip, pid):
         """等 TikLive（pid）關掉 → 解開新 EXE → 換 TikLiveMonitor.exe、_internal → 開起來；換不成就換回舊的照常打開。過程寫進 LOG\\update_log.txt."""
-        root = Path(PACKAGE_ROOT); bat = root / 'UPDATE' / 'shell_update.bat'; tmp = root / 'UPDATE' / 'shell_new'; logf = root / 'LOG' / 'update_log.txt'; exe = self.CU_EXE
+        root = Path(PACKAGE_ROOT); okf = root / 'UPDATE' / 'shell_ok.flag'; bat = root / 'UPDATE' / 'shell_update.bat'; tmp = root / 'UPDATE' / 'shell_new'; logf = root / 'LOG' / 'update_log.txt'; exe = self.CU_EXE
         q = lambda p: str(p).replace('%', '%%')
         s = f"""@echo off
 chcp 65001 >nul
@@ -36096,9 +36103,27 @@ if exist "{q(root)}\\{exe}" goto restore
 robocopy "{q(tmp)}" "{q(root)}" /E /R:3 /W:2 /NFL /NDL /NJH /NJS /NP >nul
 if not exist "{q(root)}\\{exe}" goto restore
 if not exist "{q(root)}\\_internal" goto restore
-echo [%date% %time%] [換 EXE] 完成，重新打開 >> "%LOGF%"
+echo [%date% %time%] [換 EXE] 檔案換好了，打開新的 EXE、等它開起來（最多 3 分鐘） >> "%LOGF%"
 rmdir /s /q "{q(tmp)}"
+if exist "{q(okf)}" del /f /q "{q(okf)}"
 start "" /D "{q(root)}" "{q(root)}\\{exe}"
+set /a K=0
+:chk
+timeout /t 3 /nobreak >nul
+if exist "{q(okf)}" goto good
+set /a K+=1
+if %K% GTR 60 goto slow
+tasklist /FI "IMAGENAME eq {exe}" /NH 2>nul | find /I "{exe}" >nul && goto chk
+echo [%date% %time%] [換 EXE] 新的 EXE 開不起來（自己關掉了），換回舊的 >> "%LOGF%"
+goto restore
+:good
+echo [%date% %time%] [換 EXE] 新的 EXE 開起來了，刪掉舊的 >> "%LOGF%"
+del /f /q "{q(okf)}"
+if exist "{q(root)}\\_internal_old" rmdir /s /q "{q(root)}\\_internal_old"
+if exist "{q(root)}\\{exe}.old" del /f /q "{q(root)}\\{exe}.old"
+exit /b 0
+:slow
+echo [%date% %time%] [換 EXE] 新的 EXE 還在跑但 3 分鐘沒回報，先留著舊的備份（_internal_old） >> "%LOGF%"
 exit /b 0
 :restore
 echo [%date% %time%] [換 EXE] 失敗，換回舊的 >> "%LOGF%"
@@ -36109,6 +36134,7 @@ if exist "{q(root)}\\{exe}.old" move "{q(root)}\\{exe}.old" "{q(root)}\\{exe}" >
 :fail
 echo [%date% %time%] [換 EXE] 沒有換成（解壓縮或搬檔失敗），用原本的 EXE 打開 >> "%LOGF%"
 if exist "{q(tmp)}" rmdir /s /q "{q(tmp)}"
+tasklist /FI "IMAGENAME eq {exe}" /NH 2>nul | find /I "{exe}" >nul && exit /b 1
 start "" /D "{q(root)}" "{q(root)}\\{exe}"
 exit /b 1
 """

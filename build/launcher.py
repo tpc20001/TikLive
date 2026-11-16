@@ -115,11 +115,8 @@ def run_app():
 
 def cleanup_shell():
     """上次換 EXE 留下的舊檔（換好、開得起來就不需要了）."""
-    for n in ("_internal_old", "UPDATE/shell_new"):
-        shutil.rmtree(ROOT / n, ignore_errors=True)
-    for n in (EXE_NAME + ".old",):
-        try: (ROOT / n).unlink()
-        except Exception: pass
+    # _internal_old、.old 留給換 EXE 的 BAT：程式開起來回報（UPDATE/shell_ok.flag）它才刪；開不起來它會換回舊的
+    shutil.rmtree(ROOT / "UPDATE" / "shell_new", ignore_errors=True)
 
 
 def selftest():
