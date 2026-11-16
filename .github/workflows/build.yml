@@ -1,0 +1,76 @@
+# TikLive 雲端打包：推到 main（或在 Actions 頁按 Run workflow）就會在 Windows 雲端電腦上
+#  1) 檢查所有程式檔能不能編譯  2) 用 PyInstaller 打包 EXE（外殼，TikTokLive 固定 7.0.1）並自我測試
+#  3) 做出程式更新包、EXE 外殼、完整安裝包、update.json  4) 放到 GitHub Releases（標籤 v<版本>；同一版發過就不重發）
+# 要發新版：改 app/app.py 的 APP_VERSION（並在 app/CHANGELOG.json 最上面加一筆）。要換 EXE：改 build/launcher.py 的 LAUNCHER_VERSION。
+# 更新檔放哪裡：這個 repo 是 Public → 放在自己的 Releases（程式下載不用密碼）。
+#  以後改成 Private：建一個公開的 TikLive-Release，Settings → Secrets → Actions 加 RELEASE_TOKEN（只能寫那個 repo 的 token）就會改放那裡。
+name: Build TikLive
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - name: 讀版本
+        id: v
+        shell: bash
+        run: |
+          echo "ver=$(python tools/make_release.py --version)" >> $GITHUB_OUTPUT
+          echo "launcher=$(python tools/make_release.py --launcher)" >> $GITHUB_OUTPUT
+      - name: 決定更新檔放哪個 repo
+        id: r
+        shell: bash
+        env:
+          RT: ${{ secrets.RELEASE_TOKEN }}
+          RR: ${{ vars.RELEASE_REPO }}
+        run: |
+          if [ -n "$RT" ]; then echo "repo=${RR:-${{ github.repository_owner }}/TikLive-Release}" >> $GITHUB_OUTPUT
+          else echo "repo=${{ github.repository }}" >> $GITHUB_OUTPUT; fi
+      - name: 這版發過了嗎
+        id: e
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "v${{ steps.v.outputs.ver }}" --repo "${{ steps.r.outputs.repo }}" >/dev/null 2>&1; then echo "exists=1" >> $GITHUB_OUTPUT; echo "::notice::v${{ steps.v.outputs.ver }} 已經發過了，這次只試打包、不重發（要發新版請改 APP_VERSION）"; else echo "exists=0" >> $GITHUB_OUTPUT; fi
+      - name: 裝打包工具
+        run: |
+          python -m pip install --disable-pip-version-check -q --upgrade pip
+          python -m pip install --disable-pip-version-check -q "PySide6>=6.8,<7" "TikTokLive==7.0.1" httpx pyinstaller
+      - name: 檢查程式檔
+        run: python -c "import py_compile,pathlib,json; [py_compile.compile(str(f), doraise=True) for f in list(pathlib.Path('app').glob('*.py'))+list(pathlib.Path('build').glob('*.py'))+list(pathlib.Path('tools').glob('*.py'))]; [json.loads(f.read_text(encoding='utf-8')) for f in pathlib.Path('app').glob('*.json')]; print('all program files OK')"
+      - name: 打包 EXE（外殼）
+        run: >
+          python -m PyInstaller --noconfirm --clean --onedir --windowed --name TikLiveMonitor --icon "${{ github.workspace }}\TikLiveMonitor.ico"
+          --paths "${{ github.workspace }}\build" --distpath work/dist --workpath work/build --specpath work
+          --collect-submodules TikTokLive --collect-data TikTokLive --collect-data certifi
+          --collect-submodules PySide6.QtMultimedia --exclude-module telethon --exclude-module tkinter
+          --hidden-import _deps "${{ github.workspace }}\build\launcher.py"
+      - name: 試一下 EXE（只檢查模組，不開主程式）
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "work/dist/TikLiveMonitor/TikLiveMonitor.exe" -ArgumentList "--selftest" -Wait -PassThru
+          Get-Content "work/dist/TikLiveMonitor/selftest.json"
+          Remove-Item "work/dist/TikLiveMonitor/selftest.json"
+          if ($p.ExitCode -ne 0) { throw "EXE 自我測試沒過（exit $($p.ExitCode)）" }
+      - name: 做更新包和 update.json
+        run: python tools/make_release.py --dist work/dist/TikLiveMonitor --out out --repo "${{ steps.r.outputs.repo }}"
+      - uses: actions/upload-artifact@v4
+        with: { name: 'TikLive-V${{ steps.v.outputs.ver }}', path: out/ }
+      - name: 放到 Releases
+        if: github.ref == 'refs/heads/main' && steps.e.outputs.exists == '0'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ steps.v.outputs.ver }}" out/TK_V*_Update.zip out/TK_Shell_L*.zip out/TikLive_Full_V*.zip out/update.json \
+            --repo "${{ steps.r.outputs.repo }}" --title "TikLive Monitor V${{ steps.v.outputs.ver }}" --notes-file out/notes.md --latest
