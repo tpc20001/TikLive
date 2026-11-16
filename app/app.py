@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.17"
+APP_VERSION = "1.1.18"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -25708,12 +25708,22 @@ $r | ConvertTo-Json -Depth 4 -Compress
         return ''
 
     def _mig_lim(self, S=None):
-        """V1.1.12 這次可以用多快（B/s）：設定的上限；剛斷電重開過（控溫警報中）最多 30 MB/s."""
-        S = S or self._mig_load(); v = max(5.0, float(S.get('mbps') or 50))
+        """這次可以用多快（B/s）。V1.1.18：不再因為斷電警報限速（使用者：斷電是 CPU 電壓，已在 BIOS 處理）；
+        改看 E／R 的忙碌度：最近 20 秒任一顆平均 ≥ 95% → 每 4 秒慢慢降 15%（最低設定的 15%），兩顆都 < 85% → 每 4 秒升回 10%。不會停。"""
+        S = S or self._mig_load(); v = max(5.0, float(S.get('mbps') or 50)); rt = self._mig_rt()
         try:
-            al = _Thermal.get().cur_alert()
-            if al: v = min(v, float(self.MIG_ALERT_MBPS)); self._mig_rt()['slow'] = {'mbps': v, 'until': al.get('until')}
-            else: self._mig_rt()['slow'] = None
+            now = time.time(); f = float(rt.get('bzf') or 1.0)
+            if now - float(rt.get('bz_t') or 0) >= 4:
+                rt['bz_t'] = now
+                H = [h for h in (rt.get('hist') or [])[-5:] if now - h.get('t', 0) < 30]
+                def av(k):
+                    x = [h.get(k) for h in H if h.get(k) is not None]; return sum(x) / len(x) if x else None
+                sb, db = av('sb'), av('db'); hi = max([x for x in (sb, db) if x is not None] or [0])
+                if hi >= 95: f = max(0.15, f * 0.85)
+                elif hi < 85: f = min(1.0, f * 1.1)
+                rt['bzf'] = f; rt['bz_hi'] = round(hi)
+            rt['slow'] = {'mbps': round(v * f, 1), 'busy': rt.get('bz_hi')} if f < 0.99 else None
+            v = v * f
         except Exception: pass
         return v * 1024 * 1024
 
@@ -25747,6 +25757,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     if need > el: time.sleep(need - el)
                     if time.time() - win_t > 3:
                         sp_ = win_b / max(0.001, time.time() - win_t); rt['spd'] = sp_ if not rt.get('spd') else rt['spd'] * 0.7 + sp_ * 0.3; win_t = time.time(); win_b = 0
+                        lim = self._mig_lim()                                       # V1.1.18 忙碌度變了就跟著調
                 fo.flush(); os.fsync(fo.fileno())
             if n != st.st_size or tmp.stat().st_size != n: raise OSError(f'大小不對（{n} / {st.st_size}）')
             t_copy = time.time() - cf['t0']; cf['stage'] = '比對'; cf['done'] = 0; t_v0 = time.time()
@@ -43917,7 +43928,7 @@ async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（�
       <input type="range" class="mgRange" min="5" max="300" step="5" value="${j.mbps}"><div class="mgTicks"><span>5</span><span>慢・省力</span><span>50</span><span>全速</span><span>300 MB/s</span></div>
       <div class="mgSmall">現在 ${MB(last.mine)} · ✋ 上限 ${j.mbps} MB/s · 💽 ${j.src} ${last.sb==null?"—":Math.round(last.sb)+"%"} ${j.dst} ${last.db==null?"—":Math.round(last.db)+"%"}</div>
       <div class="mgSmall">確認：<span class="mgChip on">🔎 完整讀回</span> 每個檔寫完都讀回來比對（CRC），一樣才改成正式檔</div>
-      ${j.why&&ph==="copy"?`<div class="mgSmall w">⏳ ${esc(j.why)}</div>`:""}${j.slow&&ph==="copy"?`<div class="mgSmall w">🌡 剛斷電重開過：先降到 ${j.slow.mbps} MB/s${j.slow.until?`（到 ${new Date(j.slow.until*1000).toLocaleString("zh-TW",{hour12:false,month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}，顯示卡供需頁可以提早解除）`:""}</div>`:""}</div>`;
+      ${j.why&&ph==="copy"?`<div class="mgSmall w">⏳ ${esc(j.why)}</div>`:""}${j.slow&&ph==="copy"?`<div class="mgSmall w">💽 硬碟很忙（${j.slow.busy!=null?j.slow.busy+"%":"≥95%"}）：自動降到 ${j.slow.mbps} MB/s，不忙了會慢慢升回來</div>`:""}</div>`;
     h+=`<details class="mgHow"><summary>🚚 怎麼搬的（按一下看）</summary><ol>
       <li>${j.src} 整顆照原本的資料夾複製到 ${j.dst}（回收桶、系統資料夾不搬）；搬的期間程式照舊用 ${j.src}，新錄的也會跟著複製。</li>
       <li>每個檔：先寫成暫存檔 → 寫進硬碟 → 讀回來比對 → 一樣才改成正式檔；斷電只丟掉那一個暫存檔，開機後接著做。</li>

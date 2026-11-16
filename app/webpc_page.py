@@ -7812,7 +7812,7 @@ async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（�
       <input type="range" class="mgRange" min="5" max="300" step="5" value="${j.mbps}"><div class="mgTicks"><span>5</span><span>慢・省力</span><span>50</span><span>全速</span><span>300 MB/s</span></div>
       <div class="mgSmall">現在 ${MB(last.mine)} · ✋ 上限 ${j.mbps} MB/s · 💽 ${j.src} ${last.sb==null?"—":Math.round(last.sb)+"%"} ${j.dst} ${last.db==null?"—":Math.round(last.db)+"%"}</div>
       <div class="mgSmall">確認：<span class="mgChip on">🔎 完整讀回</span> 每個檔寫完都讀回來比對（CRC），一樣才改成正式檔</div>
-      ${j.why&&ph==="copy"?`<div class="mgSmall w">⏳ ${esc(j.why)}</div>`:""}${j.slow&&ph==="copy"?`<div class="mgSmall w">🌡 剛斷電重開過：先降到 ${j.slow.mbps} MB/s${j.slow.until?`（到 ${new Date(j.slow.until*1000).toLocaleString("zh-TW",{hour12:false,month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}，顯示卡供需頁可以提早解除）`:""}</div>`:""}</div>`;
+      ${j.why&&ph==="copy"?`<div class="mgSmall w">⏳ ${esc(j.why)}</div>`:""}${j.slow&&ph==="copy"?`<div class="mgSmall w">💽 硬碟很忙（${j.slow.busy!=null?j.slow.busy+"%":"≥95%"}）：自動降到 ${j.slow.mbps} MB/s，不忙了會慢慢升回來</div>`:""}</div>`;
     h+=`<details class="mgHow"><summary>🚚 怎麼搬的（按一下看）</summary><ol>
       <li>${j.src} 整顆照原本的資料夾複製到 ${j.dst}（回收桶、系統資料夾不搬）；搬的期間程式照舊用 ${j.src}，新錄的也會跟著複製。</li>
       <li>每個檔：先寫成暫存檔 → 寫進硬碟 → 讀回來比對 → 一樣才改成正式檔；斷電只丟掉那一個暫存檔，開機後接著做。</li>
