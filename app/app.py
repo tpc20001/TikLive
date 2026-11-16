@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.15"
+APP_VERSION = "1.1.16"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -36056,7 +36056,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 if R['need_shell']:
                     if R['newer_code']:                                            # 程式也有新的：放進 UPDATE，新 EXE 開起來時套用
                         self._cu_download(info['zip'], Path(PACKAGE_ROOT) / 'UPDATE' / f"TK_V{info['version']}_Update.zip", info.get('zip_sha256'), info.get('zip_size'), f"程式 V{info['version']}")
-                    sz = self._cu_download(info['shell'], Path(PACKAGE_ROOT) / 'UPDATE' / f"TK_Shell_L{info.get('launcher')}.zip", info.get('shell_sha256'), info.get('shell_size'), f"EXE 第 {info.get('launcher')} 版")
+                    # V1.1.16 EXE 外殼放 UPDATE\shell_dl（不放 UPDATE 那層：舊 EXE 開機會當成程式更新包；路徑用英文，BAT 比較穩）
+                    sz = self._cu_download(info['shell'], Path(PACKAGE_ROOT) / 'UPDATE' / 'shell_dl' / f"TK_Shell_L{info.get('launcher')}.zip", info.get('shell_sha256'), info.get('shell_size'), f"EXE 第 {info.get('launcher')} 版")
                     st['msg'] = '下載好了，準備換 EXE（程式會關掉再自動打開）'; self._wd_log(f"☁ 雲端更新：EXE 第 {info.get('launcher')} 版下載好了（SHA-256 對過），準備換 EXE")
                     self._ui_call.emit(lambda p=str(sz): self._cu_swap_exe(p))
                 else:
@@ -36088,7 +36089,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
 chcp 65001 >nul
 title TikLive 換 EXE
 set "LOGF={q(logf)}"
-echo 等 TikLive 關掉...
+echo [%date% %time%] [換 EXE] 換 EXE 的小程式開始了，等 TikLive 關掉 >> "%LOGF%"
+echo 等 TikLive 關掉...（這個視窗跑完會自己關，請不要關掉它）
 set /a N=0
 :wait
 set /a N+=1
@@ -36098,7 +36100,11 @@ tasklist /FI "PID eq {int(pid)}" /NH 2>nul | find "{int(pid)}" >nul && (timeout 
 timeout /t 3 /nobreak >nul
 echo [%date% %time%] [換 EXE] 開始（{q(shell_zip)}） >> "%LOGF%"
 if exist "{q(tmp)}" rmdir /s /q "{q(tmp)}"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '{q(shell_zip)}' -DestinationPath '{q(tmp)}' -Force"
+echo 解壓縮新的 EXE...
+mkdir "{q(tmp)}" 2>nul
+tar -xf "{q(shell_zip)}" -C "{q(tmp)}" 2>>"%LOGF%"
+if not exist "{q(tmp)}\\{exe}" powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '{q(shell_zip)}' -DestinationPath '{q(tmp)}' -Force"
+echo 換檔案...
 if not exist "{q(tmp)}\\{exe}" goto fail
 if exist "{q(root)}\\_internal_old" rmdir /s /q "{q(root)}\\_internal_old"
 if exist "{q(root)}\\{exe}.old" del /f /q "{q(root)}\\{exe}.old"
@@ -36126,6 +36132,7 @@ echo [%date% %time%] [換 EXE] 新的 EXE 開起來了，刪掉舊的 >> "%LOGF%
 del /f /q "{q(okf)}"
 if exist "{q(root)}\\_internal_old" rmdir /s /q "{q(root)}\\_internal_old"
 if exist "{q(root)}\\{exe}.old" del /f /q "{q(root)}\\{exe}.old"
+del /f /q "{q(shell_zip)}" 2>nul
 exit /b 0
 :slow
 echo [%date% %time%] [換 EXE] 新的 EXE 還在跑但 3 分鐘沒回報，先留著舊的備份（_internal_old） >> "%LOGF%"
@@ -36158,7 +36165,14 @@ exit /b 1
             try: self._resume_handoff_write()
             except Exception: pass
             if os.name == 'nt':
-                subprocess.Popen(['cmd', '/c', str(bat)], creationflags=0x00000008 | 0x00000200 | 0x08000000, close_fds=True)
+                si = subprocess.STARTUPINFO(); si.dwFlags |= 1; si.wShowWindow = 7          # SW_SHOWMINNOACTIVE：縮小在工作列，看得到在跑
+                P0 = getattr(sys, '_tk_popen0', None) or subprocess.Popen                   # 用原本的 Popen（不進控溫工作物件）
+                last = None
+                for fl in (0x00000010 | 0x00000200 | 0x01000000, 0x00000010 | 0x00000200):  # 新主控台＋新群組（＋脫離工作物件）
+                    try: P0(['cmd', '/c', str(bat)], creationflags=fl, startupinfo=si, close_fds=True, cwd=str(Path(PACKAGE_ROOT))); last = None; break
+                    except Exception as ex_: last = ex_
+                if last is not None: raise last
+                self._web_update_log(f'[換 EXE] 開了換 EXE 的小程式：{bat}')
             st['msg'] = '換 EXE 中：程式會關掉再自動打開（約 1 分鐘）'
         except Exception as ex:
             st['busy'] = False; st['msg'] = f'換 EXE 準備失敗（程式沒關）：{ex}'

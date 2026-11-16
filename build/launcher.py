@@ -50,6 +50,11 @@ def apply_updates():
     first_backup = None; applied = []
     for z in zips:
         backup = None
+        if z.name.lower().startswith("tk_shell_"):        # EXE 外殼不是程式更新包：移到 更新包\雲端，不跳錯誤
+            try:
+                d = ROOT / "更新包" / "雲端"; d.mkdir(parents=True, exist_ok=True); shutil.move(str(z), str(d / z.name)); log(f"{z.name} 是 EXE 外殼，不是程式更新包，移到 更新包\\雲端")
+            except Exception: pass
+            continue
         try:
             with zipfile.ZipFile(z) as zf:
                 manifest = {}

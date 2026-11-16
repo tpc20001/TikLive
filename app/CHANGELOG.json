@@ -1,5 +1,14 @@
 [
  {
+  "version": "1.1.16",
+  "date": "2026-11-17",
+  "items": [
+   "☁ 修正：雲端下載的 EXE 外殼改放 UPDATE\\shell_dl，不再放 UPDATE 那層（舊 EXE 開機會把它當成程式更新包，跳出「update package has no app/ files」）；新啟動器看到也會自動移開、不跳錯誤",
+   "☁ 換 EXE 的小程式改成縮小的視窗（工作列看得到在跑），每一步都寫進 LOG\\update_log.txt；解壓縮改用 Windows 內建的 tar（比較快），不行才用 PowerShell；換好會刪掉下載的外殼檔",
+   "☁ 換 EXE 的小程式不跟著主程式一起被關掉"
+  ]
+ },
+ {
   "version": "1.1.15",
   "date": "2026-11-17",
   "items": [
