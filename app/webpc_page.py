@@ -7872,7 +7872,8 @@ async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（�
     const rc=j.recent||[];
     h+=`<div class="mgSec">✅ 最近搬好的</div><div class="mgList">${rc.length?rc.map(x=>`<div><span class="ok">✔</span><div><b>${esc(String(x.rel).split(/[\\/]/).pop())}</b><small>${G(x.size)} → ${j.dst} · 複製 ${x.tc} 秒 · 比對 ${x.tv} 秒</small></div><i>${T(x.t)}</i></div>`).join(""):`<div class="mgE">還沒有（這次開程式之後搬好的會列在這裡）</div>`}</div>`;
     if((j.errors||[]).length)h+=`<details class="migErr"><summary>⚠ 最近的問題（${j.errors.length}）</summary>${j.errors.slice().reverse().map(e=>`<div><i>${new Date(e[0]*1000).toLocaleString("zh-TW",{hour12:false})}</i> ${esc(e[1])}</div>`).join("")}</details>`;
-    root.innerHTML=h;clearTimeout(root._t);root._t=setTimeout(draw,4000);}
+    const op_=[...root.querySelectorAll("details")].map((d,i)=>d.open?(d.className||"")+"|"+(d.querySelector("summary")||{}).textContent:"").filter(Boolean);   /* V1.1.22 點開的不會被重畫收起來 */
+    root.innerHTML=h;if(op_.length)root.querySelectorAll("details").forEach(d=>{const k=(d.className||"")+"|"+(d.querySelector("summary")||{}).textContent;if(op_.some(x=>x.split("|")[0]===(d.className||"")&&x.split("|")[1].slice(0,6)===k.split("|")[1].slice(0,6)))d.open=true;});clearTimeout(root._t);root._t=setTimeout(draw,4000);}
   root.onclick=async e=>{const b=e.target.closest("[data-mg]");if(b){const op=b.dataset.mg;
       if(op==="tail_final"&&!confirm("收尾？\n\n全速把舊硬碟上剩的補到新硬碟、確認後刪掉。錄影、監控照常，不用停。\n完成會顯示「可以關機了」。"))return;
       if(op==="final"&&!confirm("切換到新硬碟？\n\n會先暫停搬進硬碟幾分鐘、補最後差異，再把程式改成用新硬碟。錄影、監控照常。\n切換好之後就可以關機裝硬碟。"))return;
