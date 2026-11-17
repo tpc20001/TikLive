@@ -1973,6 +1973,7 @@ body.oldLock{overflow:hidden}
 .toast,#toast{z-index:2147483300!important}   /* 提示訊息也要蓋在上傳頁上面 */
 /* PUP-CSS-END */
 .cuBox{padding:10px 12px;border:1px solid #3a7bd5;border-radius:12px;background:rgba(58,123,213,.08);line-height:1.55}.cuS{opacity:.7;font-size:12px}.cuT{margin-top:4px}.cuN{margin-top:4px;font-size:13px;opacity:.9}.cuW{color:#f0ad4e}.cuR{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin-top:8px}.cuBar{height:6px;border-radius:3px;background:rgba(127,127,127,.25);margin:6px 0 4px;overflow:hidden}.cuBar i{display:block;height:100%;background:#3a7bd5}
+#migFab{position:fixed;left:10px;bottom:14px;z-index:9680;max-width:min(92vw,420px);padding:8px 14px;border-radius:14px;background:#1d4f7a;color:#fff;box-shadow:0 6px 22px rgba(0,0,0,.45);cursor:pointer;display:flex;flex-direction:column;gap:2px;font-size:14px}#migFab small{opacity:.85;font-size:12px}#migFab.ok{background:#1f7a4a}
 </style></head>
 <body><div id="app"><aside id="side"><div id="sdCount">● 0 / 0 直播間</div><div class="ss"><button class="sstart" id="btnStart">▶ 開始監控</button><button class="sstop" id="btnStop">■ 停止監控</button></div><div id="sdStatus">● 連線中...</div><nav id="nav"></nav><div id="sysBox">電腦狀態讀取中…</div><button id="netBtn">⬇ —
 本日 — MB</button><button id="qBtn" title="排隊轉檔的數量、還要搬到 HDD 的 MP4 大小、全部處理完（轉檔＋搬檔）預估還要多久。點一下看轉檔排隊">🎬 轉檔排隊：讀取中…</button></aside>
@@ -7781,6 +7782,21 @@ async function cuMount(root){   /* V1.1.13 ☁ 雲端更新（GitHub）：檢查
     return true;};
   let tm=null;const tick=async()=>{clearTimeout(tm);const I=await get();if(!draw(I))return;tm=setTimeout(tick,I&&(I.busy||I.dl)?1500:8000);};
   tick();}
+function migFabInit(){   /* V1.1.20 搬硬碟切換／收尾中：右下角浮動進度 */
+  const G=b=>!b?"0":b>=1e12?(b/1e12).toFixed(2)+" TB":b>=1e9?(b/1e9).toFixed(1)+" GB":(b/1e6).toFixed(0)+" MB";
+  let tm=0;const chk=async()=>{clearTimeout(tm);let j=null;if(!document.hidden){try{j=await (typeof api==="function"?api:J)("/api/pc/mig");}catch(e){}}
+    let b=document.getElementById("migFab");const T=(j&&j.tail)||{},ph=j&&j.phase;
+    const show=j&&(ph==="final"||(ph==="switched"&&(T.fast||T.ready)));
+    if(!show){if(b)b.remove();tm=setTimeout(chk,j&&ph==="switched"?8000:30000);return;}
+    if(!b){b=document.createElement("div");b.id="migFab";document.body.appendChild(b);b.onclick=()=>{try{if(location.pathname.replace(/\/$/,"").endsWith("/pc")&&typeof go==="function")go(57);else location.hash="tool/mig";}catch(e){}};}
+    const spd=j.spd||0,eta=spd>1e5&&T.left_b?T.left_b/spd:null,H=s=>s>=3600?Math.floor(s/3600)+" 小時 "+Math.round(s%3600/60)+" 分":Math.max(1,Math.round(s/60))+" 分";
+    b.className=T.ready?"ok":"";
+    b.innerHTML=ph==="final"?`💽 <b>切換到 ${j.dst} 中</b><small>${String(j.final||"補最後差異").slice(0,30)}…（錄影照常）</small>`
+      :T.ready?`✅ <b>收尾完成，可以關機了</b><small>停止監控並退出 → 關機 → 換硬碟</small>`
+      :`🏁 <b>收尾中 · 剩 ${(T.left_n||0).toLocaleString()} 個 · ${G(T.left_b)}</b><small>${T.stage||""} · ${spd>1e5?(spd/1048576).toFixed(0)+" MB/s":"—"}${eta?" · 約 "+H(eta):""}${j.curf&&j.curf.rel?" · "+String(j.curf.rel).split(/[\\/]/).pop().slice(0,28):""}</small>`;
+    tm=setTimeout(chk,3000);};
+  setTimeout(chk,3000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)chk();});}
+setTimeout(()=>{try{migFabInit();}catch(e){}},2500);
 async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（照 SortCut「R 碟清空搬移」的樣子） */
   const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   const G=b=>b==null?"—":b>=1e12?(b/1e12).toFixed(2)+" TB":b>=1e9?(b/1e9).toFixed(1)+" GB":b>=1e6?(b/1e6).toFixed(1)+" MB":Math.round(b/1e3)+" KB";
@@ -7838,9 +7854,14 @@ async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（�
     h+=`<div class="mgCur ${cf&&cf.stage==="比對"||vc?"":"idle"}"><div class="mgCi">🔎</div><div class="mgCm"><b>${vc?"二次比對："+esc(String(vc.rel).split(/[\\/]/).pop()):cf&&cf.stage==="比對"?"讀回來比對："+esc(String(cf.rel).split(/[\\/]/).pop()):"確認：沒有"}</b><small>每個檔複製完馬上讀回來比對一次；第一輪搬完後，趁閒再把 ${j.dst} 上的全部讀一次跟指紋比（二次比對）。已二次比對 ${(j.v2_n||0).toLocaleString()} 個（${G(j.v2_b)}）</small></div>${vc?`<span class="mgCp">${(vc.size?Math.min(100,vc.done/vc.size*100):0).toFixed(1)}%</span>`:""}</div>`;
     if(ph==="idle")h+=`<button class="btn mgWide" data-mg="start">▶ 開始複製 ${j.src} → ${j.dst}</button>`;
     if(ph==="copy")h+=`<div class="mgBtns"><button class="btn s mgWide" data-mg="pause" data-v="${j.paused?0:1}">${j.paused?"▶ 繼續":"⏸ 暫停（手上正在搬的做完再停）"}</button><button class="btn s" data-mg="kick">🔎 馬上再掃一輪</button></div>`;
-    if(ph==="copy")h+=`<div class="migStep"><b>要關機裝硬碟時：</b>挑人少的時候按下面這顆（錄影、監控不會停）→ 等它顯示「已切換」→ 關機把 ${j.dst} 裝進主機 → <b>開機前把它設成 ${j.dst} 槽</b> → 開程式。<br><button class="btn" data-mg="final" ${(j.passes||0)<1?"disabled":""}>🔁 切換到 ${j.dst}（準備關機）</button>${(j.passes||0)<1?`<small>第一輪複製完才能按</small>`:""}</div>`;
+    if(ph==="copy")h+=`<div class="migStep"><b>接下來會自動做：</b>第一輪搬完 → <b>自動切換到 ${j.dst}</b>（錄影、監控不停，之後新的錄影都直接進 ${j.dst}）→ ${j.src} 上搬好的逐一確認後刪掉。<br><b>回家要關機時：</b>按「🏁 收尾」→ 看右下角進度 → 顯示「可以關機了」→ 停止監控並退出、關機 → 換硬碟。<br><button class="btn" data-mg="tail_final" ${(j.passes||0)<1?"disabled":""}>🏁 收尾（準備關機）</button>${(j.passes||0)<1?`<small>第一輪複製完才能按（搬完會自動切換）</small>`:""}</div>`;
     if(ph==="final")h+=`<div class="migStep">🔁 ${esc(j.final||"切換中")}…（錄影、監控照常）</div>`;
-    if(ph==="switched")h+=`<div class="migStep ok">✔ 已切換：之後新的都進 ${j.dst}，${j.src} 上的檔案留著當備份、沒有刪。<br>現在可以關機 → 把硬碟裝進主機 → <b>開機前一定要把它設成 ${j.dst} 槽</b>（磁碟管理 → 變更磁碟機代號）→ 開程式。改了 ${j.rewrote||0} 處存起來的路徑。</div>`;
+    if(ph==="switched"){const T=j.tail||{},rd=T.ready,fs=T.fast;
+      h+=`<div class="migStep ok">✔ 已切換：新的錄影都直接進 ${j.dst}，${j.src} 不會再有新檔進來。改了 ${j.rewrote||0} 處存起來的路徑。<br>
+      ${j.src} 上搬好的：每 10 分鐘逐一確認（${j.dst} 上一樣大、複製時讀回來比對過）就刪掉；放超過 30 分鐘沒動的才刪。程式資料夾裡的設定、頭像這些小檔重開前還在用，只複製、不刪（${j.dst} 上都有）。<br>
+      <b>收尾：</b>${T.stage==="補複製"?"補複製中…":T.stage==="確認後刪除"?"確認後刪除中…":"等下一輪"}${T.t_last?` · ${j.src} 上還有 <b>${(T.left_n||0).toLocaleString()} 個（${G(T.left_b||0)}）</b>要處理`:""} · 已刪 ${(T.deleted||0).toLocaleString()} 個（${G(T.deleted_b||0)}）${T.copied?` · 補複製 ${T.copied} 個`:""}${T.keep_n?` · 程式小檔 ${T.keep_n} 個（只複製）`:""}</div>`;
+      h+=rd?`<div class="migStep ok" style="font-size:1.1em">✅ <b>收尾完成，可以關機了</b>${T.left_n?`（${j.src} 上還有 ${T.left_n} 個刪不掉的，${j.dst} 上都有）`:""}<br>① 按「停止監控並退出」 → ② 關機 → ③ 把 ${j.dst} 接 SATA 裝進主機、拔掉 ${j.src} → ④ 開機 → ⑤ 磁碟管理確認新硬碟是 <b>${j.dst}</b> 槽 → ⑥ 開程式（找不到 ${j.dst} 會先不監控）</div>`
+        :`<button class="btn mgWide" data-mg="tail_final" ${fs?"disabled":""}>${fs?"🏁 收尾中…（全速）":"🏁 收尾（準備關機）"}</button>`;}
     if(ph==="verify")h+=`<div class="migStep ok">✔ 現在從 ${j.dst} 執行（影片資料夾：${esc(j.video_root)}）。看一下歷史、檔案總管、回放都正常，再按：<br><button class="btn" data-mg="clean">🧹 清空 ${j.src}（只刪 ${j.dst} 上確定有一樣的）</button></div>`;
     if(ph==="done"&&j.clean)h+=`<div class="migStep ok">✔ ${j.src} 清空了 ${j.clean.files} 個檔（${G(j.clean.bytes)}）${j.clean.extra?`，另外 ${j.clean.extra} 個切換後才有的放到 ${j.dst}\\從E槽多出來的`:""}${j.clean.junk?`（其中 ${j.clean.junk} 個是暫存檔／已轉好的 FLV，直接刪）`:""}${j.clean.err?`，錯誤 ${j.clean.err} 個`:""}。</div>`;
     const JK=j.junk||{},JL=[["tmp","寫到一半的暫存檔（.copying／.part…）","不搬，清空 "+j.src+" 時一起刪"],["flv_done","已經轉好 MP4 的 FLV","旁邊有同名 MP4：不搬，清空 "+j.src+" 時一起刪"],["flv_todo","還沒轉檔的 FLV","是錄影原始檔：照常搬過去，之後在 "+j.dst+" 轉"]].filter(x=>JK[x[0]]&&JK[x[0]][0]);
@@ -7850,6 +7871,7 @@ async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（�
     if((j.errors||[]).length)h+=`<details class="migErr"><summary>⚠ 最近的問題（${j.errors.length}）</summary>${j.errors.slice().reverse().map(e=>`<div><i>${new Date(e[0]*1000).toLocaleString("zh-TW",{hour12:false})}</i> ${esc(e[1])}</div>`).join("")}</details>`;
     root.innerHTML=h;clearTimeout(root._t);root._t=setTimeout(draw,4000);}
   root.onclick=async e=>{const b=e.target.closest("[data-mg]");if(b){const op=b.dataset.mg;
+      if(op==="tail_final"&&!confirm("收尾？\n\n全速把舊硬碟上剩的補到新硬碟、確認後刪掉。錄影、監控照常，不用停。\n完成會顯示「可以關機了」。"))return;
       if(op==="final"&&!confirm("切換到新硬碟？\n\n會先暫停搬進硬碟幾分鐘、補最後差異，再把程式改成用新硬碟。錄影、監控照常。\n切換好之後就可以關機裝硬碟。"))return;
       if(op==="clean"&&(!confirm("清空來源硬碟？\n\n只刪新硬碟上確定有一樣大小的檔；切換後才改過的會先複製一份過去再刪。")||prompt("確定的話請輸入：清空")!=="清空"))return;
       await post({op,v:b.dataset.v==="1"});draw();}};
