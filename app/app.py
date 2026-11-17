@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.22"
+APP_VERSION = "1.1.23"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -26154,7 +26154,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     except Exception: tz = None
                     if tz is not None and tz.st_size == st.st_size:
                         m = man.get(rel.lower())
-                        if not (m and m[2] is not None and m[0] == st.st_size and abs(m[1] - st.st_mtime) < 2):
+                        # V1.1.23 搬的時候比對過的直接刪：每個檔都是寫 .tkmig → 讀回來比 CRC → 一樣才改名成正式檔、設成跟 E 一樣的時間，
+                        # 所以 R 上「正式檔名、一樣大、時間一樣」＝當時比對過了（不管清單有沒有存指紋）。時間不一樣的才兩邊讀一次比。
+                        ok_ = (m and m[2] is not None and m[0] == st.st_size and abs(m[1] - st.st_mtime) < 2) or abs(tz.st_mtime - st.st_mtime) < 2
+                        if not ok_:
                             c1, _ = self._mig_crc(sp); c2, _ = self._mig_crc(str(tp))
                             if c1 != c2: tz = 'diff'
                     if tz is None:                                                  # R 上沒有 → 放回真正的位置
@@ -26218,7 +26221,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             try:
                 while not _app_closing():
                     S = self._mig_load()
-                    if S.get('phase') not in ('copy', 'final', 'cleaning', 'handoff', 'switched'): break
+                    if S.get('phase') not in ('copy', 'final', 'cleaning', 'handoff', 'switched', 'verify'): break
                     d = (self.sysmon.data or {}) if getattr(self, 'sysmon', None) else {}
                     bz = d.get('disk_busy') or {}; rw = d.get('disk_rw') or {}
                     def g_(dv, M): return next((v for k, v in M.items() if str(k).upper()[:2] == str(dv).upper()[:2]), None)
@@ -26405,7 +26408,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         try:                                                                    # V1.1.10 取樣停了（例如換版時被舊的停掉）→ 再開
             H_ = rt.get('hist') or []
             if S.get('phase') in ('switched', 'verify') and not rt.get('tail_on'): self._mig_tail_start()   # V1.1.21 從 R 執行後也接著慢慢刪   # V1.1.20 收尾停了就再開
-            if S.get('phase') in ('copy', 'final', 'cleaning', 'handoff', 'switched') and (not H_ or now - H_[-1]['t'] > 20):
+            if S.get('phase') in ('copy', 'final', 'cleaning', 'handoff', 'switched', 'verify') and (not H_ or now - H_[-1]['t'] > 20):
                 if rt.get('samp_on') and H_ and now - H_[-1]['t'] > 30: rt['samp_on'] = False
                 self._mig_sampler()
             if S.get('phase') == 'copy':
