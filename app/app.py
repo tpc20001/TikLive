@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.20"
+APP_VERSION = "1.1.21"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -25670,9 +25670,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
 
     def _mig_pause_why(self, final=False):
         S = self._mig_load()
-        if S.get('phase') not in ('copy', 'final', 'cleaning', 'switched') or _app_closing(): return 'stop'
+        if S.get('phase') not in ('copy', 'final', 'cleaning', 'switched', 'verify') or _app_closing(): return 'stop'
         if self._mig_rt().get('stop'): return 'stop'
-        if S.get('phase') == 'switched': return ''                                # V1.1.20 切換後的收尾：只聽「停」，其他不等（錄影已經在 R）
+        if S.get('phase') in ('switched', 'verify'): return ''                                # V1.1.20 切換後的收尾：只聽「停」，其他不等（錄影已經在 R）
         if S.get('paused') and not final: return '你按了暫停'
         try:
             T = _Thermal.get()
@@ -25712,7 +25712,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         """這次可以用多快（B/s）。V1.1.18：不再因為斷電警報限速（使用者：斷電是 CPU 電壓，已在 BIOS 處理）；
         改看 E／R 的忙碌度：最近 20 秒任一顆平均 ≥ 95% → 每 4 秒慢慢降 15%（最低設定的 15%），兩顆都 < 85% → 每 4 秒升回 10%。不會停。"""
         S = S or self._mig_load(); v = max(5.0, float(S.get('mbps') or 50)); rt = self._mig_rt()
-        if S.get('phase') == 'switched' and (rt.get('tail') or {}).get('fast'): rt['slow'] = None; return 400 * 1024 * 1024   # V1.1.20 按了「收尾」：全速
+        if S.get('phase') in ('switched', 'verify') and (rt.get('tail') or {}).get('fast'): rt['slow'] = None; return 400 * 1024 * 1024   # V1.1.20 按了「收尾」：全速
         try:
             now = time.time(); f = float(rt.get('bzf') or 1.0)
             if now - float(rt.get('bz_t') or 0) >= 4:
@@ -26116,6 +26116,64 @@ $r | ConvertTo-Json -Depth 4 -Compress
         if nd: self._wd_log(f'💽 搬硬碟收尾：{a} 上確認後刪了 {nd} 個（R 上都有、複製時讀回來比對過），還剩 {left_n} 個要處理')
         return T
 
+    def _mig_tail_verify_once(self):
+        """V1.1.21 已經從 R 執行（verify）：E 是外接的舊硬碟，慢慢比對、慢慢刪。
+        R 上有一樣大的 → 確認後刪 E（複製時比對過的直接信；沒有指紋的 E、R 都讀一次比）；
+        R 上沒有 → 複製到 R 同一個位置再刪；R 上有但不一樣（重開前那幾分鐘 E 上又改過的設定檔）→ 不蓋掉 R 現在在用的，
+        放到 R 的「從E槽多出來的」資料夾再刪。全部處理完 → 搬硬碟完成."""
+        rt = self._mig_rt(); S = self._mig_load(); a, b = S['src'], S['dst']; src = self._mig_root(a); dst = self._mig_root(b)
+        T = rt.setdefault('tail', {}); fast = bool(T.get('fast')); T.update(stage='確認後刪除', t0=T.get('t0') or time.time(), err=0)
+        if not os.path.isdir(src):
+            T.update(stage='done', gone=True); self._mig_upd(phase='done', t_done=time.time(), clean={'files': int(T.get('deleted') or 0), 'bytes': int(T.get('deleted_b') or 0), 'extra': int(T.get('extra') or 0), 'err': 0, 'junk': int(T.get('junk') or 0), 'gone': True})
+            self._wd_log(f'💽 搬硬碟：{a} 已經拔掉，搬硬碟完成'); return T
+        if not os.path.isdir(dst): T.update(stage='wait'); return T
+        try: con = self._mig_db(); man = {r[0].lower(): (r[1], r[2], r[3]) for r in con.execute('SELECT rel, size, mtime, crc FROM f')}; con.close()
+        except Exception: man = {}
+        now = time.time(); stable = 60 if fast else 600; left_n = left_b = 0; nd = bd = 0
+        for dp_, dirs, files in os.walk(src, topdown=False):
+            if self._mig_load().get('phase') != 'verify' or _app_closing(): break
+            rel_d = os.path.relpath(dp_, src)
+            if rel_d != '.' and Path(rel_d).parts[0].lower() in self.MIG_SKIP: continue
+            low_ = {x.lower() for x in files}
+            for nm in files:
+                if self._mig_load().get('phase') != 'verify' or _app_closing(): break
+                sp = os.path.join(dp_, nm); rel = os.path.relpath(sp, src)
+                try: st = os.stat(sp)
+                except Exception: continue
+                if now - st.st_mtime < stable: left_n += 1; left_b += st.st_size; continue
+                try:
+                    if self._mig_junk_kind(nm, low_, sp, st):
+                        os.remove(sp); T['junk'] = int(T.get('junk') or 0) + 1; continue
+                    tp = Path(dst) / rel; T['cur'] = rel
+                    try: tz = tp.stat()
+                    except Exception: tz = None
+                    if tz is not None and tz.st_size == st.st_size:
+                        m = man.get(rel.lower())
+                        if not (m and m[2] is not None and m[0] == st.st_size and abs(m[1] - st.st_mtime) < 2):
+                            c1, _ = self._mig_crc(sp); c2, _ = self._mig_crc(str(tp))
+                            if c1 != c2: tz = 'diff'
+                    if tz is None:                                                  # R 上沒有 → 放回真正的位置
+                        self._mig_copy(sp, tp, st, final=True); T['copied'] = int(T.get('copied') or 0) + 1
+                    elif tz == 'diff' or tz.st_size != st.st_size:                  # 不一樣 → 不蓋掉 R 在用的
+                        xp = Path(dst) / '從E槽多出來的' / rel
+                        if not (xp.exists() and xp.stat().st_size == st.st_size): self._mig_copy(sp, xp, st, final=True)
+                        T['extra'] = int(T.get('extra') or 0) + 1
+                    os.remove(sp); nd += 1; bd += st.st_size
+                    T['deleted'] = int(T.get('deleted') or 0) + 1; T['deleted_b'] = int(T.get('deleted_b') or 0) + st.st_size
+                except StopIteration: break
+                except Exception as ex:
+                    left_n += 1; left_b += st.st_size; T['err'] = int(T.get('err') or 0) + 1
+                    if T['err'] <= 20: self._mig_err(f'收尾 {rel}：{ex}')
+            if rel_d != '.':
+                try: os.rmdir(dp_)
+                except Exception: pass
+        T.update(left_n=left_n, left_b=left_b, keep_n=0, keep_b=0, t_last=time.time(), cur='', stage='idle')
+        if nd: self._wd_log(f'💽 搬硬碟（從 {b} 執行中）：{a} 上確認後刪了 {nd} 個（{bd / 1e9:.1f} GB），還剩 {left_n} 個')
+        if left_n == 0 and not T.get('err') and self._mig_load().get('phase') == 'verify':
+            self._mig_upd(phase='done', t_done=time.time(), clean={'files': int(T.get('deleted') or 0), 'bytes': int(T.get('deleted_b') or 0), 'extra': int(T.get('extra') or 0), 'err': 0, 'junk': int(T.get('junk') or 0)})
+            T['ready'] = True; self._wd_log(f'💽 搬硬碟完成：{a} 上的都確認過、刪掉了（{a} 現在是空的，可以拔掉）')
+        return T
+
     def _mig_tail_start(self):
         rt = self._mig_rt()
         if rt.get('tail_on'): return
@@ -26123,9 +26181,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
         def run_():
             try:
                 time.sleep(5)
-                while not _app_closing() and self._mig_load().get('phase') == 'switched':
+                while not _app_closing() and self._mig_load().get('phase') in ('switched', 'verify'):
                     T = rt.setdefault('tail', {})
-                    try: T = self._mig_tail_once()
+                    try: T = self._mig_tail_verify_once() if self._mig_load().get('phase') == 'verify' else self._mig_tail_once()
                     except Exception as ex: self._mig_err(f'收尾這一輪出錯（等一下再試）：{ex}')
                     if T.get('gone'): break
                     T = rt.setdefault('tail', {})
@@ -26135,7 +26193,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
                             self._wd_log(f"💽 搬硬碟收尾完成：可以關機了（E 上還剩 {T.get('left_n', 0)} 個可刪的、{T.get('keep_n', 0)} 個程式資料夾的小檔，R 上都有）")
                         else: T['rounds_fast'] = T.get('rounds_fast', 0) + 1; continue
                     t0 = time.time()
-                    while time.time() - t0 < 600 and not rt.get('tail_kick') and not _app_closing() and self._mig_load().get('phase') == 'switched': time.sleep(3)
+                    if self._mig_load().get('phase') not in ('switched', 'verify'): break
+                    while time.time() - t0 < 600 and not rt.get('tail_kick') and not _app_closing() and self._mig_load().get('phase') in ('switched', 'verify'): time.sleep(3)
                     rt['tail_kick'] = False
             finally: rt['tail_on'] = False
         threading.Thread(target=run_, name='TikLiveMigTail', daemon=True).start()
@@ -26287,7 +26346,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
             self._wd_log(f"💽 搬硬碟：{S['src']} 已經拔掉、從 {S['dst']} 執行，搬硬碟完成"); ph = 'done'
         if ph == 'switched': self._mig_tail_start()                             # V1.1.20 收尾接著跑
         if ph == 'switched' and (Path(DATA_ROOT if 'DATA_ROOT' in globals() else PACKAGE_DIR).drive or '').upper() == S['dst'].upper():
-            self._mig_upd(phase='verify', t_boot=time.time()); self._wd_log(f"💽 搬硬碟：已經從 {S['dst']} 開機執行；確認沒問題後可以按「清空 {S['src']}」")
+            self._mig_upd(phase='verify', t_boot=time.time()); self._wd_log(f"💽 搬硬碟：已經從 {S['dst']} 執行；{S['src']} 上的會慢慢比對、確認後刪掉（V1.1.21 自動）")
+            self._mig_rt()['tail_on'] = False; self._mig_tail_start()
         rt_ = self._mig_rt()
         if rt_.get('tick_on'): return
         rt_['tick_on'] = True
@@ -26336,7 +26396,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         S = self._mig_load(); rt = self._mig_rt(); now = time.time()
         try:                                                                    # V1.1.10 取樣停了（例如換版時被舊的停掉）→ 再開
             H_ = rt.get('hist') or []
-            if S.get('phase') == 'switched' and not rt.get('tail_on'): self._mig_tail_start()   # V1.1.20 收尾停了就再開
+            if S.get('phase') in ('switched', 'verify') and not rt.get('tail_on'): self._mig_tail_start()   # V1.1.21 從 R 執行後也接著慢慢刪   # V1.1.20 收尾停了就再開
             if S.get('phase') in ('copy', 'final', 'cleaning', 'handoff', 'switched') and (not H_ or now - H_[-1]['t'] > 20):
                 if rt.get('samp_on') and H_ and now - H_[-1]['t'] > 30: rt['samp_on'] = False
                 self._mig_sampler()
@@ -26398,9 +26458,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 if not (S.get('passes') or 0): return {'ok': False, 'message': '第一輪還沒複製完，還不能收尾（先讓它搬完）'}
                 r_ = self._mig_set({'op': 'final'})
                 if not r_.get('ok'): return r_
-            elif S.get('phase') not in ('switched', 'final'): return {'ok': False, 'message': '現在不需要收尾'}
+            elif S.get('phase') not in ('switched', 'final', 'verify'): return {'ok': False, 'message': '現在不需要收尾'}
             rt = self._mig_rt(); T = rt.setdefault('tail', {}); T.update(fast=True, ready=False, rounds_fast=0, t_fast=time.time(), left_prev=None); rt['tail_kick'] = True
-            if self._mig_load().get('phase') == 'switched': self._mig_tail_start()
+            if self._mig_load().get('phase') in ('switched', 'verify'): self._mig_tail_start()
             self._wd_log('💽 搬硬碟：按了「收尾」，全速把 E 上剩的補到 R'); return {'ok': True, 'message': '開始收尾：全速補完 E 上剩的，完成會顯示「可以關機了」（監控不用停）'}
         if op == 'final':
             if S.get('phase') != 'copy': return {'ok': False, 'message': '要在複製中才能切換'}
@@ -44041,8 +44101,8 @@ function migFabInit(){   /* V1.1.20 搬硬碟切換／收尾中：右下角浮�
   const G=b=>!b?"0":b>=1e12?(b/1e12).toFixed(2)+" TB":b>=1e9?(b/1e9).toFixed(1)+" GB":(b/1e6).toFixed(0)+" MB";
   let tm=0;const chk=async()=>{clearTimeout(tm);let j=null;if(!document.hidden){try{j=await (typeof api==="function"?api:J)("/api/pc/mig");}catch(e){}}
     let b=document.getElementById("migFab");const T=(j&&j.tail)||{},ph=j&&j.phase;
-    const show=j&&(ph==="final"||(ph==="switched"&&(T.fast||T.ready)));
-    if(!show){if(b)b.remove();tm=setTimeout(chk,j&&ph==="switched"?8000:30000);return;}
+    const show=j&&(ph==="final"||((ph==="switched"||ph==="verify")&&T.fast));
+    if(!show){if(b)b.remove();tm=setTimeout(chk,j&&(ph==="switched"||ph==="verify")?8000:30000);return;}
     if(!b){b=document.createElement("div");b.id="migFab";document.body.appendChild(b);b.onclick=()=>{try{if(location.pathname.replace(/\/$/,"").endsWith("/pc")&&typeof go==="function")go(57);else location.hash="tool/mig";}catch(e){}};}
     const spd=j.spd||0,eta=spd>1e5&&T.left_b?T.left_b/spd:null,H=s=>s>=3600?Math.floor(s/3600)+" 小時 "+Math.round(s%3600/60)+" 分":Math.max(1,Math.round(s/60))+" 分";
     b.className=T.ready?"ok":"";
@@ -44117,7 +44177,10 @@ async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（�
       <b>收尾：</b>${T.stage==="補複製"?"補複製中…":T.stage==="確認後刪除"?"確認後刪除中…":"等下一輪"}${T.t_last?` · ${j.src} 上還有 <b>${(T.left_n||0).toLocaleString()} 個（${G(T.left_b||0)}）</b>要處理`:""} · 已刪 ${(T.deleted||0).toLocaleString()} 個（${G(T.deleted_b||0)}）${T.copied?` · 補複製 ${T.copied} 個`:""}${T.keep_n?` · 程式小檔 ${T.keep_n} 個（只複製）`:""}</div>`;
       h+=rd?`<div class="migStep ok" style="font-size:1.1em">✅ <b>收尾完成，可以關機了</b>${T.left_n?`（${j.src} 上還有 ${T.left_n} 個刪不掉的，${j.dst} 上都有）`:""}<br>① 按「停止監控並退出」 → ② 關機 → ③ 把 ${j.dst} 接 SATA 裝進主機、拔掉 ${j.src} → ④ 開機 → ⑤ 磁碟管理確認新硬碟是 <b>${j.dst}</b> 槽 → ⑥ 開程式（找不到 ${j.dst} 會先不監控）</div>`
         :`<button class="btn mgWide" data-mg="tail_final" ${fs?"disabled":""}>${fs?"🏁 收尾中…（全速）":"🏁 收尾（準備關機）"}</button>`;}
-    if(ph==="verify")h+=`<div class="migStep ok">✔ 現在從 ${j.dst} 執行（影片資料夾：${esc(j.video_root)}）。看一下歷史、檔案總管、回放都正常，再按：<br><button class="btn" data-mg="clean">🧹 清空 ${j.src}（只刪 ${j.dst} 上確定有一樣的）</button></div>`;
+    if(ph==="verify"){const T=j.tail||{};h+=`<div class="migStep ok">✔ 現在從 ${j.dst} 執行（影片資料夾：${esc(j.video_root)}），${j.src} 是外接的舊硬碟。<br>
+      ${j.src} 上的每 10 分鐘自動比對一輪：${j.dst} 上有一樣的 → 確認後刪；${j.dst} 上沒有的 → 放回 ${j.dst} 同一個位置再刪；不一樣的不蓋掉 ${j.dst} 在用的，放到 ${j.dst}\\從E槽多出來的。全部處理完會顯示「搬硬碟完成」，${j.src} 就是空的。<br>
+      <b>現在：</b>${T.stage==="確認後刪除"?"比對、刪除中…"+(T.cur?" "+esc(String(T.cur).split(/[\\/]/).pop()):""):"等下一輪"} · 已刪 ${(T.deleted||0).toLocaleString()} 個（${G(T.deleted_b||0)}）${T.t_last?` · ${j.src} 上還有 <b>${(T.left_n||0).toLocaleString()} 個（${G(T.left_b||0)}）</b>`:""}${T.copied?` · 放回 ${T.copied} 個`:""}${T.extra?` · 不一樣的 ${T.extra} 個`:""}${T.err?` · 錯誤 ${T.err} 個（下一輪再試）`:""}</div>
+      <button class="btn mgWide" data-mg="tail_final" ${T.fast?"disabled":""}>${T.fast?"⚡ 全速處理中…":"⚡ 全速處理（不用等）"}</button>`;}
     if(ph==="done"&&j.clean)h+=`<div class="migStep ok">✔ ${j.src} 清空了 ${j.clean.files} 個檔（${G(j.clean.bytes)}）${j.clean.extra?`，另外 ${j.clean.extra} 個切換後才有的放到 ${j.dst}\\從E槽多出來的`:""}${j.clean.junk?`（其中 ${j.clean.junk} 個是暫存檔／已轉好的 FLV，直接刪）`:""}${j.clean.err?`，錯誤 ${j.clean.err} 個`:""}。</div>`;
     const JK=j.junk||{},JL=[["tmp","寫到一半的暫存檔（.copying／.part…）","不搬，清空 "+j.src+" 時一起刪"],["flv_done","已經轉好 MP4 的 FLV","旁邊有同名 MP4：不搬，清空 "+j.src+" 時一起刪"],["flv_todo","還沒轉檔的 FLV","是錄影原始檔：照常搬過去，之後在 "+j.dst+" 轉"]].filter(x=>JK[x[0]]&&JK[x[0]][0]);
     if(JL.length)h+=`<div class="mgSec">🗑 不搬的垃圾／要注意的檔${j.junk_t?`<small style="opacity:.6;font-weight:400">（上一次掃描 ${new Date(j.junk_t*1000).toLocaleString("zh-TW",{hour12:false,month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}）</small>`:""}</div><div class="mgList">${JL.map(([k,t,d])=>`<details><summary><b>${t}</b> ${JK[k][0].toLocaleString()} 個 · ${G(JK[k][1])}<small> — ${d}</small></summary>${JK[k][2].map(p=>`<div class="mgJp">${esc(p)}</div>`).join("")}${JK[k][0]>JK[k][2].length?`<div class="mgJp">…還有 ${(JK[k][0]-JK[k][2].length).toLocaleString()} 個</div>`:""}</details>`).join("")}</div>`;   /* V1.1.12 */

@@ -7786,8 +7786,8 @@ function migFabInit(){   /* V1.1.20 搬硬碟切換／收尾中：右下角浮�
   const G=b=>!b?"0":b>=1e12?(b/1e12).toFixed(2)+" TB":b>=1e9?(b/1e9).toFixed(1)+" GB":(b/1e6).toFixed(0)+" MB";
   let tm=0;const chk=async()=>{clearTimeout(tm);let j=null;if(!document.hidden){try{j=await (typeof api==="function"?api:J)("/api/pc/mig");}catch(e){}}
     let b=document.getElementById("migFab");const T=(j&&j.tail)||{},ph=j&&j.phase;
-    const show=j&&(ph==="final"||(ph==="switched"&&(T.fast||T.ready)));
-    if(!show){if(b)b.remove();tm=setTimeout(chk,j&&ph==="switched"?8000:30000);return;}
+    const show=j&&(ph==="final"||((ph==="switched"||ph==="verify")&&T.fast));
+    if(!show){if(b)b.remove();tm=setTimeout(chk,j&&(ph==="switched"||ph==="verify")?8000:30000);return;}
     if(!b){b=document.createElement("div");b.id="migFab";document.body.appendChild(b);b.onclick=()=>{try{if(location.pathname.replace(/\/$/,"").endsWith("/pc")&&typeof go==="function")go(57);else location.hash="tool/mig";}catch(e){}};}
     const spd=j.spd||0,eta=spd>1e5&&T.left_b?T.left_b/spd:null,H=s=>s>=3600?Math.floor(s/3600)+" 小時 "+Math.round(s%3600/60)+" 分":Math.max(1,Math.round(s/60))+" 分";
     b.className=T.ready?"ok":"";
@@ -7862,7 +7862,10 @@ async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（�
       <b>收尾：</b>${T.stage==="補複製"?"補複製中…":T.stage==="確認後刪除"?"確認後刪除中…":"等下一輪"}${T.t_last?` · ${j.src} 上還有 <b>${(T.left_n||0).toLocaleString()} 個（${G(T.left_b||0)}）</b>要處理`:""} · 已刪 ${(T.deleted||0).toLocaleString()} 個（${G(T.deleted_b||0)}）${T.copied?` · 補複製 ${T.copied} 個`:""}${T.keep_n?` · 程式小檔 ${T.keep_n} 個（只複製）`:""}</div>`;
       h+=rd?`<div class="migStep ok" style="font-size:1.1em">✅ <b>收尾完成，可以關機了</b>${T.left_n?`（${j.src} 上還有 ${T.left_n} 個刪不掉的，${j.dst} 上都有）`:""}<br>① 按「停止監控並退出」 → ② 關機 → ③ 把 ${j.dst} 接 SATA 裝進主機、拔掉 ${j.src} → ④ 開機 → ⑤ 磁碟管理確認新硬碟是 <b>${j.dst}</b> 槽 → ⑥ 開程式（找不到 ${j.dst} 會先不監控）</div>`
         :`<button class="btn mgWide" data-mg="tail_final" ${fs?"disabled":""}>${fs?"🏁 收尾中…（全速）":"🏁 收尾（準備關機）"}</button>`;}
-    if(ph==="verify")h+=`<div class="migStep ok">✔ 現在從 ${j.dst} 執行（影片資料夾：${esc(j.video_root)}）。看一下歷史、檔案總管、回放都正常，再按：<br><button class="btn" data-mg="clean">🧹 清空 ${j.src}（只刪 ${j.dst} 上確定有一樣的）</button></div>`;
+    if(ph==="verify"){const T=j.tail||{};h+=`<div class="migStep ok">✔ 現在從 ${j.dst} 執行（影片資料夾：${esc(j.video_root)}），${j.src} 是外接的舊硬碟。<br>
+      ${j.src} 上的每 10 分鐘自動比對一輪：${j.dst} 上有一樣的 → 確認後刪；${j.dst} 上沒有的 → 放回 ${j.dst} 同一個位置再刪；不一樣的不蓋掉 ${j.dst} 在用的，放到 ${j.dst}\\從E槽多出來的。全部處理完會顯示「搬硬碟完成」，${j.src} 就是空的。<br>
+      <b>現在：</b>${T.stage==="確認後刪除"?"比對、刪除中…"+(T.cur?" "+esc(String(T.cur).split(/[\\/]/).pop()):""):"等下一輪"} · 已刪 ${(T.deleted||0).toLocaleString()} 個（${G(T.deleted_b||0)}）${T.t_last?` · ${j.src} 上還有 <b>${(T.left_n||0).toLocaleString()} 個（${G(T.left_b||0)}）</b>`:""}${T.copied?` · 放回 ${T.copied} 個`:""}${T.extra?` · 不一樣的 ${T.extra} 個`:""}${T.err?` · 錯誤 ${T.err} 個（下一輪再試）`:""}</div>
+      <button class="btn mgWide" data-mg="tail_final" ${T.fast?"disabled":""}>${T.fast?"⚡ 全速處理中…":"⚡ 全速處理（不用等）"}</button>`;}
     if(ph==="done"&&j.clean)h+=`<div class="migStep ok">✔ ${j.src} 清空了 ${j.clean.files} 個檔（${G(j.clean.bytes)}）${j.clean.extra?`，另外 ${j.clean.extra} 個切換後才有的放到 ${j.dst}\\從E槽多出來的`:""}${j.clean.junk?`（其中 ${j.clean.junk} 個是暫存檔／已轉好的 FLV，直接刪）`:""}${j.clean.err?`，錯誤 ${j.clean.err} 個`:""}。</div>`;
     const JK=j.junk||{},JL=[["tmp","寫到一半的暫存檔（.copying／.part…）","不搬，清空 "+j.src+" 時一起刪"],["flv_done","已經轉好 MP4 的 FLV","旁邊有同名 MP4：不搬，清空 "+j.src+" 時一起刪"],["flv_todo","還沒轉檔的 FLV","是錄影原始檔：照常搬過去，之後在 "+j.dst+" 轉"]].filter(x=>JK[x[0]]&&JK[x[0]][0]);
     if(JL.length)h+=`<div class="mgSec">🗑 不搬的垃圾／要注意的檔${j.junk_t?`<small style="opacity:.6;font-weight:400">（上一次掃描 ${new Date(j.junk_t*1000).toLocaleString("zh-TW",{hour12:false,month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}）</small>`:""}</div><div class="mgList">${JL.map(([k,t,d])=>`<details><summary><b>${t}</b> ${JK[k][0].toLocaleString()} 個 · ${G(JK[k][1])}<small> — ${d}</small></summary>${JK[k][2].map(p=>`<div class="mgJp">${esc(p)}</div>`).join("")}${JK[k][0]>JK[k][2].length?`<div class="mgJp">…還有 ${(JK[k][0]-JK[k][2].length).toLocaleString()} 個</div>`:""}</details>`).join("")}</div>`;   /* V1.1.12 */
