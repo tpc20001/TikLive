@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.24"
+APP_VERSION = "1.1.25"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -15351,7 +15351,7 @@ try { NLConnect | Out-Null; Unset
         try:
             for root in self._video_roots():
                 if not root.exists(): continue
-                for d in list(root.glob(f'*/session_{sid}_*')) + list(root.glob(f'session_{sid}_*')):
+                for d in [x for s_ in self._sid_aliases(sid) for x in list(root.glob(f'*/session_{s_}_*')) + list(root.glob(f'session_{s_}_*'))]:   # V1.1.25
                     if not d.is_dir(): continue
                     meta = session_meta_path(d)
                     try: payload = json.loads(meta.read_text(encoding='utf-8')) if meta.exists() else {}
@@ -16293,6 +16293,7 @@ try { NLConnect | Out-Null; Unset
                 if busy & set(int(i) for i in ids): fails.append((ids,'含直播中的場次')); continue
                 try: done.append((ids,merge_session_group(DB_PATH,ids)))
                 except Exception as e: fails.append((ids,str(e)))
+            self.__dict__.pop('_sid_al_c',None); self.__dict__.pop('_vpf_c',None); self.__dict__.pop('_web_rf_cache',None)   # V1.1.25
             for ids_,target_ in done:                                         # TK_V0.8.34.024 改錄音 JSON 的場次編號在背景做（要讀最新的影片庫索引）
                 try: self._lib_invalidate(); self._relabel_merged_audio(ids_,target_)
                 except Exception: pass
@@ -33043,6 +33044,80 @@ $r | ConvertTo-Json -Depth 4 -Compress
         if ch is a_go: self._beta_seek(live)
         elif ch is a_pre: self._beta_seek(live-10)
 
+    # ================= V1.1.25 ⧉ 合併重複場次（手機、網頁版也能用；不重新輸出影片） =================
+    def _web_merge_state(self):
+        return self.__dict__.setdefault('_wm_st', {'scan': None, 'scan_t': 0, 'scanning': False, 'run': None})
+
+    def _web_merge_scan(self, force=False):
+        st = self._web_merge_state()
+        if st['scanning']: return {'ok': True, 'scanning': True}
+        if st['scan'] is not None and not force and time.time() - st['scan_t'] < 60: return dict(st['scan'], ok=True, scanning=False, t=st['scan_t'])
+        st['scanning'] = True
+        def run_():
+            try:
+                tol = float(self.cfg('history.merge_tol') or 60)
+                busy = self._busy_session_ids()
+                groups, skipped = find_session_merge_groups(DB_PATH, tol=tol, busy_ids=busy)
+                out = []
+                for g in groups[:300]:
+                    ss = []
+                    for x in g:
+                        try: nv = len({str(p['path']) for p in self.video_parts_for(x['id'])})
+                        except Exception: nv = 0
+                        ss.append({'id': x['id'], 'start': x['started_at'], 'end': x['ended_at'], 'comments': x['comments'], 'gifts': x['gifts'], 'diamonds': x['diamonds'], 'videos': nv})
+                    u = g[0]['username']
+                    out.append({'ids': [x['id'] for x in g], 'user': u, 'name': self.streamer_names.get(u, u), 'live_epoch': g[0]['live_epoch'], 'sessions': ss})
+                st['scan'] = {'groups': out, 'skipped': skipped, 'more': max(0, len(groups) - 300)}; st['scan_t'] = time.time()
+            except Exception as ex: st['scan'] = {'groups': [], 'skipped': 0, 'error': str(ex)}; st['scan_t'] = time.time()
+            finally: st['scanning'] = False
+        threading.Thread(target=run_, name='TikLiveMergeScan', daemon=True).start()
+        return {'ok': True, 'scanning': True}
+
+    def _web_merge_status(self):
+        st = self._web_merge_state(); sc = st['scan']
+        return {'ok': True, 'scanning': st['scanning'], 'scan': sc, 'scan_t': st['scan_t'], 'run': st['run']}
+
+    def _web_merge_run(self, d):
+        st = self._web_merge_state()
+        if st['run'] and st['run'].get('state') == 'running': return {'ok': False, 'message': '正在合併，請稍候'}
+        chosen = [[int(i) for i in g] for g in (d.get('groups') or []) if isinstance(g, (list, tuple)) and len(g) >= 2][:500]
+        if not chosen: return {'ok': False, 'message': '沒有勾選要合併的'}
+        R = st['run'] = {'state': 'running', 'n': len(chosen), 'done': 0, 'fails': [], 'merged': [], 't0': time.time(), 'backup': ''}
+        def run_():
+            try:
+                busy = self._busy_session_ids()
+                try: R['backup'] = Path(backup_database(DB_PATH)).name
+                except Exception as ex: R.update(state='error', message=f'備份資料庫失敗，沒有合併：{ex}'); return
+                for ids in chosen:
+                    if busy & set(ids): R['fails'].append([ids, '有直播中的場次']); continue
+                    try:
+                        t = merge_session_group(DB_PATH, ids)
+                        if t: R['merged'].append([ids, t]); R['done'] += 1
+                    except Exception as ex: R['fails'].append([ids, str(ex)[:200]])
+                self.__dict__.pop('_sid_al_c', None); self.__dict__.pop('_vpf_c', None); self.__dict__.pop('_web_rf_cache', None)
+                for ids, t in R['merged']:
+                    try: self._lib_invalidate(); self._relabel_merged_audio(ids, t)
+                    except Exception: pass
+                try: self._last_live_cache = None; self._bg_refresh_last['sessions'] = 0
+                except Exception: pass
+                R['state'] = 'done'; R['t1'] = time.time(); st['scan'] = None
+                self._wd_log(f"⧉ 合併重複場次（網頁）：合併 {R['done']} 組、沒合併 {len(R['fails'])} 組，備份 {R['backup']}")
+            except Exception as ex: R.update(state='error', message=str(ex))
+        threading.Thread(target=run_, name='TikLiveMergeRun', daemon=True).start()
+        return {'ok': True, 'message': f'開始合併 {len(chosen)} 組（先備份資料庫）'}
+
+    def _sid_aliases(self, sid):
+        """V1.1.25 這場＋合併進來的舊場次編號（session_redirects 指到這場的）。錄影資料夾名稱裡是舊編號，合併後回放也要找得到。30 秒快取."""
+        sid = int(sid); C = self.__dict__.setdefault('_sid_al_c', [0.0, {}])
+        if time.time() - C[0] > 30:
+            m = {}
+            try:
+                for o, n in (self._web_db('SELECT old_id,new_id FROM session_redirects', ()) or []):
+                    m.setdefault(int(n), []).append(int(o))
+            except Exception: pass
+            C[0] = time.time(); C[1] = m
+        return [sid] + sorted(C[1].get(sid, []))
+
     def video_parts_for(self, session_id):
         """TK_V0.8.34.022 15 秒快取（回放、網頁、截圖會連續問同一場；每次都要在每個分類資料夾裡找）；檔案不見的會濾掉."""
         C=self.__dict__.setdefault('_vpf_c',{}); k=int(session_id); c=C.get(k)
@@ -33061,7 +33136,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         out=[]
         for root in self._video_roots():
             if not root.exists(): continue
-            for d in list(root.glob(f'*/session_{int(session_id)}_*'))+list(root.glob(f'session_{int(session_id)}_*')):
+            for d in [x for s_ in self._sid_aliases(session_id) for x in list(root.glob(f'*/session_{s_}_*'))+list(root.glob(f'session_{s_}_*'))]:   # V1.1.25 合併過的場次：舊編號的資料夾也算
                 meta=session_meta_path(d)
                 try: payload=json.loads(meta.read_text(encoding='utf-8')) if meta.exists() else {}
                 except Exception: payload={}
@@ -33114,7 +33189,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         roots=self._audio_roots()
         for root in roots:
             if not root or not root.exists(): continue
-            for d in root.glob(f'session_{int(session_id)}_*'):
+            for d in [x for s_ in self._sid_aliases(session_id) for x in root.glob(f'session_{s_}_*')]:   # V1.1.25
                 for name in (d.name + '.m4a','audio.m4a','audio.mp3'):
                     p=d/name
                     if p.exists() and p.stat().st_size>0: return p
@@ -33137,7 +33212,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
     def _history_recording_info_calc(self, session_id, live_start=None, ended=None):
         """Return actual recording start offset and duration, independent from the full live duration."""
         info={'record_start_epoch':None,'record_start_sec':0.0,'record_duration_sec':0.0,'path':self._history_audio_file(session_id)}
-        for d in [x for r0 in self._audio_roots() if r0.exists() for x in r0.glob(f'session_{int(session_id)}_*')]:
+        for d in [x for r0 in self._audio_roots() if r0.exists() for s_ in self._sid_aliases(session_id) for x in r0.glob(f'session_{s_}_*')]:   # V1.1.25
             meta=session_meta_path(d)
             if not meta.exists(): continue
             try:
@@ -41532,6 +41607,7 @@ body.rp main{flex:1;min-height:0;padding:0;display:flex;flex-direction:column}
 .cuBox{padding:10px 12px;border:1px solid #3a7bd5;border-radius:12px;background:rgba(58,123,213,.08);margin:0 0 10px;line-height:1.55}.cuS{opacity:.7;font-size:12px}.cuT{margin-top:4px}.cuN{margin-top:4px;font-size:13px;opacity:.9}.cuW{color:#f0ad4e}.cuR{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin-top:8px}.cuBar{height:6px;border-radius:3px;background:rgba(127,127,127,.25);margin:6px 0 4px;overflow:hidden}.cuBar i{display:block;height:100%;background:#3a7bd5}.cuR .btn:not(.cuGo){background:transparent;border:1px solid #3a7bd5;color:inherit;box-shadow:none}
 #updFab{position:fixed;top:8px;right:8px;z-index:9700;display:flex;gap:4px;align-items:stretch;animation:ufIn .3s ease}@keyframes ufIn{from{transform:translateY(-20px);opacity:0}}
 #updFab .ufGo{display:flex;flex-direction:column;align-items:flex-start;padding:6px 12px;border-radius:12px;border:0;background:#ff2d55;color:#fff;font-weight:800;font-size:14px;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.45)}#updFab .ufGo small{font-weight:600;font-size:11px;opacity:.9}
+.mrgHead{margin-bottom:10px}.mrgBox{padding:10px 12px;border-radius:12px;background:rgba(127,127,127,.12);margin:8px 0}.mrgBox.ok{background:rgba(69,212,131,.14)}.mrgBox.bad{background:rgba(255,80,80,.14)}.mrgBar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0}.mrgBar span{flex:1 1 100%}.mrgBar .btn{flex:0 0 auto;width:auto;max-width:none;min-width:0;white-space:nowrap;overflow:visible;padding:6px 12px}.mrgBar .btn.start{margin-left:auto}.mrgG{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid rgba(127,127,127,.25);border-radius:12px;margin:6px 0;cursor:pointer}.mrgG.on{border-color:#3a7bd5;background:rgba(58,123,213,.08)}.mrgG input{margin-top:4px;transform:scale(1.3)}.mrgT{line-height:1.5}.mrgS{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12.5px;opacity:.85;margin-top:3px}
 #migFab{position:fixed;left:10px;bottom:14px;z-index:9680;max-width:min(92vw,420px);padding:8px 14px;border-radius:14px;background:#1d4f7a;color:#fff;box-shadow:0 6px 22px rgba(0,0,0,.45);cursor:pointer;display:flex;flex-direction:column;gap:2px;font-size:14px}#migFab small{opacity:.85;font-size:12px}#migFab.ok{background:#1f7a4a}
 #cuFab{position:fixed;top:8px;right:8px;z-index:9690;display:flex;gap:4px;align-items:stretch}#cuFab .ufGo{display:flex;flex-direction:column;align-items:flex-start;padding:6px 12px;border-radius:12px;border:0;background:#3a7bd5;color:#fff;font-weight:800;font-size:14px;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.45)}#cuFab .ufGo small{font-weight:600;font-size:11px;opacity:.9}#cuFab .ufX{border:0;border-radius:12px;background:rgba(0,0,0,.55);color:#fff;padding:0 10px;cursor:pointer}
 #updFab .ufX{border:0;border-radius:12px;background:rgba(0,0,0,.55);color:#fff;padding:0 10px;cursor:pointer}   /* TK_V0.9.45 */
@@ -44065,7 +44141,7 @@ function drawSetSearch(){const q=(S.setQ||"").trim().toLowerCase(),sb=$("#sbody"
     setTimeout(()=>{const el=document.querySelector(`#sbody [data-k="${CSS.escape(k)}"]`);const row=el&&(el.closest(".si,.pi,.prow")||el);if(row){row.scrollIntoView({block:"center"});row.classList.add("sflash");setTimeout(()=>row.classList.remove("sflash"),1800);}},350);};}
 /* ---------------- V0.6.95 工具（主頁分頁）：原本放在設定左邊的工作流 ---------------- */
 const TOOLS=[["緊急事件",[["emg","🚨","緊急處理","C／I 槽堆積、轉檔與搬檔進度、速度、模式、顯示卡"]]],["🧪 實驗工作區",[["exp","🧪","實驗工作區","新想法先放這裡：同一件事的幾種做法並排，A／B 對照自動比較"]]],["資料",[["gift","🎁","送禮者","誰送了多少、送禮排行、每位的紀錄"],["hrank","🏆","主播收禮排行","每位主播收了多少鑽石、裡面誰送最多（送禮者反過來看）"]]],["影片工具",[["vg","▦","檔案總管（影片快速瀏覽 v2）","每幾秒一張圖排滿畫面，選起來初剪；上面分頁也可以直接進"],["tkd","📥","TKDownloader","新增主播頁貼影片網址下載的短影片：篩選、播放、存到手機"],["igd","📸","IGDownloader","新增主播頁貼 IG 網址下載的照片／影片：篩選、看、存到手機"],["feat","⏯","精選／審核 開關","暫停省效能（功能保留），之後在這裡再打開"],["sp","✂","批量剪輯","選主播＋禮物，一次剪很多段"],["org","🗂","整理 MP4","依保存等級／已剪輯過的，一次刪 MP4"],["shp","📸","批量截 20 張","歷史場次先截好 20 張圖（不用等刪 MP4）"],["yt","▶","YouTube 上傳","自動上傳（不公開）、拿到網址後移到暫放"],["phr","📱","手機錄屏","從外接硬碟限速匯入手機錄的畫面，用聲音自動對上是哪一場，回放可以切換版本"],["cul","🌐","Chrome 上傳限速","看 K 槽忙不忙自動調 Chrome 的上傳速度"],["stt","🎙","語音轉字幕","下播後自動轉；進度、效能上限"]]],
-  ["電腦與連線",[["bg","🖥","後台狀態","現在在跑什麼、排隊什麼，可以取消"],["stat","📈","開播統計","主播什麼時候開播、播多久"],["prof","🧭","主播特性","習慣、PK 比例、你標的等級、錄到幾成 → 建議"],["csv","📤","匯出場次表（Excel）","最近 7／30／90 天或一年的場次，或只匯出某位主播，CSV 直接用 Excel 開"],["dtl","📅","一天的時間軸","今天（或任一天）每位主播幾點播到幾點、錄到哪裡、漏了開頭沒有"],["ythold","🗑","YouTube 已上傳-刪除隔離區","傳好 YouTube 的原檔都在這：逐項抽查 YouTube／原檔，沒問題就一次全部刪"],["mig","💽","E → R 搬硬碟","把 E 槽整顆慢慢複製到 R 槽（斷電安全），最後一次切換"],["gsd","🎛","顯示卡供需","顯示卡每天閒多久、忙多久；字幕每天錄到的量轉不轉得完（要不要換顯示卡看這裡）"],["hp","🩺","一頁健檢","所有要處理／要留意的事一次看，加上記憶體、熱更新、備份、字幕搜尋庫等數字"],["host","👤","主播總覽","選一位主播：開播時段、下次可能開播、等級、禮物、筆記、最近場次"],["dhh","🩺","硬碟健康紀錄","每顆硬碟 30 天的溫度、讀寫錯誤趨勢；錯誤一直變多就該換了"],["hevc","🧪","HEVC 壓縮試算","拿一分鐘影片用顯示卡壓成 H.265，看能省多少空間、畫質比較（只試，不動原檔）"],["act","🕘","自動處理紀錄","程式自己做了什麼：刪除、YouTube、手機錄屏、自動分級、備份、重開"],["sbk","🗂","小檔備份","每天自動備份設定／分級／YouTube 排隊／手機錄屏紀錄，可以下載"],["chv","🆕","版本與更新","這次更新了什麼：可以搜尋、依版本收合，新的標 🆕"],["wkr","📰","每週報告","上週錄了多少、錄到幾成、最精彩的 5 段"],["cg","🚦","連線管控","排隊、被限制時自動放慢"],["conn","🩺","連線狀況","每位主播的連線情形"],["logx","📋","LOG 與問題","錯誤紀錄、異常、自動處理結果"]]],
+  ["電腦與連線",[["bg","🖥","後台狀態","現在在跑什麼、排隊什麼，可以取消"],["stat","📈","開播統計","主播什麼時候開播、播多久"],["prof","🧭","主播特性","習慣、PK 比例、你標的等級、錄到幾成 → 建議"],["csv","📤","匯出場次表（Excel）","最近 7／30／90 天或一年的場次，或只匯出某位主播，CSV 直接用 Excel 開"],["dtl","📅","一天的時間軸","今天（或任一天）每位主播幾點播到幾點、錄到哪裡、漏了開頭沒有"],["ythold","🗑","YouTube 已上傳-刪除隔離區","傳好 YouTube 的原檔都在這：逐項抽查 YouTube／原檔，沒問題就一次全部刪"],["mig","💽","E → R 搬硬碟","把 E 槽整顆慢慢複製到 R 槽（斷電安全），最後一次切換"],["merge","⧉","合併重複場次","程式重開、斷電切成好幾段的同一場直播，合成一場（影片照時間接著播）"],["gsd","🎛","顯示卡供需","顯示卡每天閒多久、忙多久；字幕每天錄到的量轉不轉得完（要不要換顯示卡看這裡）"],["hp","🩺","一頁健檢","所有要處理／要留意的事一次看，加上記憶體、熱更新、備份、字幕搜尋庫等數字"],["host","👤","主播總覽","選一位主播：開播時段、下次可能開播、等級、禮物、筆記、最近場次"],["dhh","🩺","硬碟健康紀錄","每顆硬碟 30 天的溫度、讀寫錯誤趨勢；錯誤一直變多就該換了"],["hevc","🧪","HEVC 壓縮試算","拿一分鐘影片用顯示卡壓成 H.265，看能省多少空間、畫質比較（只試，不動原檔）"],["act","🕘","自動處理紀錄","程式自己做了什麼：刪除、YouTube、手機錄屏、自動分級、備份、重開"],["sbk","🗂","小檔備份","每天自動備份設定／分級／YouTube 排隊／手機錄屏紀錄，可以下載"],["chv","🆕","版本與更新","這次更新了什麼：可以搜尋、依版本收合，新的標 🆕"],["wkr","📰","每週報告","上週錄了多少、錄到幾成、最精彩的 5 段"],["cg","🚦","連線管控","排隊、被限制時自動放慢"],["conn","🩺","連線狀況","每位主播的連線情形"],["logx","📋","LOG 與問題","錯誤紀錄、異常、自動處理結果"]]],
   ["主播與畫面",[["cats","🗂","主播分類","分類顏色、資料夾"],["nv","🎧","只錄聲音的主播","哪些主播只錄 M4A"],["gfx","🎁","送禮動畫","直播畫面上的送禮動畫"]]]];
 function toolName(k){if(k==="host")return "👤 主播總覽";if(k==="gifs")return "🎞 GIF 製作";for(const [,L] of TOOLS)for(const x of L)if(x[0]===k)return x[1]+" "+x[2];return "工具";}
 /* V0.7.42.026 智慧功能狀態：點一行跳到那一頁 */
@@ -44158,6 +44234,35 @@ function migFabInit(){   /* V1.1.20 搬硬碟切換／收尾中：右下角浮�
     tm=setTimeout(chk,3000);};
   setTimeout(chk,3000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)chk();});}
 setTimeout(()=>{try{migFabInit();}catch(e){}},2500);
+async function mrgMount(root){   /* V1.1.25 ⧉ 合併重複場次 */
+  if(!root)return;const E=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const get=async u=>{try{return await (typeof api==="function"?api:J)(u);}catch(e){return null;}};
+  const post=async(u,o)=>{const f=(typeof kPost==="function"?kPost:rvPost);return (await f(u,o))||{};};
+  const T=s=>{if(!s)return"—";const d=new Date(String(s).replace(" ","T"));return isNaN(d)?String(s).slice(5,16):d.toLocaleString("zh-TW",{hour12:false,month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});};
+  const off=new Set();let I=null,tm=0;
+  const draw=()=>{if(!root.isConnected)return;const sc=I&&I.scan,R=I&&I.run;let h=`<div class="mrgHead"><b>⧉ 合併重複場次</b><div class="snote">同一位主播、TikTok 開播時間一樣（相差 1 分鐘內）的場次＝同一場直播，只是程式重開、斷電、斷線被切成好幾段。合併後留言、禮物、送禮者、觀看人數都歸到同一場；<b>影片不重新輸出</b>，回放照時間軸一段接一段播，中間沒錄到的會自動跳過。合併前自動備份資料庫。直播中的場次不會動（等它下播）。</div></div>`;
+    if(R&&R.state==="running")h+=`<div class="mrgBox">⏳ 合併中… ${R.done}/${R.n}（先備份資料庫）</div>`;
+    else if(R&&(R.state==="done"||R.state==="error"))h+=`<div class="mrgBox ${R.state==="done"?"ok":"bad"}">${R.state==="done"?`✔ 合併了 ${R.done} 組${R.fails.length?`，${R.fails.length} 組沒合併（${E(R.fails[0][1])}）`:""}${R.backup?`<br><small>合併前的資料庫備份：${E(R.backup)}</small>`:""}`:"✖ "+E(R.message||"失敗")}</div>`;
+    if(!I||I.scanning&&!sc)h+=`<div class="mrgBox">🔎 找可以合併的場次…</div>`;
+    else if(sc&&sc.error)h+=`<div class="mrgBox bad">✖ 找的時候出錯：${E(sc.error)}</div>`;
+    else if(sc){const G=sc.groups||[];const on=G.filter(g=>!off.has(g.ids.join(",")));
+      h+=`<div class="mrgBar"><span>找到 <b>${G.length}</b> 組可以合併${sc.skipped?`（另有 ${sc.skipped} 組還在直播，先不動）`:""}</span><button class="btn pill" data-m="rescan">🔎 重新找</button>${G.length?`<button class="btn pill" data-m="all">${on.length===G.length?"全部取消":"全部勾選"}</button><button class="btn pill start" data-m="run" ${on.length?"":"disabled"}>⧉ 合併勾選的 ${on.length} 組</button>`:""}</div>`;
+      if(!G.length)h+=`<div class="mrgBox ok">✔ 沒有需要合併的場次</div>`;
+      h+=G.map(g=>{const k=g.ids.join(","),ck=!off.has(k),S=g.sessions||[],nc=S.reduce((a,x)=>a+x.comments,0),nd=S.reduce((a,x)=>a+x.diamonds,0),nv=S.reduce((a,x)=>a+x.videos,0);
+        return `<label class="mrgG ${ck?"on":""}"><input type="checkbox" data-k="${k}" ${ck?"checked":""}><div><div class="mrgT"><b>${E(g.name)}</b> <small>@${E(g.user)}</small> · ${T(S[0]&&S[0].start)} 開播 · <b>${S.length} 段</b> → 1 場</div>
+        <div class="mrgS">${S.map((x,i)=>`<span>#${x.id} ${T(x.start)}～${T(x.end).slice(-5)} · 💬${x.comments} · 🎁${x.gifts}${x.diamonds?` (💎${x.diamonds})`:""} · 🎬${x.videos}</span>`).join("")}</div>
+        <div class="mrgS"><small>合併後：💬 ${nc} 則 · 💎 ${nd} · 🎬 ${nv} 段影片照時間接著播 · 留下編號 #${Math.max(...g.ids)}</small></div></div></label>`;}).join("");
+      if(sc.more)h+=`<div class="snote">還有 ${sc.more} 組，這批合併完再按「重新找」</div>`;}
+    root.innerHTML=h;
+    root.querySelectorAll("input[data-k]").forEach(c=>c.onchange=()=>{c.checked?off.delete(c.dataset.k):off.add(c.dataset.k);draw();});
+    root.querySelectorAll("[data-m]").forEach(b=>b.onclick=async e=>{e.preventDefault();const m=b.dataset.m,G=(sc&&sc.groups)||[];
+      if(m==="all"){const allOn=G.every(g=>!off.has(g.ids.join(",")));G.forEach(g=>allOn?off.add(g.ids.join(",")):off.delete(g.ids.join(",")));draw();return;}
+      if(m==="rescan"){await get("/api/pc/merge/scan?force=1");tick();return;}
+      if(m==="run"){const on=G.filter(g=>!off.has(g.ids.join(",")));if(!confirm(`合併 ${on.length} 組場次？\n\n留言、禮物、影片都會歸到同一場（影片不重新輸出）。\n合併前會自動備份資料庫。`))return;
+        b.disabled=true;const r=await post("/api/pc/merge/run",{groups:on.map(g=>g.ids)});if(typeof toast==="function")toast((r.ok?"⧉ ":"✖ ")+(r.message||""),3500);tick();}});};
+  const tick=async()=>{clearTimeout(tm);if(!root.isConnected)return;I=await get("/api/pc/merge");if(I&&!I.scan&&!I.scanning&&!(I.run&&I.run.state==="running")){await get("/api/pc/merge/scan");I=await get("/api/pc/merge");}
+    draw();tm=setTimeout(tick,I&&(I.scanning||(I.run&&I.run.state==="running"))?1500:15000);};
+  tick();}
 async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（照 SortCut「R 碟清空搬移」的樣子） */
   const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   const G=b=>b==null?"—":b>=1e12?(b/1e12).toFixed(2)+" TB":b>=1e9?(b/1e9).toFixed(1)+" GB":b>=1e6?(b/1e6).toFixed(1)+" MB":Math.round(b/1e3)+" KB";
@@ -44344,6 +44449,7 @@ function viewTool(k){$("#clk").textContent="";V().onclick=null;
   if(k==="hp"){hpMount($("#sbody"));return;}   /* TK_V1.0.69 */
   if(k==="gsd"){gsdMount($("#sbody"));return;}   /* TK_V1.0.84 */
   if(k==="mig"){migMount($("#sbody"));return;}   /* V1.1.07 */
+  if(k==="merge"){mrgMount($("#sbody"));return;}   /* V1.1.25 */
   if(k==="ythold"){yhcMount($("#sbody"));return;}   /* TK_V1.0.97 */
   if(k==="gifs"){gfsMount($("#sbody"));return;}   /* TK_V1.0.75 */
   if(k==="host"){hostMount($("#sbody"));return;}   /* TK_V1.0.42 主播總覽（從快速找進來） */

@@ -1974,6 +1974,7 @@ body.oldLock{overflow:hidden}
 /* PUP-CSS-END */
 .cuBox{padding:10px 12px;border:1px solid #3a7bd5;border-radius:12px;background:rgba(58,123,213,.08);line-height:1.55}.cuS{opacity:.7;font-size:12px}.cuT{margin-top:4px}.cuN{margin-top:4px;font-size:13px;opacity:.9}.cuW{color:#f0ad4e}.cuR{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin-top:8px}.cuBar{height:6px;border-radius:3px;background:rgba(127,127,127,.25);margin:6px 0 4px;overflow:hidden}.cuBar i{display:block;height:100%;background:#3a7bd5}
 #migFab{position:fixed;left:10px;bottom:14px;z-index:9680;max-width:min(92vw,420px);padding:8px 14px;border-radius:14px;background:#1d4f7a;color:#fff;box-shadow:0 6px 22px rgba(0,0,0,.45);cursor:pointer;display:flex;flex-direction:column;gap:2px;font-size:14px}#migFab small{opacity:.85;font-size:12px}#migFab.ok{background:#1f7a4a}
+.mrgHead{margin-bottom:10px}.mrgBox{padding:10px 12px;border-radius:12px;background:rgba(127,127,127,.12);margin:8px 0}.mrgBox.ok{background:rgba(69,212,131,.14)}.mrgBox.bad{background:rgba(255,80,80,.14)}.mrgBar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0}.mrgBar span{flex:1 1 100%}.mrgBar .btn{flex:0 0 auto;width:auto;max-width:none;min-width:0;white-space:nowrap;overflow:visible;padding:6px 12px}.mrgBar .btn.start{margin-left:auto}.mrgG{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid rgba(127,127,127,.25);border-radius:12px;margin:6px 0;cursor:pointer}.mrgG.on{border-color:#3a7bd5;background:rgba(58,123,213,.08)}.mrgG input{margin-top:4px;transform:scale(1.3)}.mrgT{line-height:1.5}.mrgS{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12.5px;opacity:.85;margin-top:3px}
 </style></head>
 <body><div id="app"><aside id="side"><div id="sdCount">● 0 / 0 直播間</div><div class="ss"><button class="sstart" id="btnStart">▶ 開始監控</button><button class="sstop" id="btnStop">■ 停止監控</button></div><div id="sdStatus">● 連線中...</div><nav id="nav"></nav><div id="sysBox">電腦狀態讀取中…</div><button id="netBtn">⬇ —
 本日 — MB</button><button id="qBtn" title="排隊轉檔的數量、還要搬到 HDD 的 MP4 大小、全部處理完（轉檔＋搬檔）預估還要多久。點一下看轉檔排隊">🎬 轉檔排隊：讀取中…</button></aside>
@@ -2182,7 +2183,7 @@ class VT{
 const S={page:(p=>p===6?0:p===28?29:p===26?31:p)(LS.get("page",0)),tab:null,hist:LS.get("hist",[]),tabMode:LS.get("tabMode","expanded"),pins:LS.get("pins",[]),st:null,mode:"dark",sbT:0,data:{}};
 const NAV=[["緊急事件","#ff4d6d",[[37,"緊急處理","🚨"]]],["總覽","#4dc9ff",[[0,"直播總覽","⌂"],[31,"檔案總管","▦"],[38,"主播審核","🗂"],[33,"精選","✨"],[30,"後台狀態","🖥"]]],["目前直播","#45d4b0",[[1,"即時聊天室","◌"],[2,"禮物","◈"],[4,"進入紀錄","↳"],[5,"按讚","♥"]]],
   ["歷史資料","#b48cff",[[7,"歷史直播場次","▤"],[3,"送禮者","◇"],[8,"使用者","◎"]]],["影片工具","#f0ad4e",[[27,"批量剪輯","✂"],[29,"整理 MP4","🗂"],[32,"批量截 20 張","📸"],[34,"YouTube 上傳","▶"],[45,"手機錄屏","📱"],[40,"Chrome 上傳限速","🌐"],[25,"語音轉字幕","🎙"]]],
-  ["電腦與檔案","#45d483",[[43,"精選／審核 開關","⏯"],[16,"電腦效能","▦"],[39,"🧪 實驗工作區","🧪"],[17,"開播統計","↗"],[35,"主播特性","🧭"],[36,"每週報告","📰"],[12,"錄音／錄影","◉"],[19,"FLV 待處理","▧"],[20,"影片庫重整","⊞"],[21,"清理工具","✧"],[22,"LOG 與問題","⇪"],[46,"自動處理紀錄","🕘"],[47,"小檔備份","🗂"],[48,"HEVC 壓縮試算","🧪"],[49,"硬碟健康紀錄","🩺"],[50,"主播總覽","👤"],[53,"一頁健檢","🩺"],[57,"E → R 搬硬碟","💽"],[55,"顯示卡供需","🎛"],[56,"YouTube 隔離區抽查","🗑"],[51,"一天的時間軸","📅"],[52,"匯出場次表","📤"],[15,"LIVE 時移（BETA）","◷"]]],
+  ["電腦與檔案","#45d483",[[43,"精選／審核 開關","⏯"],[16,"電腦效能","▦"],[39,"🧪 實驗工作區","🧪"],[17,"開播統計","↗"],[35,"主播特性","🧭"],[36,"每週報告","📰"],[12,"錄音／錄影","◉"],[19,"FLV 待處理","▧"],[20,"影片庫重整","⊞"],[21,"清理工具","✧"],[22,"LOG 與問題","⇪"],[46,"自動處理紀錄","🕘"],[47,"小檔備份","🗂"],[48,"HEVC 壓縮試算","🧪"],[49,"硬碟健康紀錄","🩺"],[50,"主播總覽","👤"],[53,"一頁健檢","🩺"],[57,"E → R 搬硬碟","💽"],[58,"合併重複場次","⧉"],[55,"顯示卡供需","🎛"],[56,"YouTube 隔離區抽查","🗑"],[51,"一天的時間軸","📅"],[52,"匯出場次表","📤"],[15,"LIVE 時移（BETA）","◷"]]],
   ["設定","#9aa5b3",[[11,"設定","⚙"],[10,"主播清單","☷"],[18,"主播分類","◐"],[24,"連線管控／縮編","⛽"],[23,"送禮動畫","❋"],[9,"連線診斷","⌁"],[14,"線上更新","⟳"],[13,"升級資訊","✦"]]]];
 const NAV_OPEN0=["總覽","目前直播","歷史資料","影片工具"];   /* V0.6.95 左邊選單分組可以收合：預設只打開常用的，其他按標題展開（目前這頁所在的組一定打開） */
 function applyTheme(mode){S.mode=mode;const t=THEMES[mode]||THEMES.dark,r=document.documentElement.style;for(const k in t)r.setProperty("--"+k,t[k]);document.documentElement.dataset.mode=mode;}
@@ -7248,7 +7249,7 @@ streamPage(5,"按讚 Likes · 分段統計",host=>{const vt=new VT(host,{key:"li
 
 /* ================= 7 歷史直播場次 ================= */
 PAGES[7]={render(pg,arg){this.uf=typeof arg==="string"?arg:"";pg.innerHTML=`<div class="pg fill"><div class="row"><h1 class="title">歷史直播場次</h1><select id="seCat" style="display:none"></select><span class="grow"></span>
-<button disabled title="這個整理工具會開對話框、改檔案，請在電腦本機操作">⧉ 合併重複場次</button><button disabled title="請在電腦本機操作">🩺 重整並統計場次</button><button id="seSA" title="找出時長不合理的場次（例如顯示 20 多小時），用最後一筆資料推算正確時長，勾選後修正（可復原）">⏱ 偵測場次異常</button><button disabled title="請在電腦本機操作">🗂 整理影片檔名</button><button disabled title="會刪除檔案，請在電腦本機操作">🧹 清理影片／錄音檔</button></div>
+<button onclick="go(58)" title="同一場直播被程式重開、斷電切成好幾段 → 合成一場（影片照時間接著播，不重新輸出）">⧉ 合併重複場次</button><button disabled title="請在電腦本機操作">🩺 重整並統計場次</button><button id="seSA" title="找出時長不合理的場次（例如顯示 20 多小時），用最後一筆資料推算正確時長，勾選後修正（可復原）">⏱ 偵測場次異常</button><button disabled title="請在電腦本機操作">🗂 整理影片檔名</button><button disabled title="會刪除檔案，請在電腦本機操作">🧹 清理影片／錄音檔</button></div>
 <div class="hero row" id="seF" style="display:none"><b id="seFT"></b><span class="grow"></span><button id="seFX">✕ 顯示全部主播</button></div><div id="seT" style="flex:1;display:flex;flex-direction:column;min-height:0"></div>
 <div class="panel" id="seC" style="display:none;margin-top:6px;flex:none"><div class="bt"><span id="seCT">場次圖表</span><span class="grow"></span><span class="sub">灰色虛線＝已開播還沒監控（推算）· 線＝人流 · 點＝高價禮物　設定 → 歷史場次圖表 可調</span></div><canvas id="seCv" style="width:100%;height:80px;display:block"></canvas></div></div>`;
     this.vt=new VT($("#seT"),{key:"sessions",sort:this.uf?[3,true]:[3,true],cols:[TC(0,"ID",62,{al:"c"}),TC(1,"主播",125),TC(2,"暱稱",145),TC(3,"開播（TikTok）",145,{al:"c"}),TC(4,"結束",145,{al:"c"}),TC(5,"直播總時長",90,{al:"c"}),TC(6,"錄製時長",90,{al:"c"}),TC(7,"錄製區間",105,{al:"c"}),TC(8,"鑽石",85,{al:"r"}),TC(9,"按讚",75,{al:"r"}),TC(10,"累積觀眾",95,{al:"r"}),TC(11,"留言",75,{al:"r"}),TC(12,"狀態",85,{al:"c"}),TC(13,"MP4",85,{al:"r",css:r=>r[13]==="轉檔中"?"color:#fff;background:#c62845;font-weight:800;text-align:center":""}),TC(14,"剪輯",80,{al:"c",css:r=>r[14]?"color:#3fb6f2;font-weight:800":""}),TC(15,"字幕",60,{al:"c",css:r=>r[15]?"color:#f5a524;font-weight:800":""})],
@@ -7797,6 +7798,35 @@ function migFabInit(){   /* V1.1.20 搬硬碟切換／收尾中：右下角浮�
     tm=setTimeout(chk,3000);};
   setTimeout(chk,3000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)chk();});}
 setTimeout(()=>{try{migFabInit();}catch(e){}},2500);
+async function mrgMount(root){   /* V1.1.25 ⧉ 合併重複場次 */
+  if(!root)return;const E=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const get=async u=>{try{return await (typeof api==="function"?api:J)(u);}catch(e){return null;}};
+  const post=async(u,o)=>{const f=(typeof kPost==="function"?kPost:rvPost);return (await f(u,o))||{};};
+  const T=s=>{if(!s)return"—";const d=new Date(String(s).replace(" ","T"));return isNaN(d)?String(s).slice(5,16):d.toLocaleString("zh-TW",{hour12:false,month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});};
+  const off=new Set();let I=null,tm=0;
+  const draw=()=>{if(!root.isConnected)return;const sc=I&&I.scan,R=I&&I.run;let h=`<div class="mrgHead"><b>⧉ 合併重複場次</b><div class="snote">同一位主播、TikTok 開播時間一樣（相差 1 分鐘內）的場次＝同一場直播，只是程式重開、斷電、斷線被切成好幾段。合併後留言、禮物、送禮者、觀看人數都歸到同一場；<b>影片不重新輸出</b>，回放照時間軸一段接一段播，中間沒錄到的會自動跳過。合併前自動備份資料庫。直播中的場次不會動（等它下播）。</div></div>`;
+    if(R&&R.state==="running")h+=`<div class="mrgBox">⏳ 合併中… ${R.done}/${R.n}（先備份資料庫）</div>`;
+    else if(R&&(R.state==="done"||R.state==="error"))h+=`<div class="mrgBox ${R.state==="done"?"ok":"bad"}">${R.state==="done"?`✔ 合併了 ${R.done} 組${R.fails.length?`，${R.fails.length} 組沒合併（${E(R.fails[0][1])}）`:""}${R.backup?`<br><small>合併前的資料庫備份：${E(R.backup)}</small>`:""}`:"✖ "+E(R.message||"失敗")}</div>`;
+    if(!I||I.scanning&&!sc)h+=`<div class="mrgBox">🔎 找可以合併的場次…</div>`;
+    else if(sc&&sc.error)h+=`<div class="mrgBox bad">✖ 找的時候出錯：${E(sc.error)}</div>`;
+    else if(sc){const G=sc.groups||[];const on=G.filter(g=>!off.has(g.ids.join(",")));
+      h+=`<div class="mrgBar"><span>找到 <b>${G.length}</b> 組可以合併${sc.skipped?`（另有 ${sc.skipped} 組還在直播，先不動）`:""}</span><button class="btn pill" data-m="rescan">🔎 重新找</button>${G.length?`<button class="btn pill" data-m="all">${on.length===G.length?"全部取消":"全部勾選"}</button><button class="btn pill start" data-m="run" ${on.length?"":"disabled"}>⧉ 合併勾選的 ${on.length} 組</button>`:""}</div>`;
+      if(!G.length)h+=`<div class="mrgBox ok">✔ 沒有需要合併的場次</div>`;
+      h+=G.map(g=>{const k=g.ids.join(","),ck=!off.has(k),S=g.sessions||[],nc=S.reduce((a,x)=>a+x.comments,0),nd=S.reduce((a,x)=>a+x.diamonds,0),nv=S.reduce((a,x)=>a+x.videos,0);
+        return `<label class="mrgG ${ck?"on":""}"><input type="checkbox" data-k="${k}" ${ck?"checked":""}><div><div class="mrgT"><b>${E(g.name)}</b> <small>@${E(g.user)}</small> · ${T(S[0]&&S[0].start)} 開播 · <b>${S.length} 段</b> → 1 場</div>
+        <div class="mrgS">${S.map((x,i)=>`<span>#${x.id} ${T(x.start)}～${T(x.end).slice(-5)} · 💬${x.comments} · 🎁${x.gifts}${x.diamonds?` (💎${x.diamonds})`:""} · 🎬${x.videos}</span>`).join("")}</div>
+        <div class="mrgS"><small>合併後：💬 ${nc} 則 · 💎 ${nd} · 🎬 ${nv} 段影片照時間接著播 · 留下編號 #${Math.max(...g.ids)}</small></div></div></label>`;}).join("");
+      if(sc.more)h+=`<div class="snote">還有 ${sc.more} 組，這批合併完再按「重新找」</div>`;}
+    root.innerHTML=h;
+    root.querySelectorAll("input[data-k]").forEach(c=>c.onchange=()=>{c.checked?off.delete(c.dataset.k):off.add(c.dataset.k);draw();});
+    root.querySelectorAll("[data-m]").forEach(b=>b.onclick=async e=>{e.preventDefault();const m=b.dataset.m,G=(sc&&sc.groups)||[];
+      if(m==="all"){const allOn=G.every(g=>!off.has(g.ids.join(",")));G.forEach(g=>allOn?off.add(g.ids.join(",")):off.delete(g.ids.join(",")));draw();return;}
+      if(m==="rescan"){await get("/api/pc/merge/scan?force=1");tick();return;}
+      if(m==="run"){const on=G.filter(g=>!off.has(g.ids.join(",")));if(!confirm(`合併 ${on.length} 組場次？\n\n留言、禮物、影片都會歸到同一場（影片不重新輸出）。\n合併前會自動備份資料庫。`))return;
+        b.disabled=true;const r=await post("/api/pc/merge/run",{groups:on.map(g=>g.ids)});if(typeof toast==="function")toast((r.ok?"⧉ ":"✖ ")+(r.message||""),3500);tick();}});};
+  const tick=async()=>{clearTimeout(tm);if(!root.isConnected)return;I=await get("/api/pc/merge");if(I&&!I.scan&&!I.scanning&&!(I.run&&I.run.state==="running")){await get("/api/pc/merge/scan");I=await get("/api/pc/merge");}
+    draw();tm=setTimeout(tick,I&&(I.scanning||(I.run&&I.run.state==="running"))?1500:15000);};
+  tick();}
 async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（照 SortCut「R 碟清空搬移」的樣子） */
   const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   const G=b=>b==null?"—":b>=1e12?(b/1e12).toFixed(2)+" TB":b>=1e9?(b/1e9).toFixed(1)+" GB":b>=1e6?(b/1e6).toFixed(1)+" MB":Math.round(b/1e3)+" KB";
@@ -7969,6 +7999,7 @@ PAGES[51]={render(pg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding
 PAGES[50]={render(pg,arg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding:14px;max-width:820px"><div id="hoRoot"></div></div>`;hostMount(pg.querySelector("#hoRoot"),arg||window.HOST_U);}};   /* TK_V1.0.42 */
 PAGES[54]={render(pg,arg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding:14px;max-width:900px"><div id="gfsRoot"></div></div>`;gfsMount(pg.querySelector("#gfsRoot"),arg||window.GIFS_U);}};   /* TK_V1.0.75 */
 PAGES[56]={render(pg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding:14px;max-width:960px"><div id="yhcRoot"></div></div>`;yhcMount(pg.querySelector("#yhcRoot"));}};   /* TK_V1.0.97 */
+PAGES[58]={render(pg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding:14px;max-width:900px"><div id="mrgRoot"></div></div>`;mrgMount(pg.querySelector("#mrgRoot"));}};   /* V1.1.25 */
 PAGES[57]={render(pg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding:14px;max-width:900px"><div id="migRoot"></div></div>`;migMount(pg.querySelector("#migRoot"));}};   /* V1.1.07 */
 PAGES[55]={render(pg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding:14px;max-width:900px"><div id="gsdRoot"></div></div>`;gsdMount(pg.querySelector("#gsdRoot"));}};   /* TK_V1.0.84 */
 PAGES[53]={render(pg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding:14px;max-width:820px"><div id="hpRoot"></div></div>`;hpMount(pg.querySelector("#hpRoot"));}};   /* TK_V1.0.69 */
