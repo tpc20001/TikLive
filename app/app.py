@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.23"
+APP_VERSION = "1.1.24"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -26128,23 +26128,28 @@ $r | ConvertTo-Json -Depth 4 -Compress
             E0 = S.get('errors') or []; E1 = [e for e in E0 if 'WinError 2' not in str(e[1])]
             if len(E1) != len(E0): self._mig_upd(errors=E1)
         except Exception: pass
-        if not os.path.isdir(src):
+        if not os.path.isdir(src):                                            # V1.1.24 外接 E 可能只是短暫斷線：連續 10 分鐘都不在才算拔掉
+            T.setdefault('gone_t', time.time())
+            if time.time() - T['gone_t'] < 600: T.update(stage='wait', msg=f'{a} 暫時讀不到（外接盒斷線？）'); return T
             T.update(stage='done', gone=True); self._mig_upd(phase='done', t_done=time.time(), clean={'files': int(T.get('deleted') or 0), 'bytes': int(T.get('deleted_b') or 0), 'extra': int(T.get('extra') or 0), 'err': 0, 'junk': int(T.get('junk') or 0), 'gone': True})
             self._wd_log(f'💽 搬硬碟：{a} 已經拔掉，搬硬碟完成'); return T
+        T.pop('gone_t', None)
         if not os.path.isdir(dst): T.update(stage='wait'); return T
+        walk_err = []                                                         # V1.1.24 列資料夾出錯（E 斷線）→ 這一輪不能算「處理完」
         try: con = self._mig_db(); man = {r[0].lower(): (r[1], r[2], r[3]) for r in con.execute('SELECT rel, size, mtime, crc FROM f')}; con.close()
         except Exception: man = {}
-        now = time.time(); stable = 60 if fast else 600; left_n = left_b = 0; nd = bd = 0
-        for dp_, dirs, files in os.walk(src, topdown=False):
-            if self._mig_load().get('phase') != 'verify' or _app_closing(): break
+        now = time.time(); stable = 60 if fast else 600; left_n = left_b = 0; nd = bd = 0; broke = False
+        for dp_, dirs, files in os.walk(src, topdown=False, onerror=walk_err.append):
+            if self._mig_load().get('phase') != 'verify' or _app_closing(): broke = True; break
             rel_d = os.path.relpath(dp_, src)
             if rel_d != '.' and Path(rel_d).parts[0].lower() in self.MIG_SKIP: continue
             low_ = {x.lower() for x in files}
             for nm in files:
-                if self._mig_load().get('phase') != 'verify' or _app_closing(): break
+                if self._mig_load().get('phase') != 'verify' or _app_closing(): broke = True; break
                 sp = os.path.join(dp_, nm); rel = os.path.relpath(sp, src)
                 try: st = os.stat(sp)
-                except Exception: continue
+                except FileNotFoundError: continue
+                except Exception: left_n += 1; continue
                 if now - st.st_mtime < stable: left_n += 1; left_b += st.st_size; continue
                 try:
                     if self._mig_junk_kind(nm, low_, sp, st):
@@ -26168,20 +26173,44 @@ $r | ConvertTo-Json -Depth 4 -Compress
                         T['extra'] = int(T.get('extra') or 0) + 1
                     os.remove(sp); nd += 1; bd += st.st_size
                     T['deleted'] = int(T.get('deleted') or 0) + 1; T['deleted_b'] = int(T.get('deleted_b') or 0) + st.st_size
-                except StopIteration: break
+                except StopIteration: broke = True; break                     # V1.1.24 被叫停 → 這一輪不算完
                 except FileNotFoundError: continue                                # V1.1.22 已經不在了（處理過）＝不是錯誤
                 except Exception as ex:
                     left_n += 1; left_b += st.st_size; T['err'] = int(T.get('err') or 0) + 1
                     if T['err'] <= 20: self._mig_err(f'收尾 {rel}：{ex}')
+            if broke: break
             if rel_d != '.':
                 try: os.rmdir(dp_)
                 except Exception: pass
+        if walk_err: self._mig_err(f'收尾：{a} 有 {len(walk_err)} 個資料夾讀不到（{walk_err[0]}），下一輪再試'); T['err'] = int(T.get('err') or 0) + len(walk_err)
         T.update(left_n=left_n, left_b=left_b, keep_n=0, keep_b=0, t_last=time.time(), cur='', stage='idle')
         if nd: self._wd_log(f'💽 搬硬碟（從 {b} 執行中）：{a} 上確認後刪了 {nd} 個（{bd / 1e9:.1f} GB），還剩 {left_n} 個')
-        if left_n == 0 and not T.get('err') and self._mig_load().get('phase') == 'verify':
+        if left_n == 0 and not walk_err and not broke and not T.get('err') and self._mig_load().get('phase') == 'verify' and self._mig_e_count(src, S) == 0:   # V1.1.24 再數一次真的是空的才算完成
             self._mig_upd(phase='done', t_done=time.time(), clean={'files': int(T.get('deleted') or 0), 'bytes': int(T.get('deleted_b') or 0), 'extra': int(T.get('extra') or 0), 'err': 0, 'junk': int(T.get('junk') or 0)})
             T['ready'] = True; self._wd_log(f'💽 搬硬碟完成：{a} 上的都確認過、刪掉了（{a} 現在是空的，可以拔掉）')
         return T
+
+    def _mig_e_count(self, src, S=None, limit=1):
+        """E 上（略過系統資料夾）還有幾個檔；數到 limit 就停。讀不到資料夾回傳 -1."""
+        n = 0; bad = []
+        try:
+            for dp_, dirs, files in os.walk(src, onerror=bad.append):
+                if dp_.rstrip('\\/') == str(src).rstrip('\\/'): dirs[:] = [d for d in dirs if d.lower() not in self.MIG_SKIP]
+                n += len(files)
+                if n >= limit: return n
+        except Exception: return -1
+        return -1 if bad else n
+
+    def _mig_reopen(self):
+        """V1.1.24 誤判「搬硬碟完成」：E 還接著、上面還有檔 → 回到「從 R 執行、慢慢清 E」接著做."""
+        S = self._mig_load()
+        if S.get('phase') != 'done' or not S.get('tail_t') or time.time() - float(S.get('t_done') or 0) > 30 * 86400: return False
+        src = self._mig_root(S['src']); dst = self._mig_root(S['dst'])
+        if not (os.path.isdir(src) and os.path.isdir(dst)): return False
+        if self._mig_e_count(src, S) <= 0: return False
+        self._mig_upd(phase='verify', t_reopen=time.time()); self._mig_rt()['tail'] = {}
+        self._wd_log(f"💽 搬硬碟：{S['src']} 上還有檔（上次誤判完成），回到「從 {S['dst']} 執行、慢慢清 {S['src']}」接著做")
+        self._mig_tail_start(); return True
 
     def _mig_tail_start(self):
         rt = self._mig_rt()
@@ -26340,6 +26369,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
 
     def _mig_boot(self):
         """程式啟動時：切換後重開、資料已經在 R → 進入「確認」；還在複製就接著複製."""
+        try:
+            if self._mig_reopen(): pass                                         # V1.1.24 誤判完成 → 接著清
+        except Exception: pass
         S = self._mig_load(); ph = S.get('phase')
         if S.get('cur_tmp'):                                                    # 上次複製到一半斷電：半截的暫存檔刪掉
             try: Path(S['cur_tmp']).unlink()
@@ -26407,6 +26439,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
         S = self._mig_load(); rt = self._mig_rt(); now = time.time()
         try:                                                                    # V1.1.10 取樣停了（例如換版時被舊的停掉）→ 再開
             H_ = rt.get('hist') or []
+            if S.get('phase') == 'done' and not rt.get('reopen_t') or (S.get('phase') == 'done' and time.time() - float(rt.get('reopen_t') or 0) > 300):
+                rt['reopen_t'] = time.time()
+                if self._mig_reopen(): S = self._mig_load()                      # V1.1.24
             if S.get('phase') in ('switched', 'verify') and not rt.get('tail_on'): self._mig_tail_start()   # V1.1.21 從 R 執行後也接著慢慢刪   # V1.1.20 收尾停了就再開
             if S.get('phase') in ('copy', 'final', 'cleaning', 'handoff', 'switched', 'verify') and (not H_ or now - H_[-1]['t'] > 20):
                 if rt.get('samp_on') and H_ and now - H_[-1]['t'] > 30: rt['samp_on'] = False
