@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.27"
+APP_VERSION = "1.1.28"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -2982,6 +2982,10 @@ class MainWindow(QMainWindow):
         try: self.sysmon=SysMonitor(); self._sysmon_drives()
         except Exception: self.sysmon=None
         try: _ResLink.get().attach(self)                                     # TK_V1.0.84 跟 SortCut 講：TikLive 優先用電腦
+        except Exception: pass
+        try:                                                                    # V1.1.28 使用者 11/17 20:21：搬硬碟完成，把積欠的 FLV 全部排進去轉（一次）
+            fl2_ = Path(PACKAGE_ROOT) / '_DB_SSD' / 'flv_catchup_1117.done'
+            if not fl2_.exists(): QTimer.singleShot(45000, self._flv_catchup)
         except Exception: pass
         try:                                                                    # V1.1.13 使用者 11/17：YouTube 改成舊的場次先傳（一次）
             fl_ = Path(PACKAGE_ROOT) / '_DB_SSD' / 'yt_order_old.done'
@@ -27810,6 +27814,24 @@ $r | ConvertTo-Json -Depth 4 -Compress
         est = max(2 * b / hdd, b / conv) + 10 * len(rows) if rows else 0
         tot = sum(r['bytes'] for r in self._flv_rows)
         self.flv_sel_lab.setText(f'共 {len(self._flv_rows)} 場 · {self._fmt_b(tot)}　｜　勾選 {len(rows)} 場 · {self._fmt_b(b)}' + (f' · 預估約 {self._fmt_dur(est)}' if rows else ''))
+
+    def _flv_catchup(self):
+        """V1.1.28 一次：硬碟上以前留下、還沒轉的 FLV（含 FLV轉檔失敗 資料夾）全部排進「FLV 待處理」，
+        照原本的流程一部一部轉（先搬到 SSD → 轉 MP4，要重新壓縮的用顯示卡 → 進影片庫）。正在錄的不動."""
+        fl = Path(PACKAGE_ROOT) / '_DB_SSD' / 'flv_catchup_1117.done'
+        if fl.exists(): return
+        try: fl.parent.mkdir(parents=True, exist_ok=True); fl.write_text(str(time.time()), encoding='utf-8')
+        except Exception: pass
+        def run_():
+            try:
+                rows = self._flv_rows_scan(set(self._active_rec_dirs()))
+                dirs = [r['dir'] for r in rows if not r.get('ssd')]
+                gb = sum(r['bytes'] for r in rows if not r.get('ssd')) / 1e9
+                if not dirs: self._wd_log('🎞 積欠的 FLV：沒有要轉的'); return
+                self._wd_log(f'🎞 積欠的 FLV：{len(dirs)} 場（{gb:.1f} GB）全部排進「FLV 待處理」，一部一部轉（要重新壓縮的用顯示卡）')
+                self._ui_call.emit(lambda d=dirs: self._flv_go(d))
+            except Exception as ex: self._wd_log(f'🎞 積欠的 FLV 排隊失敗：{ex}')
+        threading.Thread(target=run_, name='TikLiveFlvCatchup', daemon=True).start()
 
     def _flv_go(self, dirs=None):
         sel = list(dirs) if dirs is not None else self._flv_checked()
