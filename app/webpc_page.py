@@ -7195,7 +7195,7 @@ const HP={t:0,sid:0,R:null,page:null,
     if(play!==false&&this.el)this.el.play().catch(()=>{});this.t=t;this.sync();},
   lvCur(){const v=this.el;if(this.lvm==="vod"&&this.vod)return this.vod.start+(v.currentTime||0);if(this.lvm==="live"&&this.lvT0!=null)return this.lvT0+(v.currentTime||0);return this.t;},
   dataReady(D){this.sync();},
-  rowMenu(r,e){const ls=HP.R?HP.R.live_start:0,t=+r[2]||0;menu([{label:`⏩ 跳到這個時間　${fmtClk(ls+t)}（直播 ${fmtE(t)}）`,act:()=>HP.seek(t,true)},{label:"⏪ 跳到前 10 秒並播放（看前因後果）",act:()=>HP.seek(t-10,true)},{label:"⏸ 跳過去但不播放",act:()=>{HP.pause();HP.seek(t,false);}}],e.clientX,e.clientY);},
+  rowMenu(r,e){const ls=HP.R?HP.R.live_start:0,t=+r[2]||0;menu([{label:`⏩ 跳到這個時間　${fmtClk(ls+t)}（直播 ${fmtE(t)}）`,act:()=>HP.seek(Math.max(0,t-0.5),true)},   /* V1.1.19 早 0.5 秒落地：送禮動畫完整出現 */{label:"⏪ 跳到前 10 秒並播放（看前因後果）",act:()=>HP.seek(t-10,true)},{label:"⏸ 跳過去但不播放",act:()=>{HP.pause();HP.seek(t,false);}}],e.clientX,e.clientY);},
   tlSeek(e,down){const r=$("#hpTl").getBoundingClientRect(),x=Math.max(0,Math.min(1,(e.clientX-r.left-8)/(r.width-16)));const rs=this.recStart,dur=this.total-rs;let t,play=true;
     if(rs>0){if(x<=0.05){t=rs*x/0.05;play=false;}else t=rs+dur*(x-0.05)/0.95;}else t=this.total*x;this.seek(t,play&&(!this.paused()||down));},
   drawTl(){const c=$("#hpTl canvas");if(!c)return;const r=c.getBoundingClientRect(),dpr=devicePixelRatio||1;c.width=r.width*dpr;c.height=r.height*dpr;const g=c.getContext("2d");g.setTransform(dpr,0,0,dpr,0,0);

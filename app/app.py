@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.18"
+APP_VERSION = "1.1.19"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -44942,12 +44942,13 @@ function infoHtml(){const d=RP.d,T=d.total;const rec=segsFor("stream").reduce((a
 ${vf.length?`<p>影片 ${vf.length} 個檔，共 ${mb>=1000?(mb/1000).toFixed(1)+" GB":mb.toFixed(0)+" MB"}${mbh?`，看 1 小時約用 ${mbh>=1000?(mbh/1000).toFixed(1)+" GB":mbh.toFixed(0)+" MB"} 流量`:""}。用行動網路或 ngrok 免費版（每月流量有限）時，建議切到「🎧 只聽聲音」（約 29 MB／小時）。</p>`:""}
 ${d.files.some(f=>f.kind==="flv")&&!vf.length?"<p>這場的影片還沒合併成 MP4（直播中或尚未合併），手機先用聲音播放；合併完成後就能看畫面。</p>":""}
 ${!d.files.length?"<p>這場沒有錄影也沒有錄音，按 ▶ 會讓留言照時間播放。</p>":""}</div>`;}
+function rpJump(){return (UI.jump===undefined||isNaN(+UI.jump))?3:+UI.jump;}
 function paint(force){
   if(!RP)return;const d=RP.d,t=RP.t;
   if(force||Math.abs(t-RP.lastPaint)>=0.25){RP.lastPaint=t;
     $("#tcur").textContent=hms(t);$("#treal").textContent=clock(d.live_start+t);drawTL();
     const ic=bs(d.chat,t),ig=bs(d.gifts,t),ij=bs(d.joins,t);
-    if(RP.playing)try{gfxReplay(d.gifts,t,r=>r[0],r=>({k:gfxKey(r[5],r[2]),gid:r[5],name:r[2],nick:r[1],count:+r[3]||1,dia:+r[4]||0}));}catch(x){}   // V0.6.46
+    if(RP.playing)try{gfxReplay(d.gifts,t-rpJump(),r=>r[0],   /* V1.1.19 送禮動畫跟著「點了跳過去 +N 秒」的延遲（畫面比資料晚 N 秒）一起延後 */r=>({k:gfxKey(r[5],r[2]),gid:r[5],name:r[2],nick:r[1],count:+r[3]||1,dia:+r[4]||0}));}catch(x){}   // V0.6.46
     if(RP.cum.length<=d.gifts.length&&!RP.cumDone){let a=0;RP.cum=d.gifts.map(g=>a+=g[4]);RP.cumDone=true;}
     const dia=ig?RP.cum[ig-1]:0;let vw=0;const iv=bs(d.vs,t);if(iv)vw=d.vs[iv-1][1];
     const at=(L)=>{const i=bs(L,t);return i?L[i-1][1]:0;},cnt=L=>{let lo=0,hi=L.length;while(lo<hi){const m=(lo+hi)>>1;if(L[m]<=t)lo=m+1;else hi=m;}return lo;};
@@ -45093,7 +45094,9 @@ async function viewRP(id,at,how){
   rl.onscroll=()=>{if(performance.now()-(RP.autoT||0)<250)return;if(RP.tab==="info"||RP.tab==="top")return;
     RP.follow=false;$("#follow").style.display="block";
     if(rl.scrollTop<120)listGrow(-1);else if(rl.scrollHeight-rl.scrollTop-rl.clientHeight<120)listGrow(1);};
-  rl.onclick=e=>{const r=e.target.closest(".ev[data-t]");if(!r)return;RP.follow=true;$("#follow").style.display="none";const jo=(UI.jump===undefined||isNaN(+UI.jump))?3:+UI.jump;seek(Math.max(0,parseFloat(r.dataset.t)+jo),true);toast("跳到 "+r.querySelector("i").textContent+"（"+(jo>=0?"+":"−")+Math.abs(jo)+" 秒）");};
+  rl.onclick=e=>{const r=e.target.closest(".ev[data-t]");if(!r)return;RP.follow=true;$("#follow").style.display="none";const jo=rpJump(),g=r.classList.contains("g");
+    seek(Math.max(0,parseFloat(r.dataset.t)+jo-(g?0.5:0)),true);   /* V1.1.19 點禮物：早 0.5 秒落地，播放 0.5 秒後送禮動畫完整出現 */
+    toast("跳到 "+r.querySelector("i").textContent+"（"+(jo>=0?"+":"−")+Math.abs(jo)+" 秒"+(g?"，送禮動畫馬上出現":"")+"）");};
   $("#follow").onclick=()=>{RP.follow=true;$("#follow").style.display="none";renderList(true);};
   const tl=$("#tl");const tAt=ev=>{const r=tl.getBoundingClientRect();return Math.max(0,Math.min(1,(ev.clientX-r.left)/r.width))*RP.d.total;};
   tl.onpointerdown=ev=>{RP.drag=true;tl.setPointerCapture(ev.pointerId);RP.t=tAt(ev);paint(true);};
@@ -45105,7 +45108,7 @@ async function viewRP(id,at,how){
   if(UI.rpTab&&UI.rpTab!=="chat"){const tb=document.querySelector(`#rtabs button[data-k="${UI.rpTab}"]`);if(tb)setTimeout(()=>tb.click(),0);}
   if(+UI.autoplay)setTimeout(()=>{if(RP&&!RP.playing)seek(RP.t,true);},300);
   if(RP.mode==="video"||RP.mode==="afile"){const loc=locate(startT,RP.mode);if(loc){RP.fi=loc.s.f;RP.pend={pos:loc.t-loc.s.start+loc.s.off,play:false};m.src=B+d.files[loc.s.f].url;}}
-  if(at&&d.live_start){const jo=how==="hl"?0:(UI.jump===undefined||isNaN(+UI.jump))?3:+UI.jump;const t=Math.max(0,Math.min(d.total,at-d.live_start+jo));     // V0.6.15 從送禮者的禮物跳過來
+  if(at&&d.live_start){const jo=how==="hl"?0:(UI.jump===undefined||isNaN(+UI.jump))?3:+UI.jump;const t=Math.max(0,Math.min(d.total,at-d.live_start+jo-(how==='hl'?0:0.5)));     // V0.6.15 從送禮者的禮物跳過來（V1.1.19 早 0.5 秒，送禮動畫完整出現）
     if(UI.rpTab!=="gifts"){const tb=document.querySelector('#rtabs button[data-k="gifts"]');if(tb)setTimeout(()=>tb.click(),0);}
     setTimeout(()=>{if(!RP)return;RP.follow=true;seek(t,true);toast(how==="hl"?`✨ 從精彩片段開始播（${hms(at-d.live_start)}）`:`從禮物時間 ${hms(at-d.live_start)} ${jo>=0?"+":"−"}${Math.abs(jo)} 秒開始播`);},400);}
 }
