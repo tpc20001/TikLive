@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.25"
+APP_VERSION = "1.1.26"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -41580,6 +41580,27 @@ select.pill{appearance:auto}.hsum{color:var(--sub);font-size:12px;margin:8px 2px
 .back{background:none;border:0;color:var(--vline);font-size:15px;padding:2px 0 8px}
 textarea{width:100%;height:120px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);font-size:16px;padding:12px;outline:none}
 #m{margin-top:10px;padding:10px;border-radius:10px;display:none}.ok{background:#12352a;color:var(--green)}.err{background:#3a1820;color:#ff6b81}
+.devb{border:0;cursor:pointer;font:inherit}
+/* V1.1.26 平板版：橫著看回放時，右邊分成 4 格（直線貫穿上下，左右兩欄各自上下調） */
+.tq{display:none}
+@media (orientation:landscape){body.tabm .rpr.tqon>.rtabs,body.tabm .rpr.tqon>#rl,body.tabm .rpr.tqon>#follow{display:none!important}body.tabm .rpr.tqon>.tq{display:flex}}
+.tq{flex:1;min-height:0;height:100%;position:relative;--tqx:50%;--tqyL:55%;--tqyR:45%}
+.tqc{display:flex;flex-direction:column;min-width:0;min-height:0;height:100%}
+#tqL{width:var(--tqx)}#tqR{flex:1}
+#tqL .tqp:first-child{height:var(--tqyL)}#tqR .tqp:first-child{height:var(--tqyR)}
+.tqc .tqp:last-child{flex:1}
+.tqp{display:flex;flex-direction:column;min-height:40px;min-width:0;overflow:hidden;position:relative;background:var(--card,transparent)}
+.tqhd{display:flex;align-items:center;gap:4px;padding:3px 6px;background:var(--head);border-bottom:1px solid var(--line);font-size:12.5px}
+.tqhd select{background:transparent;color:var(--strong);border:0;font:inherit;font-weight:800;padding:2px;max-width:70%}
+.tqhd em{font-style:normal;color:var(--sub);font-size:11px;margin-left:auto}
+.tqb{flex:1;overflow:auto;min-height:0;-webkit-overflow-scrolling:touch}
+.tqf{position:absolute;right:8px;bottom:8px;display:none;border:0;border-radius:14px;padding:4px 10px;background:var(--accent);color:#fff;font-size:12px;cursor:pointer;z-index:3}
+.tqv{width:12px;cursor:col-resize;flex:0 0 12px;display:flex;align-items:center;justify-content:center;touch-action:none;background:var(--line)}
+.tqh{height:12px;cursor:row-resize;flex:0 0 12px;display:flex;align-items:center;justify-content:center;touch-action:none;background:var(--line)}
+.tqv i{width:3px;height:36px;border-radius:2px;background:var(--sub);opacity:.6}.tqh i{height:3px;width:36px;border-radius:2px;background:var(--sub);opacity:.6}
+.tqv.drag,.tqh.drag{background:var(--accent)}
+.tqb{container-type:inline-size}
+@container (max-width:340px){.tqb .ev{flex-wrap:wrap;gap:0 6px;padding:5px 8px}.tqb .ev>i{font-size:11px;opacity:.8}.tqb .ev>span{flex:1 1 100%;min-width:0;word-break:break-word}.tqb .ev>b{margin-left:auto}}
 .rtabs{display:flex;background:var(--head);border-bottom:1px solid var(--line)}
 .rtabs button{flex:1;background:none;border:0;border-bottom:2px solid transparent;color:var(--headtext);padding:8px 0;font-size:13px}
 .rtabs button.on{color:var(--strong);border-color:var(--accent);font-weight:800}
@@ -43497,7 +43518,7 @@ nav button,nav button.tbg,nav button.tset{flex:1 0 auto;white-space:nowrap;overf
 .qsBtn{background:transparent;border:0;color:inherit;font-size:17px;padding:2px 6px;cursor:pointer}
 
 </style></head><body>
-<header><div class="bar"><div class="logo"><i></i>TikLive Monitor<span class="pc pc-__PCROLE__">__PCNAME__</span></div><button id="inst" class="inst" hidden>📲 安裝 App</button><div class="rt"><div id="clk" class="clk"></div><a class="topc" href="__BASE__/pc" title="切換成和電腦版一樣的介面（適合在電腦的瀏覽器打開）" onclick="try{localStorage.setItem('tlm_view','pc')}catch(e){}">🖥 網頁版</a><span class="ver" title="程式版本">V__APPVER__</span></div></div>
+<header><div class="bar"><div class="logo"><i></i>TikLive Monitor<span class="pc pc-__PCROLE__">__PCNAME__</span></div><button id="inst" class="inst" hidden>📲 安裝 App</button><div class="rt"><div id="clk" class="clk"></div><a class="topc" href="__BASE__/pc" title="切換成和電腦版一樣的介面（適合在電腦的瀏覽器打開）" onclick="try{localStorage.setItem('tlm_view','pc')}catch(e){}">🖥 網頁版</a><button id="devb" class="topc devb" title="切換手機版／平板版（平板版：橫著看回放時，右邊分成 4 格）"></button><span class="ver" title="程式版本">V__APPVER__</span></div></div>
 <nav id="tabs"><button data-t="live">直播中<em id="nlive" hidden></em></button><button data-t="hist">歷史紀錄</button><button data-t="fx" class="tbg" title="影片快速瀏覽 v2：每幾秒一張圖排滿畫面，選起來初剪">檔案總管</button><button data-t="rv" class="tbg" title="主播審核：每位主播所有場次每 2 分鐘一張圖，快速決定 S／A／E／F">🗂 審核</button><button data-t="hl" class="tbg" title="每天自動找出的精彩片段，點一段直接播">✨ 精選</button><button data-t="tools" class="tset tbg">工具<em id="ntodo" class="ntodo" hidden></em></button><button data-t="set" class="tset">設定</button></nav></header>
 <main id="v"></main><div class="toast" id="toast"></div>
 <script>
@@ -45319,6 +45340,53 @@ function infoHtml(){const d=RP.d,T=d.total;const rec=segsFor("stream").reduce((a
 ${vf.length?`<p>影片 ${vf.length} 個檔，共 ${mb>=1000?(mb/1000).toFixed(1)+" GB":mb.toFixed(0)+" MB"}${mbh?`，看 1 小時約用 ${mbh>=1000?(mbh/1000).toFixed(1)+" GB":mbh.toFixed(0)+" MB"} 流量`:""}。用行動網路或 ngrok 免費版（每月流量有限）時，建議切到「🎧 只聽聲音」（約 29 MB／小時）。</p>`:""}
 ${d.files.some(f=>f.kind==="flv")&&!vf.length?"<p>這場的影片還沒合併成 MP4（直播中或尚未合併），手機先用聲音播放；合併完成後就能看畫面。</p>":""}
 ${!d.files.length?"<p>這場沒有錄影也沒有錄音，按 ▶ 會讓留言照時間播放。</p>":""}</div>`;}
+/* V1.1.26 手機版／平板版：預設看螢幕大小（短邊 ≥ 600 = 平板），右上角可以切換，每台記自己的 */
+function devMode(){let m="";try{m=localStorage.getItem("tlm_dev")||"";}catch(e){}if(m==="phone"||m==="tablet")return m;
+  const s=Math.min(screen.width||0,screen.height||0);return s>=600&&("ontouchstart" in window||navigator.maxTouchPoints>0)?"tablet":"phone";}
+function devApply(){const t=devMode()==="tablet";document.body.classList.toggle("tabm",t);const b=document.getElementById("devb");if(b)b.textContent=t?"▭ 平板":"📱 手機";}
+function devInit(){devApply();const b=document.getElementById("devb");if(b)b.onclick=()=>{const n=devMode()==="tablet"?"phone":"tablet";try{localStorage.setItem("tlm_dev",n);}catch(e){}devApply();
+  if(typeof toast==="function")toast(n==="tablet"?"▭ 平板版：橫著看回放時，右邊分成 4 格（可以拖線調大小、每格選要看什麼）":"📱 手機版",3500);if(RP&&typeof tqPaint==="function"){tqSetup();paint(true);}};}
+setTimeout(()=>{try{devInit();}catch(e){}},0);
+/* V1.1.26 平板回放 4 格：0 左上、1 左下、2 右上、3 右下；中間一條直線貫穿上下，左右兩欄的橫線各自調 */
+const TQ_OPT=[["chat","💬 留言"],["gifts","🎁 禮物"],["songs","🎵 點歌"],["joins","👋 進入"],["top","🏆 排行"],["info","ℹ 資訊"]];
+let TQ=null;
+function tqLoad(){let o={};try{o=JSON.parse(localStorage.getItem("tlm_tq")||"{}")||{};}catch(e){}
+  return {tabs:Array.isArray(o.tabs)&&o.tabs.length===4?o.tabs:["chat","songs","gifts","joins"],x:o.x||50,yL:o.yL||58,yR:o.yR||42};}
+function tqSave(){if(!TQ)return;try{localStorage.setItem("tlm_tq",JSON.stringify({tabs:TQ.p.map(p=>p.tab),x:TQ.x,yL:TQ.yL,yR:TQ.yR}));}catch(e){}}
+function tqSetup(){const rpr=document.querySelector(".rpr");if(!rpr||!RP)return;let q=document.getElementById("tq");
+  const on=document.body.classList.contains("tabm");rpr.classList.toggle("tqon",on);if(!on){if(q)q.remove();TQ=null;return;}
+  if(q&&TQ)return;const L=tqLoad();TQ={x:L.x,yL:L.yL,yR:L.yR,p:L.tabs.map(tab=>({tab,lastI:-1,lastTab:"",follow:true,autoT:0}))};
+  const pane=i=>`<div class="tqp" data-p="${i}"><div class="tqhd"><select>${TQ_OPT.map(([k2,n])=>`<option value="${k2}">${n}</option>`).join("")}</select><em></em></div><div class="tqb"></div><button class="tqf">↓ 回到播放位置</button></div>`;
+  q=document.createElement("div");q.className="tq";q.id="tq";
+  q.innerHTML=`<div class="tqc" id="tqL">${pane(0)}<div class="tqh" data-c="L" title="上下拖曳調整（點兩下恢復）"><i></i></div>${pane(1)}</div><div class="tqv" title="左右拖曳調整（點兩下恢復）"><i></i></div><div class="tqc" id="tqR">${pane(2)}<div class="tqh" data-c="R" title="上下拖曳調整（點兩下恢復）"><i></i></div>${pane(3)}</div>`;
+  rpr.appendChild(q);const lay=()=>{q.style.setProperty("--tqx",TQ.x+"%");q.style.setProperty("--tqyL",TQ.yL+"%");q.style.setProperty("--tqyR",TQ.yR+"%");};lay();
+  q.querySelectorAll(".tqp").forEach(el=>{const i=+el.dataset.p,P=TQ.p[i],sel=el.querySelector("select"),box=el.querySelector(".tqb"),fb=el.querySelector(".tqf");
+    sel.value=P.tab;sel.onchange=()=>{P.tab=sel.value;P.lastTab="";P.follow=true;fb.style.display="none";tqSave();tqPane(i,true);};
+    box.onscroll=()=>{if(performance.now()-(P.autoT||0)<250||P.tab==="info"||P.tab==="top")return;if(P.follow){P.follow=false;fb.style.display="block";}};
+    fb.onclick=()=>{P.follow=true;fb.style.display="none";P.lastTab="";tqPane(i,true);};
+    box.onclick=e=>{const r=e.target.closest(".ev[data-t]");if(!r)return;const jo=rpJump(),g=r.classList.contains("g");TQ.p.forEach((p,j)=>{p.follow=true;p.lastTab="";const f=q.querySelector(`.tqp[data-p="${j}"] .tqf`);if(f)f.style.display="none";});
+      seek(Math.max(0,parseFloat(r.dataset.t)+jo-(g?0.5:0)),true);toast("跳到 "+((r.querySelector("i")||{}).textContent||"")+"（"+(jo>=0?"+":"−")+Math.abs(jo)+" 秒"+(g?"，送禮動畫馬上出現":"")+"）");};});
+  const drag=(h,fn,reset)=>{let d=null;h.onpointerdown=e=>{h.setPointerCapture(e.pointerId);h.classList.add("drag");d={r:h.parentElement.getBoundingClientRect(),q:q.getBoundingClientRect()};e.preventDefault();};
+    h.onpointermove=e=>{if(!d)return;fn(e,d);lay();};const end=()=>{if(!d)return;h.classList.remove("drag");d=null;tqSave();};h.onpointerup=end;h.onpointercancel=end;
+    h.ondblclick=()=>{reset();lay();tqSave();};};
+  drag(q.querySelector(".tqv"),(e,d)=>{TQ.x=Math.max(15,Math.min(85,(e.clientX-d.q.left)/d.q.width*100));},()=>{TQ.x=50;});
+  q.querySelectorAll(".tqh").forEach(h=>{const c=h.dataset.c;drag(h,(e,d)=>{const v=Math.max(8,Math.min(92,(e.clientY-d.r.top)/d.r.height*100));if(c==="L")TQ.yL=v;else TQ.yR=v;},()=>{if(c==="L")TQ.yL=58;else TQ.yR=42;});});
+  tqPaint(true);}
+function tqPane(i,force){if(!TQ||!RP)return;const q=document.getElementById("tq");if(!q)return;const el=q.querySelector(`.tqp[data-p="${i}"]`);if(!el)return;
+  const P=TQ.p[i],box=el.querySelector(".tqb"),d=RP.d,t=RP.t,tab=P.tab,em=el.querySelector(".tqhd em");
+  if(d[tab]&&Array.isArray(d[tab])){const n=bs(d[tab],t);em.textContent=k(n)+" / "+k(d[tab].length);}else em.textContent="";
+  if(tab==="info"){if(force||P.lastTab!==tab){P.lastTab=tab;box.innerHTML=infoHtml();}return;}
+  if(tab==="top"){const n=bs(d.gifts,t);if(!force&&n===P.lastI&&P.lastTab===tab)return;P.lastI=n;P.lastTab=tab;
+    const m=new Map();for(let j=0;j<n;j++){const g=d.gifts[j];const o=m.get(g[1])||[0,0];o[0]+=g[4];o[1]++;m.set(g[1],o);}
+    const L=[...m.entries()].sort((a,b)=>b[1][0]-a[1][0]).slice(0,50);
+    box.innerHTML=`<div class="more">到 ${clock(d.live_start+t)} 為止的送禮排行</div>`+(L.map((x,j)=>`<div class="ev rk"><i>${j+1}</i><u style="max-width:60%">${esc(x[0])}</u><span style="color:var(--sub);font-size:12px">${x[1][1]} 次</span><b>💎 ${k(x[1][0])}</b></div>`).join("")||'<div class="empty">這個時間點前還沒有人送禮</div>');return;}
+  const arr=d[tab]||[],n=bs(arr,t);
+  if(!P.follow&&P.lastTab===tab)return;
+  if(!force&&n===P.lastI&&P.lastTab===tab)return;P.lastI=n;P.lastTab=tab;
+  box.innerHTML=listHtml(tab,arr,Math.max(0,n-120),Math.min(arr.length,n+60),n,t);
+  const nl=box.querySelector(".nowline");if(nl){P.autoT=performance.now();box.scrollTop=Math.max(0,nl.offsetTop-box.clientHeight*0.72);}}
+function tqPaint(force){if(!TQ)return;const q=document.getElementById("tq");if(!q||!q.offsetParent)return;for(let i=0;i<4;i++)tqPane(i,force);}
+window.addEventListener("resize",()=>{if(RP&&TQ)setTimeout(()=>tqPaint(true),120);});
 function rpJump(){return (UI.jump===undefined||isNaN(+UI.jump))?3:+UI.jump;}
 function paint(force){
   if(!RP)return;const d=RP.d,t=RP.t;
@@ -45334,7 +45402,7 @@ function paint(force){
       gifts:k(ig),diamonds:k(dia),repeat:k(at(d.rj||[])),likes:k(at(d.lk||[])),shares:k(cnt(d.sh||[])),follows:k(cnt(d.fo||[]))};
     for(const [k2] of RC12){const e=document.getElementById("rc_"+k2);if(e&&e.textContent!==V12[k2])e.textContent=V12[k2];}if(RP.rsOn)for(const [k2] of RC12){const e=document.getElementById("rs_"+k2);if(e&&e.textContent!==V12[k2])e.textContent=V12[k2];}
     fsPaint();try{sxSubPaint(t);}catch(x){}try{snPaint(t);}catch(x){}const tb=$("#rtabs");tb.querySelector('[data-k=chat] em').textContent=k(ic);tb.querySelector('[data-k=gifts] em').textContent=k(ig);tb.querySelector('[data-k=joins] em').textContent=k(ij);const sgE=tb.querySelector('[data-k=songs] em');if(sgE&&d.songs)sgE.textContent=k(bs(d.songs,t));}
-  renderList(force);}
+  renderList(force);try{tqPaint(force);}catch(x){}}   /* V1.1.26 平板 4 格 */
 function tick(){if(!RP)return;
   if(RP.mode==="text"){if(RP.playing){const n=performance.now();RP.t=Math.min(RP.d.total,RP.t+(n-RP.tick0)/1000);RP.tick0=n;if(RP.t>=RP.d.total){RP.playing=false;btns();}}}
   else if(RP.mode==="yt"){const yt=ytCurT();if(yt!=null&&!RP.drag)RP.t=Math.min(RP.d.total,yt);}
@@ -45419,7 +45487,7 @@ async function viewRP(id,at,how){
 <div class="ctl"><button id="pp">▶</button><button id="bk">−${+UI.skip||10}</button><button id="fw">+${+UI.skip||10}</button><div class="tm"><b id="tcur">00:00:00</b> / ${hms(d.total)}<small id="treal"></small></div><button id="rplive" class="rplive" hidden title="回到直播（約 10 秒延遲）">LIVE</button><button id="rsbtn" class="rsbtn2" title="切換 12 格：下面／A 卡片（影片左右）／E 模糊背景（影片左右）／隱藏"></button><button id="md"></button><button id="rpph" hidden title="切換：TikLive 錄的影片 ⇄ 手機錄屏（時間軸對好了）">📱 手機</button><button id="fs">⤢</button><div class="szm" id="szm"><button data-s="n">一般大小</button><button data-s="b">放大影片</button><button data-s="f">全螢幕</button></div></div>
 <canvas id="tl"></canvas><div id="htl"></div><div id="hact"></div><div id="hclips"></div><div class="rcards" id="rcards">${RC12.map(([k2,t])=>`<div><span>${t}</span><b id="rc_${k2}">0</b></div>`).join("")}</div></div><div class="split" id="split" title="拖曳調整影片／留言大小（點兩下恢復）"><i></i></div>
 <div class="rpr"><div class="rtabs" id="rtabs"><button data-k="chat" class="on">留言<em></em></button><button data-k="gifts">禮物<em></em></button><button data-k="songs">點歌<em></em></button><button data-k="joins">進入<em></em></button><button data-k="top">排行</button><button data-k="info">資訊</button></div>
-<div class="rlist" id="rl"></div><button class="follow" id="follow">↓ 回到播放位置</button></div></div>`;miniStart();$("#rped").onclick=()=>edOpen(d.id,RP?RP.t:null);try{RP.htl=htlMount($("#htl"),{sid:d.id,key:"m",total:()=>RP?RP.d.total:1,t:()=>RP?RP.t:0,playing:()=>!!(RP&&RP.playing),seek:(t,p)=>{if(!RP)return;RP.follow=true;seek(t,p);}});}catch(x){}   /* V0.6.85 縮圖時間軸 */try{haMount($("#hact"),{sid:d.id,u:d.u,name:d.name,pause:()=>{try{me().pause();}catch(x){}}});}catch(x){}   /* V0.6.86 保存等級、只錄聲音、刪除 */try{cpMount($("#hcp"),$("#stage"),{sid:d.id,pause:()=>{try{me().pause();}catch(x){}},media:()=>me()});}catch(x){}   /* V0.7.14 剪好的放在完整影片右邊，下面 « ●•••• » 切換 */try{sxSubInit(d.id,()=>$("#stage"),$(".ctl"));}catch(x){}   /* V0.6.52 字幕 */
+<div class="rlist" id="rl"></div><button class="follow" id="follow">↓ 回到播放位置</button></div></div>`;miniStart();TQ=null;try{tqSetup();}catch(x){}$("#rped").onclick=()=>edOpen(d.id,RP?RP.t:null);try{RP.htl=htlMount($("#htl"),{sid:d.id,key:"m",total:()=>RP?RP.d.total:1,t:()=>RP?RP.t:0,playing:()=>!!(RP&&RP.playing),seek:(t,p)=>{if(!RP)return;RP.follow=true;seek(t,p);}});}catch(x){}   /* V0.6.85 縮圖時間軸 */try{haMount($("#hact"),{sid:d.id,u:d.u,name:d.name,pause:()=>{try{me().pause();}catch(x){}}});}catch(x){}   /* V0.6.86 保存等級、只錄聲音、刪除 */try{cpMount($("#hcp"),$("#stage"),{sid:d.id,pause:()=>{try{me().pause();}catch(x){}},media:()=>me()});}catch(x){}   /* V0.7.14 剪好的放在完整影片右邊，下面 « ●•••• » 切換 */try{sxSubInit(d.id,()=>$("#stage"),$(".ctl"));}catch(x){}   /* V0.6.52 字幕 */
   try{RP.sn=snMount($("#stage"),d.id,d.snaps,t=>seek(t,RP.playing),t=>clock(d.live_start+t),d.snap_layout);}catch(x){RP.sn=false;}   /* V0.6.62 只錄聲音的快照 */
   RP.jpg=!!RP.sn&&!!(d.snaps&&d.snaps.length);btns();   /* TK_V0.9.93 沒有截圖：先看影片，MP4/JPG 換過去可以截 */   /* V0.7.07 預設先看 20 張圖（有影片也是），按 MP4/JPG 換看影片 */
   $("#rsbtn").onclick=e=>{e.stopPropagation();rsCycle();};RP.rsKey="";
