@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.26"
+APP_VERSION = "1.1.27"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -26140,10 +26140,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
         try: con = self._mig_db(); man = {r[0].lower(): (r[1], r[2], r[3]) for r in con.execute('SELECT rel, size, mtime, crc FROM f')}; con.close()
         except Exception: man = {}
         now = time.time(); stable = 60 if fast else 600; left_n = left_b = 0; nd = bd = 0; broke = False
-        for dp_, dirs, files in os.walk(src, topdown=False, onerror=walk_err.append):
+        for dp_, dirs, files in os.walk(src, onerror=walk_err.append):          # V1.1.27 由上往下走，系統資料夾（回收筒、System Volume Information）直接不進去（進去會「拒絕存取」→ 永遠算不完）
             if self._mig_load().get('phase') != 'verify' or _app_closing(): broke = True; break
             rel_d = os.path.relpath(dp_, src)
-            if rel_d != '.' and Path(rel_d).parts[0].lower() in self.MIG_SKIP: continue
+            if rel_d == '.': dirs[:] = [x for x in dirs if x.lower() not in self.MIG_SKIP]
             low_ = {x.lower() for x in files}
             for nm in files:
                 if self._mig_load().get('phase') != 'verify' or _app_closing(): broke = True; break
@@ -26180,15 +26180,23 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     left_n += 1; left_b += st.st_size; T['err'] = int(T.get('err') or 0) + 1
                     if T['err'] <= 20: self._mig_err(f'收尾 {rel}：{ex}')
             if broke: break
-            if rel_d != '.':
+        try:                                                                  # 空資料夾收掉（由下往上；系統資料夾不碰）
+            for dp_, dirs, files in os.walk(src, topdown=False):
+                rel_d = os.path.relpath(dp_, src)
+                if rel_d == '.' or Path(rel_d).parts[0].lower() in self.MIG_SKIP: continue
                 try: os.rmdir(dp_)
                 except Exception: pass
+        except Exception: pass
+        walk_err = [e for e in walk_err if not any(k in str(getattr(e, 'filename', '') or e).lower() for k in self.MIG_SKIP)]
         if walk_err: self._mig_err(f'收尾：{a} 有 {len(walk_err)} 個資料夾讀不到（{walk_err[0]}），下一輪再試'); T['err'] = int(T.get('err') or 0) + len(walk_err)
         T.update(left_n=left_n, left_b=left_b, keep_n=0, keep_b=0, t_last=time.time(), cur='', stage='idle')
         if nd: self._wd_log(f'💽 搬硬碟（從 {b} 執行中）：{a} 上確認後刪了 {nd} 個（{bd / 1e9:.1f} GB），還剩 {left_n} 個')
         if left_n == 0 and not walk_err and not broke and not T.get('err') and self._mig_load().get('phase') == 'verify' and self._mig_e_count(src, S) == 0:   # V1.1.24 再數一次真的是空的才算完成
-            self._mig_upd(phase='done', t_done=time.time(), clean={'files': int(T.get('deleted') or 0), 'bytes': int(T.get('deleted_b') or 0), 'extra': int(T.get('extra') or 0), 'err': 0, 'junk': int(T.get('junk') or 0)})
-            T['ready'] = True; self._wd_log(f'💽 搬硬碟完成：{a} 上的都確認過、刪掉了（{a} 現在是空的，可以拔掉）')
+            try: used_ = shutil.disk_usage(src).used
+            except Exception: used_ = 0
+            self._mig_upd(phase='done', t_done=time.time(), clean={'files': int(T.get('deleted') or 0), 'bytes': int(T.get('deleted_b') or 0), 'extra': int(T.get('extra') or 0), 'err': 0, 'junk': int(T.get('junk') or 0), 'sys_b': used_})
+            T['ready'] = True; T['fast'] = False
+            self._wd_log(f'💽 搬硬碟完成：{a} 上的都確認過、刪掉了（{a} 現在是空的，可以拔掉；還用著的 {used_ / 1e9:.1f} GB 是 Windows 自己的回收筒、系統還原、檔案系統本身，TikLive 不碰，格式化就清掉）')
         return T
 
     def _mig_e_count(self, src, S=None, limit=1):
@@ -44353,7 +44361,7 @@ async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（�
       ${j.src} 上的每 10 分鐘自動比對一輪：${j.dst} 上有一樣的 → 確認後刪；${j.dst} 上沒有的 → 放回 ${j.dst} 同一個位置再刪；不一樣的不蓋掉 ${j.dst} 在用的，放到 ${j.dst}\\從E槽多出來的。全部處理完會顯示「搬硬碟完成」，${j.src} 就是空的。<br>
       <b>現在：</b>${T.stage==="確認後刪除"?"比對、刪除中…"+(T.cur?" "+esc(String(T.cur).split(/[\\/]/).pop()):""):"等下一輪"} · 已刪 ${(T.deleted||0).toLocaleString()} 個（${G(T.deleted_b||0)}）${T.t_last?` · ${j.src} 上還有 <b>${(T.left_n||0).toLocaleString()} 個（${G(T.left_b||0)}）</b>`:""}${T.copied?` · 放回 ${T.copied} 個`:""}${T.extra?` · 不一樣的 ${T.extra} 個`:""}${T.err?` · 錯誤 ${T.err} 個（下一輪再試）`:""}</div>
       <button class="btn mgWide" data-mg="tail_final" ${T.fast?"disabled":""}>${T.fast?"⚡ 全速處理中…":"⚡ 全速處理（不用等）"}</button>`;}
-    if(ph==="done"&&j.clean)h+=`<div class="migStep ok">✔ ${j.src} 清空了 ${j.clean.files} 個檔（${G(j.clean.bytes)}）${j.clean.extra?`，另外 ${j.clean.extra} 個切換後才有的放到 ${j.dst}\\從E槽多出來的`:""}${j.clean.junk?`（其中 ${j.clean.junk} 個是暫存檔／已轉好的 FLV，直接刪）`:""}${j.clean.err?`，錯誤 ${j.clean.err} 個`:""}。</div>`;
+    if(ph==="done"&&j.clean)h+=`<div class="migStep ok">✔ ${j.src} 清空了 ${j.clean.files} 個檔（${G(j.clean.bytes)}）${j.clean.extra?`，另外 ${j.clean.extra} 個切換後才有的放到 ${j.dst}\\從E槽多出來的`:""}${j.clean.junk?`（其中 ${j.clean.junk} 個是暫存檔／已轉好的 FLV，直接刪）`:""}${j.clean.err?`，錯誤 ${j.clean.err} 個`:""}。<br><b>搬硬碟完成，${j.src} 可以拔掉了。</b>${j.clean.sys_b?`${j.src} 上還用著的 ${G(j.clean.sys_b)} 是 Windows 自己的（資源回收筒、系統還原、檔案系統本身），不是 TikLive 的資料，格式化就清掉。`:""}</div>`;
     const JK=j.junk||{},JL=[["tmp","寫到一半的暫存檔（.copying／.part…）","不搬，清空 "+j.src+" 時一起刪"],["flv_done","已經轉好 MP4 的 FLV","旁邊有同名 MP4：不搬，清空 "+j.src+" 時一起刪"],["flv_todo","還沒轉檔的 FLV","是錄影原始檔：照常搬過去，之後在 "+j.dst+" 轉"]].filter(x=>JK[x[0]]&&JK[x[0]][0]);
     if(JL.length)h+=`<div class="mgSec">🗑 不搬的垃圾／要注意的檔${j.junk_t?`<small style="opacity:.6;font-weight:400">（上一次掃描 ${new Date(j.junk_t*1000).toLocaleString("zh-TW",{hour12:false,month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}）</small>`:""}</div><div class="mgList">${JL.map(([k,t,d])=>`<details><summary><b>${t}</b> ${JK[k][0].toLocaleString()} 個 · ${G(JK[k][1])}<small> — ${d}</small></summary>${JK[k][2].map(p=>`<div class="mgJp">${esc(p)}</div>`).join("")}${JK[k][0]>JK[k][2].length?`<div class="mgJp">…還有 ${(JK[k][0]-JK[k][2].length).toLocaleString()} 個</div>`:""}</details>`).join("")}</div>`;   /* V1.1.12 */
     const rc=j.recent||[];
