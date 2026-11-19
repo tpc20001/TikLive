@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.29"
+APP_VERSION = "1.1.30"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -36345,7 +36345,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
             try:
                 with self._cu_open(u) as r: info = json.loads(r.read().decode('utf-8-sig'))
                 if str(info.get('app') or 'TikLive') != 'TikLive' or not info.get('version'): err = f'{u}：不是 TikLive 的 update.json'; continue
-                need_shell = bool(info.get('shell')) and int(info.get('launcher') or 1) > self._cu_launcher()
+                need_shell = False                                              # V1.1.30 使用者 11/19：以後只熱更新、絕對不換殼（EXE）；雲端有新殼也不提示
+                if bool(info.get('shell')) and int(info.get('launcher') or 1) > self._cu_launcher():
+                    try: self._wd_log(f"☁ 雲端有新的 EXE 外殼（第 {info.get('launcher')} 版），照你的設定不換，只熱更新程式")
+                    except Exception: pass
                 newer_code = self._version_tuple(info['version']) > self._version_tuple(APP_VERSION)
                 R = {'ok': True, 'info': info, 'url': u, 't': time.time(), 'need_shell': need_shell, 'newer_code': newer_code, 'newer': newer_code or need_shell,
                      'cur': APP_VERSION, 'launcher': self._cu_launcher()}

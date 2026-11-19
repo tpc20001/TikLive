@@ -49,6 +49,7 @@ def main():
     ap.add_argument('--dist', default=''); ap.add_argument('--out', default='out'); ap.add_argument('--repo', default='tpc20001/TikLive')
     a = ap.parse_args()
     ver = app_version(); L = launcher_version()
+    if L != 2: raise SystemExit(f'LAUNCHER_VERSION 是 {L}：使用者 11/19 規定以後只熱更新、不換殼，啟動器版本固定 2（要改先問使用者）')
     if a.version: print(ver); return
     if a.launcher: print(L); return
     for f in app_files():
