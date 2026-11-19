@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.35"
+APP_VERSION = "1.1.36"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -2999,6 +2999,8 @@ class MainWindow(QMainWindow):
                     try: (Path(PACKAGE_ROOT) / 'UPDATE' / 'shell_ok.flag').write_text(str(time.time()), encoding='utf-8'); self._wd_log(f'☁ 換 EXE 成功：啟動器第 {self._cu_launcher()} 版、V{APP_VERSION}')
                     except Exception: pass
                 QTimer.singleShot(20000, ok_)
+        except Exception: pass
+        try: self._ret_loop()                                                 # V1.1.36 原檔保留期限（10 分鐘後開始，之後每 30 分鐘）
         except Exception: pass
         try: self._cu_loop()                                                  # V1.1.13 ☁ 雲端更新：1 分鐘後檢查，之後每 6 小時（只提示）
         except Exception: pass
@@ -12950,7 +12952,8 @@ class MainWindow(QMainWindow):
                 L = by.get(s) or []; stt = [x.get('state') for x in L]
                 if any(v in ('wait', 'up') for v in stt): out.add(s); continue
                 names = {p.name for p in (vi.get(s) or [])}
-                done = bool(names) and all(any(x['name'] == n and x.get('state') in ('proc', 'ready') for x in L) for n in names)
+                if any(v == 'proc' for v in stt): out.add(s); continue           # V1.1.36 傳完、YouTube 還在處理：也要等處理好
+                done = bool(names) and all(any(x['name'] == n and x.get('state') == 'ready' for x in L) for n in names)
                 if done: continue
                 r = R.get(U.get(s, ''))
                 if r and r[1]: out.add(s)
@@ -13135,6 +13138,29 @@ class MainWindow(QMainWindow):
                 return 0.35, (f'{drv} 正在搬檔進去' if info['moving'] else f'{drv} 硬碟有點忙（{b:.0f}%）') + '：上傳放慢到 35%', info
             return 1.0, f'{drv} 硬碟閒（{b:.0f}%）：照你設定的速度' if b is not None else f'{drv} 讀不到忙碌度：照你設定的速度', info
         except Exception: return 1.0, '', info
+
+    def _yt_inflow(self, q=None):
+        """V1.1.36 平均一天新增幾部要上傳（照場次開播那天算排進上傳的檔案數；最近 7／14 天、不含今天）。10 分鐘快取."""
+        c = self.__dict__.setdefault('_yt_inf_c', [0.0, None])
+        if time.time() - c[0] < 600 and c[1] is not None: return c[1]
+        q = q or self._yt_q(); by = {}
+        for x in q.get('items') or []:
+            try: by[int(x['sid'])] = by.get(int(x['sid']), 0) + 1
+            except Exception: pass
+        days = {}; today = datetime.now().date()
+        sids = sorted(by)
+        for i in range(0, len(sids), 400):
+            ch = sids[i:i + 400]
+            try:
+                for sid, ep in self._web_db(f"SELECT s.id,{self._WEB_E} FROM sessions s WHERE s.id IN ({','.join('?' * len(ch))})", tuple(ch)):
+                    if not ep: continue
+                    d = datetime.fromtimestamp(float(ep)).date(); age = (today - d).days
+                    if 1 <= age <= 14: days[age] = days.get(age, 0) + by[int(sid)]
+            except Exception: pass
+        a7 = sum(days.get(k, 0) for k in range(1, 8)) / 7.0; a14 = sum(days.get(k, 0) for k in range(1, 15)) / 14.0
+        L = [[(today - timedelta(days=k)).strftime('%m/%d'), days.get(k, 0)] for k in range(14, 0, -1)]
+        out = {'a7': round(a7, 1), 'a14': round(a14, 1), 'days': L}
+        c[0] = time.time(); c[1] = out; return out
 
     def _yt_eta(self, q=None):
         """TK_V1.0.03 排隊全部傳完要幾天：一天能傳幾部＝min(每天最多, YouTube 學到的上限 lim, 最近 7 天實際單日最多)；
@@ -14388,6 +14414,90 @@ try { NLConnect | Out-Null; Unset
         return {'n': len(live), 'bytes': sum(int(x.get('size') or 0) for x in live), 'sessions': len({x.get('sid') for x in live}), 'dirs': dirs,
                 'oldest': min((x['t'] for x in live), default=None), 'newest': max((x['t'] for x in live), default=None), 'low': low}
 
+    # ================= V1.1.36 原檔保留期限（使用者 11/19 21:52） =================
+    #   B、E（不傳 YouTube）：下播超過 ret.be_days（14）天 → 刪 MP4（先截 60 張；留言、禮物、錄音、剪輯成品都留著）
+    #   傳 YouTube、傳好原檔留著（S、A-Dance…）：YouTube 處理好超過 ret.yt_keep_days（7）天 → 移到隔離區 → 跟 YouTube 確認後馬上刪
+    #   傳 YouTube、原檔不留（A、A-Sing、G…）：處理好就移到隔離區 → 確認後馬上刪
+    #   不動：還在 YouTube 排隊／上傳中／處理中的（不受時間限制）、直播／錄影中、⭐ 收藏、標 +1 待剪輯／+2 保存 的場次
+    def _ret_loop(self):
+        app_ = QApplication.instance(); st = getattr(app_, '_tlm_ret', None) if app_ is not None else None
+        if st is None:
+            st = {'on': False, 'last': None}
+            try: setattr(app_, '_tlm_ret', st)
+            except Exception: pass
+        if st.get('on'): return
+        st['on'] = True
+        def run_():
+            try:
+                time.sleep(600)
+                while not _app_closing():
+                    try:
+                        if self.cfg('ret.on'): st['last'] = self._ret_tick()
+                    except Exception as ex: st['last'] = {'err': str(ex)}
+                    for _ in range(180):
+                        if _app_closing(): break
+                        time.sleep(10)
+            finally: st['on'] = False
+        threading.Thread(target=run_, name='TikLiveRetention', daemon=True).start()
+
+    def _ret_tick(self, dry=False, limit=10):
+        now = time.time(); vi = self._vb_index() or {}; sids = sorted(int(s) for s in vi if vi.get(s))
+        if not sids: return {'be': 0, 'yt7': 0, 'ytnow': 0}
+        R = self._grade_rule_of(); U = self._sid_users(sids); busy = set(self._busy_session_ids() or ())
+        try: fav = self._hlf_sids() or {}
+        except Exception: fav = {}
+        notes = self._snote_all()
+        q = self._yt_q(); qst = {}; rdy_t = {}
+        for x in q.get('items') or []:
+            s = int(x['sid']); qst.setdefault(s, set()).add(x.get('state'))
+            if x.get('state') == 'ready': rdy_t[s] = max(rdy_t.get(s, 0), float(x.get('ready_t') or x.get('done_t') or 0))
+        ready = set(self._yt_ready_sids(include_restored=False))
+        endt = {}
+        for i in range(0, len(sids), 400):
+            ch = sids[i:i + 400]
+            try:
+                for sid, ea in self._web_db(f"SELECT id,ended_at FROM sessions WHERE id IN ({','.join('?' * len(ch))}) AND ended_at IS NOT NULL", tuple(ch)):
+                    try: endt[int(sid)] = datetime.fromisoformat(str(ea)).timestamp()
+                    except Exception: pass
+            except Exception: pass
+        be_d = max(1, int(self.cfg('ret.be_days') or 14)); yk_d = max(0, int(self.cfg('ret.yt_keep_days') or 7))
+        be, yt7, ytnow = [], [], []
+        for s in sids:
+            if s in busy or fav.get(s): continue
+            lv = (notes.get(str(s)) or {}).get('lv')
+            if lv is not None and int(lv) >= 1: continue                       # +1 待剪輯、+2 保存：不照時間刪
+            r = R.get(U.get(s, '')); 
+            if not r: continue
+            g, yt, keep = r
+            if yt:
+                if s in ready:
+                    if not keep: ytnow.append(s)
+                    elif now - rdy_t.get(s, now) >= yk_d * 86400: yt7.append(s)
+                continue                                                        # 排隊中、上傳中、處理中、還沒排：不受時間限制
+            if g in ('B', 'E') and s in endt and now - endt[s] >= be_d * 86400 and not (qst.get(s, set()) & {'wait', 'up', 'proc'}): be.append(s)
+        out = {'be': len(be), 'yt7': len(yt7), 'ytnow': len(ytnow), 't': now}
+        if dry: return dict(out, be_l=be[:50], yt7_l=yt7[:50], ytnow_l=ytnow[:50])
+        mv = (ytnow + yt7)[:60]
+        if mv and not self._yt_state().get('del_busy'):
+            try: self._yt_delete_ready(mv)
+            except Exception: pass
+        n = 0
+        for s in be[:limit]:
+            if _app_closing() or not self.cfg('ret.on'): break
+            for _ in range(3600):
+                if not self._purge_state().get('running'): break
+                time.sleep(1)
+            r_ = self._web_db('SELECT username FROM sessions WHERE id=?', (s,))
+            if not r_: continue
+            try:
+                rr = self.delete_videos(str(r_[0][0]), s, only_mp4=True, force_shots=True, why='ret')
+                if rr.get('ok'): n += 1
+            except Exception: pass
+        if n or mv: self._wd_log(f"🗓 原檔保留期限：B／E 下播超過 {be_d} 天刪 MP4 {n} 場（還有 {max(0, len(be) - n)} 場下一輪）；YouTube 傳好的移到隔離區 {len(mv)} 場（其中留原檔的等級滿 {yk_d} 天 {len(yt7)} 場）")
+        try: self.__dict__.get('_vb_idx', {}).update(t=0)
+        except Exception: pass
+        out['done_be'] = n; return out
+
     def _yt_hold_auto(self):
         """V1.1.35 使用者 11/19：隔離區不用手動刪。放進來超過 yt.hold_auto_h 小時、而且當下再問 YouTube 一次
         （那部影片還在、已經處理好 processed）→ 自動刪原檔。問不到、找不到、不是 processed 的一律留著（寧可不刪）。30 分鐘做一次."""
@@ -14859,7 +14969,7 @@ try { NLConnect | Out-Null; Unset
                 'linked': bool(tok.get('refresh')), 'email': tok.get('email', ''), 'channel': tok.get('channel', ''), 'want': self._yt_want(),
                 'auth_t': tok.get('t'), 'auth_left': round(7 - (time.time() - float(tok['t'])) / 86400, 2) if tok.get('t') else None, 'auth_bad': st.get('auth_bad') or '',
                 'dev': {'user_code': dv.get('user_code'), 'url': dv.get('url'), 'msg': dv.get('msg'), 'exp': dv.get('exp')} if dv else None,
-                'lim': 0, 'n24': self._yt_24h(q)[0], 'real': self._yt_daily(), 'eta': self._yt_eta(q), 'w24': self._yt_w24_safe(),
+                'lim': 0, 'n24': self._yt_24h(q)[0], 'real': self._yt_daily(), 'eta': self._yt_eta(q), 'inflow': self._yt_inflow(q), 'w24': self._yt_w24_safe(),
                 'long_ok': st.get('long_ok', True), 'long_s': st.get('long_s', ''),
                 'msg': (st.get('msg', '') if st.get('running') or not self.cfg('yt.on') else '上傳程式啟動中…（幾秒內開始）'), 'cur': st.get('cur'), 'speed': round(float(st.get('speed') or 0) * 8 / 1e6, 1),
                 'hdd': self._yt_hdd_view(st), 'today': int(q.get('n') or 0) if q.get('day') == datetime.now().strftime('%Y-%m-%d') else 0,
@@ -17804,7 +17914,7 @@ try { NLConnect | Out-Null; Unset
             items.append(it)
         return {'cats':cats,'items':items,'pw':self._web_pw_set()}
 
-    RULES_KEYS = {'yt.hold_auto_h', 'rec.snap_min', 'conn.rate', 'th.cpu', 'hl.max_gpu', 'yt.mbps', 'history.merge_tol', 'th.cpu_solo', 'conn.stale_mult', 'rec.ssd_min_free', 'health.restart_min', 'hl.max_cpu', 'retry.normal', 'th.min', 'ui.freeze_rest_s', 'reel.max_min', 'hl.keep2s_gb', 'th.alert_h', 'rec.video_min_free', 'reel.keep', 'yt.hold_new_days', 'conn.stale_days', 'yt.daily', 'monitor.silent_min', 'retry.priority', 'th.alert_stop_n', 'hl.max_disk', 'vg.cache_gb', 'th.gpu', 'conn.grace_minutes'}   # V1.1.35 規則說明頁可以直接改的數字（其他設定不能從這裡改）
+    RULES_KEYS = {'yt.hold_auto_h', 'ret.be_days', 'ret.yt_keep_days', 'rec.snap_min', 'conn.rate', 'th.cpu', 'hl.max_gpu', 'yt.mbps', 'history.merge_tol', 'th.cpu_solo', 'conn.stale_mult', 'rec.ssd_min_free', 'health.restart_min', 'hl.max_cpu', 'retry.normal', 'th.min', 'ui.freeze_rest_s', 'reel.max_min', 'hl.keep2s_gb', 'th.alert_h', 'rec.video_min_free', 'reel.keep', 'yt.hold_new_days', 'conn.stale_days', 'yt.daily', 'monitor.silent_min', 'retry.priority', 'th.alert_stop_n', 'hl.max_disk', 'vg.cache_gb', 'th.gpu', 'conn.grace_minutes'}   # V1.1.35 規則說明頁可以直接改的數字（其他設定不能從這裡改）
 
     def _rules_vals(self, ks):
         out = {}
@@ -41772,6 +41882,8 @@ body.rp main{flex:1;min-height:0;padding:0;display:flex;flex-direction:column}
 .ruQuad{display:grid;grid-template-columns:1fr 1fr;gap:4px;max-width:300px;margin:6px 0}.ruQuad span{border:1px solid rgba(127,127,127,.35);border-radius:8px;padding:8px;text-align:center;font-size:12.5px}
 .ruNone{padding:20px;text-align:center;opacity:.7}
 .ruV{display:inline-flex;align-items:center;gap:3px;border-bottom:1px dashed var(--c,#888);cursor:pointer;padding:0 2px;border-radius:4px}.ruV:hover{background:rgba(127,127,127,.15)}.ruV i{font-style:normal;font-size:11px;opacity:.55}.ruV small{font-size:11px;opacity:.6;font-weight:400}.ruV.ed{background:rgba(58,123,213,.15);padding:2px 6px;border-bottom:0;cursor:default}.ruV.done{background:rgba(69,212,131,.3)}.ruIn{width:84px;padding:3px 6px;border-radius:6px;border:1px solid #3a7bd5;background:transparent;color:inherit;font:inherit;font-weight:800}.ruCk{display:inline-flex;align-items:center;gap:3px;font-size:12.5px;opacity:.5;white-space:nowrap}.ruCk.go{opacity:1;color:#45d483;font-weight:800}.ruCk input{transform:scale(1.25)}.ruX{border:0;background:transparent;color:inherit;cursor:pointer;opacity:.6}
+.ytInf{margin:8px 0;padding:8px 12px;border-radius:10px;border:1px solid rgba(77,201,255,.4);background:rgba(77,201,255,.07);line-height:1.6}.ytInf small{opacity:.7}.ytInf .w{color:#f0ad4e}
+.ruWarn{border:2px solid #ff4d6d;background:rgba(255,77,109,.1);border-radius:10px;padding:8px 12px;margin:6px 0 8px;line-height:1.6}
 #migFab{position:fixed;left:10px;bottom:14px;z-index:9680;max-width:min(92vw,420px);padding:8px 14px;border-radius:14px;background:#1d4f7a;color:#fff;box-shadow:0 6px 22px rgba(0,0,0,.45);cursor:pointer;display:flex;flex-direction:column;gap:2px;font-size:14px}#migFab small{opacity:.85;font-size:12px}#migFab.ok{background:#1f7a4a}
 #cuFab{position:fixed;top:8px;right:8px;z-index:9690;display:flex;gap:4px;align-items:stretch}#cuFab .ufGo{display:flex;flex-direction:column;align-items:flex-start;padding:6px 12px;border-radius:12px;border:0;background:#3a7bd5;color:#fff;font-weight:800;font-size:14px;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.45)}#cuFab .ufGo small{font-weight:600;font-size:11px;opacity:.9}#cuFab .ufX{border:0;border-radius:12px;background:rgba(0,0,0,.55);color:#fff;padding:0 10px;cursor:pointer}
 #updFab .ufX{border:0;border-radius:12px;background:rgba(0,0,0,.55);color:#fff;padding:0 10px;cursor:pointer}   /* TK_V0.9.45 */
@@ -44446,22 +44558,23 @@ const RULES=[
   {t:"已經下播的回放",d:"<ul><li>播的是影片庫裡的 MP4，可以直接跳到任何位置（程式一次只送一小段，不會整支讀完）。</li><li>一場有好幾段影片時，照時間軸<b>一段接一段</b>播；中間沒錄到的地方自動跳過。</li><li>影片在傳統硬碟上，硬碟很忙（轉檔、搬檔、搬硬碟）時，開始播放和跳轉會慢一點。設定「手機回放加速」打開後，有人在手機看回放時背景工作全部讓路。</li><li>MP4 已經刪掉的場次：用刪之前截的 60 張圖（或 20 張）在影片的位置左右翻看，留言、禮物、M4A 照舊。</li><li>剪輯成品手機放不出畫面時（HEVC、10-bit…），背景自動用顯示卡轉一份相容的，原檔留著。</li></ul>"},
   {t:"平板版回放（4 格）",d:'<div class="ruQuad"><span>左上<br>💬 留言</span><span>右上<br>🎁 禮物</span><span>左下<br>🎵 點歌</span><span>右下<br>👋 進入</span></div>'+"<ul><li>右上角「📱 手機／▭ 平板」切換（預設看螢幕大小）。平板<b>橫著</b>看回放時，右邊分成 4 格，每格選要看什麼。</li><li>中間一條直線貫穿上下，左右兩欄的橫線<b>各自</b>拖，可以上下不對稱；點兩下恢復。大小和選擇會記住。</li><li>App 以後的修正手機、平板一起改，除非你說「平板更正」。</li></ul>"}]},
  {k:"grade",i:"🏷",c:"#ffc94d",t:"主播等級（🗂 主播審核）",s:[
-  {t:"每個等級的意思與自動規則",d:'<table class="ruT"><tr><th>等級</th><th>自動傳 YouTube</th><th>傳好後原檔</th><th>特別規則</th></tr>'+
-   '<tr><td>'+RU_G("S","無條件保存","#ffc94d")+'</td><td>✔ 最優先</td><td>✔ 留著</td><td>不會被自動刪</td></tr>'+
-   '<tr><td>'+RU_G("A","保存","#45d483")+'</td><td>✔</td><td>移到隔離區</td><td></td></tr>'+
-   '<tr><td>'+RU_G("AD","A-Dance","#56e39f")+'</td><td>✔</td><td>✔ 留著</td><td></td></tr>'+
-   '<tr><td>'+RU_G("AS","A-Sing","#f78fb3")+'</td><td>✔</td><td>移到隔離區</td><td></td></tr>'+
-   '<tr><td>'+RU_G("B","普通","#2ec4b6")+'</td><td>—</td><td>留著</td><td></td></tr>'+
-   '<tr><td>'+RU_G("E","觀察","#4dc9ff")+'</td><td>—</td><td>留著</td><td>C 槽快滿、要停錄影時：F 先停、再來 E、再來未分級</td></tr>'+
-   '<tr><td>'+RU_G("G","只錄聲音","#b48cff")+'</td><td>✔</td><td>移到隔離區</td><td>截 60 張＋字幕做好後才傳</td></tr>'+
+  {t:"每個等級的意思與自動規則",d:'<table class="ruT"><tr><th>等級</th><th>自動傳 YouTube</th><th>原檔（MP4）留多久</th><th>特別規則</th></tr>'+
+   '<tr><td>'+RU_G("S","無條件保存","#ffc94d")+'</td><td>✔ 最優先</td><td>傳好後再留 '+RU_V('ret.yt_keep_days','天',7)+'</td><td>還沒傳好前不受時間限制</td></tr>'+
+   '<tr><td>'+RU_G("A","保存","#45d483")+'</td><td>✔</td><td>傳好就刪</td><td></td></tr>'+
+   '<tr><td>'+RU_G("AD","A-Dance","#56e39f")+'</td><td>✔</td><td>傳好後再留 '+RU_V('ret.yt_keep_days','天',7)+'</td><td></td></tr>'+
+   '<tr><td>'+RU_G("AS","A-Sing","#f78fb3")+'</td><td>✔</td><td>傳好就刪</td><td></td></tr>'+
+   '<tr><td>'+RU_G("B","普通","#2ec4b6")+'</td><td>—</td><td>下播後 '+RU_V('ret.be_days','天',14)+'</td><td></td></tr>'+
+   '<tr><td>'+RU_G("E","觀察","#4dc9ff")+'</td><td>—</td><td>下播後 '+RU_V('ret.be_days','天',14)+'</td><td>C 槽快滿、要停錄影時：F 先停、再來 E、再來未分級</td></tr>'+
+   '<tr><td>'+RU_G("G","只錄聲音","#b48cff")+'</td><td>✔</td><td>傳好就刪</td><td>截 60 張＋字幕做好後才傳</td></tr>'+
    '<tr><td>'+RU_G("F","刪除","#ff4d6d")+'</td><td>✖ 不傳</td><td>—</td><td>按「處置 F」會把這位整個刪掉</td></tr></table>'+
-   "<ul><li>上面是預設值。審核頁「🏷 等級設定」可以新增、改名、改色、排序，也可以改每一級要不要傳 YouTube、傳好原檔要不要留（S、F、G 的特別作用不能刪）。</li><li>「傳 YouTube」的等級：那一場的轉檔、截圖、字幕、預覽圖都做好之後才自動上傳。</li></ul>"},
+   "<ul><li><b>「傳好」＝每個 MP4 都在 YouTube 處理好；刪之前會再問 YouTube 一次確認還在</b>。還在 YouTube 排隊、上傳中、處理中的，<b>不受時間限制</b>（所以理論上原檔不會留超過 14 天，除非排隊一直排不上）。</li><li>上面是預設值。審核頁「🏷 等級設定」可以新增、改名、改色、排序，也可以改每一級要不要傳 YouTube、傳好原檔要不要留（S、F、G 的特別作用不能刪）。</li><li>「傳 YouTube」的等級：那一場的轉檔、截圖、字幕、預覽圖都做好之後才自動上傳。</li></ul>"},
   {t:"審核頁怎麼看",d:"<ul><li>每位主播所有場次、每 2 分鐘一張圖接成一長條（新的在上），用來決定等級。</li><li>圖只拿檔案總管已經做好的預覽圖，不另外跑 FFmpeg；還沒做好的先用 20 張截圖，都沒有就標「預覽圖排隊中」。</li></ul>"}]},
  {k:"lv",i:"🗂",c:"#45d483",t:"場次標記（−2／0／+1／+2）與刪除",s:[
   {t:"四種標記",d:'<div class="ruLv"><span style="--c:#ff4d6d">−2 可丟</span><span style="--c:#f0ad4e">0 未分類</span><span style="--c:#45d483">+1 待剪輯</span><span style="--c:#2ec4b6">+2 保存</span></div>'+"<ul><li>在檔案總管按等級＝存好、自動捲到下一場。</li><li><b>沒按就滑到下一場＝上一場自動標 −2</b>；有選片段的話，那些片段先合併輸出成 1 部剪輯成品。按「↩ 復原自動 −2」可以還原。</li></ul>"},
-  {t:"−2 的場次要刪 MP4 時（重要）",d:RU_F([["標 −2、按刪除","#ff4d6d"],["這位的等級要傳 YouTube？","#f0ad4e"],["先傳 YouTube","#4dc9ff"],["傳好 → 移到隔離區","#b48cff"],["再確認 YouTube → 自動刪","#45d483"]])+
-   "<ul><li>例如 <b>S 級主播的場次標 −2 後，一定要等它傳上 YouTube 才會處理原檔</b>：還沒傳完的先不刪、自動排進 YouTube，傳好才移到「YouTube 已上傳-刪除隔離區」。A、A-Dance、A-Sing、G 也一樣。</li><li>不用傳 YouTube 的等級：直接照你按的刪。</li><li>查不到 YouTube 狀態時<b>寧可先不刪</b>。</li><li><b>隔離區會自己清</b>：放進來超過 "+RU_V('yt.hold_auto_h','小時',24)+"，而且當下再問 YouTube 一次（影片還在、已經處理好）→ 自動刪原檔。問不到、找不到的一律留著。這段時間內可以反悔（隔離區頁「全部搬回去」），也可以自己先抽查、按全部刪。</li><li>還在直播／錄影中的場次<b>不能刪影片</b>。</li></ul>"},
+  {t:"−2 的場次要刪 MP4 時（重要）",d:'<div class="ruWarn">⚠ <b>只要這場有安排要傳 YouTube，就算你在檔案總管標了 −2、按了刪除，原檔也一定等 YouTube 傳完、處理好才會刪。</b></div>'+RU_F([["標 −2、按刪除","#ff4d6d"],["這場有安排傳 YouTube？","#f0ad4e"],["有 → 先不刪，等傳完","#4dc9ff"],["YouTube 處理好","#b48cff"],["隔離區 → 再確認 → 刪","#45d483"]])+
+   "<ul><li><b>「有安排傳 YouTube」</b>包括：① 主播等級設定要傳（S、A、A-Dance、A-Sing、G…），還沒傳完；② 已經在 YouTube 排隊中；③ 正在上傳（傳到一半的也算）；④ 已經傳上去、YouTube 還在處理。四種都一樣：<b>先不刪</b>。</li><li>還沒排進 YouTube 的會自動排進去；傳完、YouTube 處理好之後，才移到「YouTube 已上傳-刪除隔離區」，再問 YouTube 一次確認影片還在，才刪原檔。</li><li>不管從哪裡刪都一樣：檔案總管 −2、整理 MP4、剪輯完刪、刪主播、回放頁、手機、網頁。</li><li>沒有安排傳 YouTube 的場次：直接照你按的刪。</li><li>查不到 YouTube 狀態時<b>寧可先不刪</b>。</li><li>還在直播／錄影中的場次<b>不能刪影片</b>；正在剪輯的那場剪完才刪。</li></ul>"},
   {t:"刪 MP4 之前一定先截圖",d:"<ul><li>不管從哪裡刪 MP4（歷史紀錄、檔案總管、整理 MP4、手機、網頁），刪之前先在影片 10%、20%…100% 各截圖，共 <b>60 張</b>（原檔不完整的 20 張），每張約 100 KB。</li><li>剪輯成品、留言、禮物、錄音全部留著；剪輯成品<b>永久保留</b>。</li><li>有 ⭐ 收藏片段的場次：刪 MP4／轉出時會跳過那些片段。</li></ul>"},
+  {t:"🗓 原檔保留期限（自動）",d:RU_F([["B／E：下播 "+RU_V('ret.be_days','天',14)+"","#2ec4b6"],["刪 MP4（先截 60 張）","#ff4d6d"]])+RU_F([["S／AD：YouTube 傳好","#ffc94d"],["再留 "+RU_V('ret.yt_keep_days','天',7)+"","#f0ad4e"],["隔離區 → 確認 YouTube → 馬上刪","#ff4d6d"]])+RU_F([["A／AS／G：YouTube 傳好","#45d483"],["隔離區 → 確認 YouTube → 馬上刪","#ff4d6d"]])+"<ul><li>每 30 分鐘檢查一次（開程式 10 分鐘後開始）；B／E 一次最多刪 10 場，慢慢來。</li><li><b>不動</b>：還在 YouTube 排隊／上傳中／處理中的、直播／錄影中、有 ⭐ 收藏片段、標 <b>+1 待剪輯</b>或 <b>+2 保存</b>的場次。</li><li>刪的只有 MP4：截圖、預覽圖、字幕、留言、禮物、M4A 錄音、剪輯成品都留著。設定「🗓 原檔保留期限」可以整個關掉。</li></ul>"},
   {t:"程式自己會清的",d:"<ul><li><b>冗餘 14 天+</b>：放超過 14 天、沒有場次紀錄的 MP4（檔案總管「冗餘」那些）。</li><li><b>暫存</b>：只錄聲音的場次留著的 MP4，<b>5 天後</b>沒按「📌 留下」就自動刪。</li><li>每 30 秒一張的預覽圖：C 槽最多 "+RU_V('vg.cache_gb','GB',40)+"，超過從最久沒看的刪；要看時再做。精選用的每 2 秒圖保留 15 天、最多 "+RU_V('hl.keep2s_gb','GB',60)+"。</li></ul>"}]},
  {k:"yt",i:"▶",c:"#ff4d4d",t:"YouTube 上傳",s:[
   {t:"上傳規則",d:"<ul><li>照「主播等級」自動上傳（見主播等級），也可以在 YouTube 上傳頁手動加。隱私預設<b>不公開</b>（搜尋不到，只有拿到網址的人看得到；回放頁可以內嵌 YouTube 跟留言同步播）。</li><li>每 <b>24 小時最多 "+RU_V('yt.daily','個',100)+"</b>，照<b>上傳完成時間滾動</b>算；頁面會顯示第 101 個什麼時候可以開始。額度用完自動等 6 小時。</li><li>速度上限 "+RU_V('yt.mbps','Mbps',20)+"，不搶錄影的網路；可以設只在某個時段開始傳新的。<b>正在傳的那部一定照傳完</b>，不會中途斷。</li></ul>"},
@@ -48505,7 +48618,8 @@ ${I.linked?`<div class="ytRow"><button class="pill ytGo${I.on?" on":""}" data-yt
 <label class="ytCk"><input type="checkbox" data-ys="yt.auto_delete"${I.auto_delete?" checked":""}> 上傳好後原檔移到「YouTube 已上傳-刪除隔離區」（等級設定可以設哪些等級留原檔）</label>
 <button class="pill" data-yt="unlink">取消連結</button></div>
 ${I.long_ok===false?`<div class="ytLong">⚠ <b>你的 YouTube 帳號還不能傳超過 15 分鐘的影片</b>（直播錄影都很長，會被拒絕）。請打開 <a href="https://www.youtube.com/verify" target="_blank" rel="noopener">youtube.com/verify</a>，用你連結的 YouTube 帳號登入、收簡訊驗證，驗證好按 → <button class="pill" data-yt="verified">✔ 我驗證好了</button></div>`:""}${ytHdd(I)}<div class="ytSt"><span>⏳ 排隊 <b>${c.wait||0}</b></span><span>⬆ 上傳中 <b>${c.up||0}</b></span><span>⚙ 處理中 <b>${c.proc||0}</b></span><span>✔ 好了 <b>${c.ready||0}</b></span>${c.fail?`<span class="bad">✖ 失敗 <b>${c.fail}</b></span>`:""}<span>24 小時內 <b>${(I.w24||{}).n??I.today}</b>/${(I.w24||{}).cap??I.daily}</span></div>${ytW24(I.w24)}${(()=>{const E=I.eta;if(!E||!E.n)return "";   /* TK_V1.0.03 全部傳完要幾天 */
-  return `${I.lim?`<details class="ytUp"><summary>🔓 想一天傳超過 ${I.lim} 部？（YouTube「進階功能」）</summary><div>YouTube 說明：<b>進階功能包含「更高的每日上傳量」</b>。開法（只能頻道擁有者，用你連結的那個帳號）：<ol><li>打開 <a href="https://studio.youtube.com" target="_blank" rel="noopener">YouTube Studio</a> → 左下「設定」→「頻道」→「功能使用資格」</li><li>「進階功能」→ 按「取得功能使用權」：<b>用身分證件驗證</b> 或 <b>錄一段影片驗證</b>（不是每個帳號都有這個選項）</li><li>通常 <b>24 小時內</b> 審完、會寄信；第二次被拒要等 30 天才能再試</li><li>沒有這兩個選項的話：頻道持續正常上傳、沒違規，累積夠「頻道紀錄」也會自動開（YouTube 沒公布要多久）</li></ol><small>手機號碼驗證（你已經做了）只開「超過 15 分鐘的影片」，不會增加部數。程式這邊不用改：上限放寬後會自己學到新的部數。</small></div></details>`:""}<div class="ytEta">🗓 排隊 <b>${E.n}</b> 部 · ${E.gb} GB；一天大約傳 <b>${E.rate}</b> 部（${E.why}）→ ${E.days?`約 <b>${E.days}</b> 天後（${E.done_d}）全部傳完`:"今天就傳得完"}<br><small>現在可以傳 ${E.today} 部（${E.today_gb} GB）${E.tom?` · 再下一個 24 小時 ${E.tom} 部（${E.tom_gb} GB）`:""}</small></div>`;})()}${(()=>{const R=I.real;if(!R)return "";const mx=Math.max(1,...R.days.map(d=>d[1]));   /* TK_V0.9.36 實際上傳完成的部數（照紀錄，不是推估） */
+  return `${I.lim?`<details class="ytUp"><summary>🔓 想一天傳超過 ${I.lim} 部？（YouTube「進階功能」）</summary><div>YouTube 說明：<b>進階功能包含「更高的每日上傳量」</b>。開法（只能頻道擁有者，用你連結的那個帳號）：<ol><li>打開 <a href="https://studio.youtube.com" target="_blank" rel="noopener">YouTube Studio</a> → 左下「設定」→「頻道」→「功能使用資格」</li><li>「進階功能」→ 按「取得功能使用權」：<b>用身分證件驗證</b> 或 <b>錄一段影片驗證</b>（不是每個帳號都有這個選項）</li><li>通常 <b>24 小時內</b> 審完、會寄信；第二次被拒要等 30 天才能再試</li><li>沒有這兩個選項的話：頻道持續正常上傳、沒違規，累積夠「頻道紀錄」也會自動開（YouTube 沒公布要多久）</li></ol><small>手機號碼驗證（你已經做了）只開「超過 15 分鐘的影片」，不會增加部數。程式這邊不用改：上限放寬後會自己學到新的部數。</small></div></details>`:""}<div class="ytEta">🗓 排隊 <b>${E.n}</b> 部 · ${E.gb} GB；一天大約傳 <b>${E.rate}</b> 部（${E.why}）→ ${E.days?`約 <b>${E.days}</b> 天後（${E.done_d}）全部傳完`:"今天就傳得完"}<br><small>現在可以傳 ${E.today} 部（${E.today_gb} GB）${E.tom?` · 再下一個 24 小時 ${E.tom} 部（${E.tom_gb} GB）`:""}</small></div>`;})()}${(()=>{const F=I.inflow;if(!F)return "";const lim=+I.daily||0,net=lim-F.a7;   /* V1.1.36 平均一天新增幾部要傳 */
+  return `<div class="ytInf">📥 <b>平均一天新增要傳的</b>：最近 7 天 <b>${F.a7}</b> 部 · 最近 14 天 <b>${F.a14}</b> 部（照場次開播那天、排進上傳的檔案數，不含今天）。每天上限 <b>${lim}</b> 部 → ${net>0?`每天還能多消化積壓約 <b>${Math.round(net)}</b> 部`:`<b class="w">新增的比上限多約 ${Math.round(-net)} 部，排隊會越來越長</b>，可以把上限調高`}<br><small>${F.days.map(([d,n])=>d+" "+n).join(" · ")}</small></div>`;})()}${(()=>{const R=I.real;if(!R)return "";const mx=Math.max(1,...R.days.map(d=>d[1]));   /* TK_V0.9.36 實際上傳完成的部數（照紀錄，不是推估） */
   return `<div class="ytReal"><div class="ytRealH">📊 實際上傳完成（照紀錄${R.first?`，從 ${R.first} 起`:""}）：最近 24 小時 <b>${R.n24}</b> 部 · 滾動 24 小時最多 <b>${R.max24}</b> 部${R.max24_t?`（${R.max24_t} 那時）`:""} · 單日最多 <b>${R.best_day?R.best_day[1]:0}</b> 部${R.best_day?`（${R.best_day[0]}）`:""} · 共 ${R.total} 部</div>
 <div class="ytRealB">${R.days.map(([d,n])=>`<div title="${d}：${n} 部"><b>${n||""}</b><i style="height:${Math.round(n/mx*70)}%"></i><small>${d.slice(3)}</small></div>`).join("")}</div></div>`;})()}
 ${cur?`<div class="ytCur"><div>⬆ #${String(cur.sid).padStart(5,"0")} ${ytE(cur.name)} · ${ytGB(cur.sent)} / ${ytGB(cur.size)} · ${I.speed} Mbps</div><i><u style="width:${pr}%"></u></i></div>`:`<div class="ytMsg">${ytE(I.msg||"")}</div>`}
@@ -51416,8 +51530,12 @@ SETTINGS_SPEC = [
          help='下載更新包限速，不跟錄影搶網路（EXE 外殼約一兩百 MB，2048 KB/s 約 1～2 分鐘）。'),
     dict(key='yt.hold_auto', cat='auto', label='YouTube 隔離區：確認沒問題就自動刪原檔', kind='bool', default=True,
          help='V1.1.35：放進隔離區超過下面的時間、而且當下再問 YouTube 一次（影片還在、已經處理好）→ 自動刪原檔，不用手動按。問不到、找不到的一律留著。截圖、預覽圖、字幕、留言都留著。'),
-    dict(key='yt.hold_auto_h', cat='auto', label='YouTube 隔離區：放進來幾小時後才自動刪', kind='int', default=24, min=0, max=720, step=1, suffix=' 小時',
-         help='這段時間可以反悔（隔離區頁按「全部搬回去」）。0＝確認好就馬上刪。'),
+    dict(key='yt.hold_auto_h', cat='auto', label='YouTube 隔離區：放進來幾小時後才自動刪', kind='int', default=0, min=0, max=720, step=1, suffix=' 小時',
+         help='0（預設，V1.1.36）＝跟 YouTube 確認好就馬上刪。設大一點＝這段時間可以反悔（隔離區頁按「全部搬回去」）。'),
+    dict(key='ret.on', cat='auto', label='🗓 原檔保留期限（照等級自動清 MP4）', kind='bool', default=True,
+         help='V1.1.36：B、E 下播超過下面天數刪 MP4；傳 YouTube 而且留原檔的等級（S、A-Dance…）傳好超過下面天數移到隔離區；原檔不留的等級（A、A-Sing、G…）傳好就移到隔離區；隔離區跟 YouTube 確認後馬上刪。還在 YouTube 排隊／上傳中的不受時間限制；直播中、⭐ 收藏、標 +1／+2 的不動。刪之前一律先截 60 張圖，留言、禮物、錄音、剪輯成品都留著。'),
+    dict(key='ret.be_days', cat='auto', label='🗓 B、E 等級：下播幾天後刪 MP4', kind='int', default=14, min=1, max=365, step=1, suffix=' 天'),
+    dict(key='ret.yt_keep_days', cat='auto', label='🗓 傳好 YouTube、留原檔的等級：原檔再留幾天', kind='int', default=7, min=0, max=365, step=1, suffix=' 天'),
     dict(key='yt.hold_new_days', cat='auto', label='YouTube：最近幾天的場次先不傳', kind='int', default=3, min=0, max=30, step=1, suffix=' 天',
          help='開播在這幾天內的場次先不傳（可能還要合併同一場被拆開的）；0＝不限。已經開始傳的那部照傳完。'),
     dict(key='yt.order', cat='auto', label='YouTube 排隊先傳哪些', kind='choice', default='big', choices=[('大的檔先傳', 'big'), ('照排進來的順序', 'queue'), ('新的場次先傳', 'new'), ('舊的場次先傳', 'old'), ('小的檔先傳', 'small')],
