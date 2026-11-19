@@ -1979,7 +1979,7 @@ body.oldLock{overflow:hidden}
 <body><div id="app"><aside id="side"><div id="sdCount">● 0 / 0 直播間</div><div class="ss"><button class="sstart" id="btnStart">▶ 開始監控</button><button class="sstop" id="btnStop">■ 停止監控</button></div><div id="sdStatus">● 連線中...</div><nav id="nav"></nav><div id="sysBox">電腦狀態讀取中…</div><button id="netBtn">⬇ —
 本日 — MB</button><button id="qBtn" title="排隊轉檔的數量、還要搬到 HDD 的 MP4 大小、全部處理完（轉檔＋搬檔）預估還要多久。點一下看轉檔排隊">🎬 轉檔排隊：讀取中…</button></aside>
 <main><div id="tabsRow"><button id="tabMode" title="點一下切換：展開＝完整直播小卡；收合＝照片＋時長＋鑽石愛心；堆疊＝頭像疊在一起"></button><div id="tabs"></div><div id="miniW"></div><div id="topRight"><span><span id="ver"></span> · 網頁版 · __PCNAME__</span><button id="toPhone" title="切回手機版介面">📱 手機版</button></div></div><section id="page"></section>
-<footer id="statusBar"><span id="sbMsg"></span><button id="themeBtn" title="這個瀏覽器自己的深色／淺色">◐ 深色／淺色</button><span>介面大小</span><button id="zoomM">－</button><span id="zoomV">100%</span><button id="zoomP">＋</button></footer></main></div>
+<footer id="statusBar"><span id="sbMsg"></span><button id="themeBtn" title="這個瀏覽器自己的深色／淺色">◐ 深色／淺色</button><span title="滾輪滾一下捲多遠（只影響這個瀏覽器）">滾輪</span><button id="whM" title="滾輪捲慢一點">－</button><span id="whV">×1</span><button id="whP" title="滾輪捲快一點">＋</button><span>介面大小</span><button id="zoomM">－</button><span id="zoomV">100%</span><button id="zoomP">＋</button></footer></main></div>
 <script>const THEMES=__THEMES__;const THEME0="__MODE__";
 "use strict";
 /* ================= V0.6.01 TikLive Monitor 網頁版（電腦版介面） ================= */
@@ -2253,6 +2253,15 @@ function boot(){applyTheme(THEME0);drawNav();
   $("#themeBtn").onclick=()=>{const m=S.mode==="dark"?"light":"dark";applyTheme(m);LS.set("theme",m);$("#tabs")._h="";drawTabs();renderPage();};
   applyZoom(LS.get("zoom",100));addEventListener("resize",()=>applyZoom(LS.get("zoom",100)));
   $("#zoomM").onclick=()=>setZoom(-10);$("#zoomP").onclick=()=>setZoom(10);
+  /* V1.1.29 滾輪倍數（每個瀏覽器自己記）：×0.5～×8。有自己處理滾輪的地方（剪輯時間軸、Ctrl＋滾輪縮放、欄數選單）照舊 */
+  {const WS=[0.5,0.75,1,1.5,2,2.5,3,4,5,6,8];let wm=1;try{wm=parseFloat(localStorage.getItem("tlm_pc_wheel"))||1;}catch(e){}
+   const show=()=>{$("#whV").textContent="×"+wm;};const step=d=>{let i=WS.indexOf(wm);if(i<0)i=WS.findIndex(x=>x>=wm);i=Math.max(0,Math.min(WS.length-1,(i<0?2:i)+d));wm=WS[i];try{localStorage.setItem("tlm_pc_wheel",String(wm));}catch(e){}show();toast("滾輪 ×"+wm+(wm===1?"（原本的速度）":""),1500);};
+   $("#whM").onclick=()=>step(-1);$("#whP").onclick=()=>step(1);show();
+   const canY=(el,dy)=>{const cs=getComputedStyle(el),o=cs.overflowY;if(!(o==="auto"||o==="scroll"||(el===document.scrollingElement)))return false;if(el.scrollHeight<=el.clientHeight+1)return false;return dy>0?el.scrollTop+el.clientHeight<el.scrollHeight-1:el.scrollTop>0;};
+   const canX=(el,dx)=>{const cs=getComputedStyle(el),o=cs.overflowX;if(!(o==="auto"||o==="scroll"))return false;if(el.scrollWidth<=el.clientWidth+1)return false;return dx>0?el.scrollLeft+el.clientWidth<el.scrollWidth-1:el.scrollLeft>0;};
+   window.addEventListener("wheel",e=>{if(wm===1||e.defaultPrevented||e.ctrlKey||e.metaKey)return;const t=e.target;if(t&&t.closest&&t.closest("select,input[type=range],textarea,video,audio"))return;
+     const k=e.deltaMode===1?40:e.deltaMode===2?600:1,horiz=e.shiftKey||Math.abs(e.deltaX)>Math.abs(e.deltaY);let dy=(horiz?0:e.deltaY)*k,dx=(horiz?(e.deltaX||e.deltaY):0)*k;if(!dx&&!dy)return;
+     for(let el=t&&t.nodeType===1?t:t&&t.parentElement;el&&el!==document.documentElement;el=el.parentElement){if(dy?canY(el,dy):canX(el,dx)){e.preventDefault();if(dy)el.scrollTop+=dy*wm;else el.scrollLeft+=dx*wm;return;}}},{passive:false});}
   try{localStorage.setItem("tlm_view","pc");}catch(e){}
   pollState();renderPage();}
 function setZoom(d){const z=Math.max(60,Math.min(150,LS.get("zoom",100)+d));LS.set("zoom",z);applyZoom(z);}
