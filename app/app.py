@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.33"
+APP_VERSION = "1.1.34"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -36297,10 +36297,18 @@ $r | ConvertTo-Json -Depth 4 -Compress
         text=f"已從 V{ju.get('from')} 更新到 V{ju.get('to')}。\n\n監控與錄音持續進行中，沒有中斷。"
         if ju.get('items'): text+='\n\n本次更新：\n'+'\n'.join('• '+str(i) for i in ju['items'])
         if ju.get('core_changed'): text+='\n\n（本次含核心變更，下次重開程式後完全生效）'
-        if ju.get('via_web'):                       # V0.5.52 installed from the phone: a note that does not block anything
-            text='（從手機網頁安裝）\n\n'+text
-            mb=QMessageBox(QMessageBox.Information,'更新完成',text,QMessageBox.Ok,self); mb.setModal(False); mb.setAttribute(Qt.WA_DeleteOnClose,True); mb.show(); return
-        QMessageBox.information(self,'更新完成',text)
+        if ju.get('via_web'): text='（從手機網頁安裝）\n\n'+text               # V0.5.52 installed from the phone
+        # V1.1.34 使用者 11/19：更新完成的視窗不擋畫面，倒數 10 秒自己關（也可以直接按確定）
+        mb=QMessageBox(QMessageBox.Information,'更新完成',text,QMessageBox.Ok,self); mb.setModal(False); mb.setAttribute(Qt.WA_DeleteOnClose,True)
+        btn=mb.button(QMessageBox.Ok); left=[10]
+        def tick_():
+            try:
+                if left[0]<=0: tm_.stop(); mb.close(); return
+                btn.setText(f'確定（{left[0]} 秒後自動關閉）'); left[0]-=1
+            except Exception:
+                try: tm_.stop()
+                except Exception: pass
+        tm_=QTimer(mb); tm_.timeout.connect(tick_); tick_(); tm_.start(1000); mb.show()
 
     @staticmethod
     def _app_code_dir():
