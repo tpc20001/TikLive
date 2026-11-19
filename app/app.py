@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.38"
+APP_VERSION = "1.1.39"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -13200,10 +13200,18 @@ class MainWindow(QMainWindow):
             gb = lambda L: round(sum(int(x.get('size') or 0) for x in L) / 1e9, 1)
             t1 = W[:left_today]; t2 = W[left_today:left_today + rate]
             import math
-            days = 0 if len(W) <= left_today else math.ceil((len(W) - left_today) / rate)
-            return {'n': len(W), 'gb': gb(W), 'rate': rate, 'why': '每 24 小時最多',
-                    'today': len(t1), 'today_gb': gb(t1), 'tom': len(t2), 'tom_gb': gb(t2), 'days': days,
-                    'done_d': (datetime.now() + timedelta(days=days)).strftime('%m/%d')}
+            # V1.1.39 使用者 11/19：每天還會新增（最近 7 天平均）→ 真正每天消化的＝上限 − 每天新增；不夠就永遠追不上
+            try: inf = float((self._yt_inflow(q) or {}).get('a7') or 0)
+            except Exception: inf = 0.0
+            net = rate - inf; rest = max(0, len(W) - left_today)
+            if rest == 0: days = 0
+            elif net <= 0.5: days = None
+            else: days = math.ceil(rest / net)
+            days0 = 0 if rest == 0 else math.ceil(rest / rate)
+            return {'n': len(W), 'gb': gb(W), 'rate': rate, 'why': '每 24 小時最多', 'inf': round(inf, 1), 'net': round(net, 1), 'days0': days0,
+                    'today': len(t1), 'today_gb': gb(t1), 'tom': len(t2), 'tom_gb': gb(t2), 'days': days, 'never': days is None,
+                    'need': math.ceil(inf + max(1, len(W)) / 30.0),
+                    'done_d': (datetime.now() + timedelta(days=days)).strftime('%m/%d') if days else ''}
         except Exception as ex:
             return {'n': 0, 'err': str(ex)}
 
@@ -41909,7 +41917,7 @@ body.rp main{flex:1;min-height:0;padding:0;display:flex;flex-direction:column}
 .ruQuad{display:grid;grid-template-columns:1fr 1fr;gap:4px;max-width:300px;margin:6px 0}.ruQuad span{border:1px solid rgba(127,127,127,.35);border-radius:8px;padding:8px;text-align:center;font-size:12.5px}
 .ruNone{padding:20px;text-align:center;opacity:.7}
 .ruV{display:inline-flex;align-items:center;gap:3px;border-bottom:1px dashed var(--c,#888);cursor:pointer;padding:0 2px;border-radius:4px}.ruV:hover{background:rgba(127,127,127,.15)}.ruV i{font-style:normal;font-size:11px;opacity:.55}.ruV small{font-size:11px;opacity:.6;font-weight:400}.ruV.ed{background:rgba(58,123,213,.15);padding:2px 6px;border-bottom:0;cursor:default}.ruV.done{background:rgba(69,212,131,.3)}.ruIn{width:84px;padding:3px 6px;border-radius:6px;border:1px solid #3a7bd5;background:transparent;color:inherit;font:inherit;font-weight:800}.ruCk{display:inline-flex;align-items:center;gap:3px;font-size:12.5px;opacity:.5;white-space:nowrap}.ruCk.go{opacity:1;color:#45d483;font-weight:800}.ruCk input{transform:scale(1.25)}.ruX{border:0;background:transparent;color:inherit;cursor:pointer;opacity:.6}
-.ytInf{margin:8px 0;padding:8px 12px;border-radius:10px;border:1px solid rgba(77,201,255,.4);background:rgba(77,201,255,.07);line-height:1.6}.ytInf small{opacity:.7}.ytInf .w{color:#f0ad4e}
+.ytInf{margin:8px 0;padding:8px 12px;border-radius:10px;border:1px solid rgba(77,201,255,.4);background:rgba(77,201,255,.07);line-height:1.6}.ytInf small{opacity:.7}.ytInf .w,.ytEta .w{color:#f0ad4e}
 .ruWarn{border:2px solid #ff4d6d;background:rgba(255,77,109,.1);border-radius:10px;padding:8px 12px;margin:6px 0 8px;line-height:1.6}
 #migFab{position:fixed;left:10px;bottom:14px;z-index:9680;max-width:min(92vw,420px);padding:8px 14px;border-radius:14px;background:#1d4f7a;color:#fff;box-shadow:0 6px 22px rgba(0,0,0,.45);cursor:pointer;display:flex;flex-direction:column;gap:2px;font-size:14px}#migFab small{opacity:.85;font-size:12px}#migFab.ok{background:#1f7a4a}
 #cuFab{position:fixed;top:8px;right:8px;z-index:9690;display:flex;gap:4px;align-items:stretch}#cuFab .ufGo{display:flex;flex-direction:column;align-items:flex-start;padding:6px 12px;border-radius:12px;border:0;background:#3a7bd5;color:#fff;font-weight:800;font-size:14px;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.45)}#cuFab .ufGo small{font-weight:600;font-size:11px;opacity:.9}#cuFab .ufX{border:0;border-radius:12px;background:rgba(0,0,0,.55);color:#fff;padding:0 10px;cursor:pointer}
@@ -44213,8 +44221,9 @@ function histUrl(){const sq=S.honly?"":(S.hq||"").trim();const us=S.honly?"":(S.
   return `/api/sessions?n=${S.hn}`+(S.hfrom?`&from=${S.hfrom}&to=${S.hto||S.hfrom}`:"")+(S.honly?`&u=${encodeURIComponent(S.honly)}`:"")+(sq?`&q=${encodeURIComponent(sq)}`:"")+(!S.honly&&S.hcat?`&cat=${encodeURIComponent(S.hcat)}`:"")+(us?`&us=${encodeURIComponent(us)}`:"");}
 async function histReload(onlyU){const L=$("#list");if(L)L.innerHTML='<div class="empty">載入全部符合的場次中…</div>';const url=histUrl();try{const j=await J(url);if(url!==histUrl())return;S.hist=j;S.histU=onlyU||"";if(!onView("hist","who"))return;drawHist(onlyU);const c=$("#clk");if(c)c.textContent="歷史 "+S.hist.length+" 場";}catch(e){if(L)L.innerHTML=offline;}}
 async function viewHist(onlyU){S.honly=onlyU;
-  V().innerHTML=`<div class="hfilt"><div class="hrow"><input class="search" id="q" placeholder="搜尋主播 / 場次 ID…" value="${esc(S.hq)}"><button class="pill pd" id="dateBtn">${rangeText()}</button></div>
+  V().innerHTML=`<div class="hfilt"><div class="hrow">${onlyU&&S.whoBack?`<button class="pill pd" id="whoBackB" title="回到剛剛的頁面（會回到原本捲到的位置）">‹ 上一頁</button>`:""}<input class="search" id="q" placeholder="搜尋主播 / 場次 ID…" value="${esc(S.hq)}"><button class="pill pd" id="dateBtn">${rangeText()}</button></div>
 <div class="hrow"><select class="pill" id="sortSel">${Object.entries(HSORT).map(([k2,v])=>`<option value="${k2}"${k2===S.hsort?" selected":""}>${v[0]}</option>`).join("")}</select><span id="catSlot" style="display:contents">${catFilterHtml()}</span><button class="pill" id="saBtn" title="找出時長不合理的場次（例如顯示 20 多小時），推算正確時長並修正">⏱ 異常</button>${onlyU?`<button class="pill pd" onclick="location.hash='hist'">只看 @${esc(onlyU)} ✕</button><button class="pill" id="purgeBtn" style="color:#ff6577;border-color:#c62845">🗑 刪除…</button>`:`<button class="pill pw" id="whoBtn">${whoText()}</button><button class="pill tg pg${S.hgroup?" on":""}" id="grpBtn" title="依主播清單的編號排列（1 在最前面），每位主播內再依左邊的排序">${S.hgroup?"☑":"☐"} 分組</button>`}</div></div><div id="miniS" class="pcst one" style="margin:6px 4px 4px"></div><div id="list"><div class="empty">載入中…</div></div>`;miniStart();
+  if($("#whoBackB"))$("#whoBackB").onclick=()=>{const b=S.whoBack;S.whoBack="";location.hash=b.slice(1);};   /* V1.1.40 */
   if(onlyU&&$("#purgeBtn"))$("#purgeBtn").onclick=()=>delMenu(onlyU,onlyU,0);
   if($("#saBtn"))$("#saBtn").onclick=()=>saOpen();                        // V0.6.53
   stickTop();
@@ -44604,7 +44613,7 @@ const RULES=[
   {t:"🗓 原檔保留期限（自動）",d:RU_F([["B／E：下播 "+RU_V('ret.be_days','天',14)+"","#2ec4b6"],["刪 MP4（先截 60 張）","#ff4d6d"]])+RU_F([["S／AD：YouTube 傳好","#ffc94d"],["再留 "+RU_V('ret.yt_keep_days','天',7)+"","#f0ad4e"],["隔離區 → 確認 YouTube → 馬上刪","#ff4d6d"]])+RU_F([["A／AS／G：YouTube 傳好","#45d483"],["隔離區 → 確認 YouTube → 馬上刪","#ff4d6d"]])+"<ul><li>每 30 分鐘檢查一次（開程式 10 分鐘後開始）；B／E 一次最多刪 10 場，慢慢來。</li><li><b>不動</b>：還在 YouTube 排隊／上傳中／處理中的、直播／錄影中、有 ⭐ 收藏片段、標 <b>+1 待剪輯</b>或 <b>+2 保存</b>的場次。</li><li>刪的只有 MP4：截圖、預覽圖、字幕、留言、禮物、M4A 錄音、剪輯成品都留著。設定「🗓 原檔保留期限」可以整個關掉。</li></ul>"},
   {t:"程式自己會清的",d:"<ul><li><b>冗餘 14 天+</b>：放超過 14 天、沒有場次紀錄的 MP4（檔案總管「冗餘」那些）。</li><li><b>暫存</b>：只錄聲音的場次留著的 MP4，<b>5 天後</b>沒按「📌 留下」就自動刪。</li><li>每 30 秒一張的預覽圖：C 槽最多 "+RU_V('vg.cache_gb','GB',40)+"，超過從最久沒看的刪；要看時再做。精選用的每 2 秒圖保留 15 天、最多 "+RU_V('hl.keep2s_gb','GB',60)+"。</li></ul>"}]},
  {k:"yt",i:"▶",c:"#ff4d4d",t:"YouTube 上傳",s:[
-  {t:"上傳規則",d:"<ul><li>照「主播等級」自動上傳（見主播等級），也可以在 YouTube 上傳頁手動加。隱私預設<b>不公開</b>（搜尋不到，只有拿到網址的人看得到；回放頁可以內嵌 YouTube 跟留言同步播）。</li><li>每 <b>24 小時最多 "+RU_V('yt.daily','個',100)+"</b>，照<b>上傳完成時間滾動</b>算；頁面會顯示第 101 個什麼時候可以開始。額度用完自動等 6 小時。</li><li>速度上限 "+RU_V('yt.mbps','Mbps',20)+"，不搶錄影的網路；可以設只在某個時段開始傳新的。<b>正在傳的那部一定照傳完</b>，不會中途斷。</li></ul>"},
+  {t:"上傳規則",d:"<ul><li>照「主播等級」自動上傳（見主播等級），也可以在 YouTube 上傳頁手動加。隱私預設<b>不公開</b>（搜尋不到，只有拿到網址的人看得到；回放頁可以內嵌 YouTube 跟留言同步播）。</li><li>每 <b>24 小時最多 "+RU_V('yt.daily','個',100)+"</b>，照<b>上傳完成時間滾動</b>算；頁面會顯示第 101 個什麼時候可以開始。額度用完自動等 6 小時。</li><li>速度上限 "+RU_V('yt.mbps','Mbps',20)+"，不搶錄影的網路；可以設只在某個時段開始傳新的。<b>正在傳的那部一定照傳完</b>，不會中途斷。</li><li>「幾天後全部傳完」會<b>扣掉每天新增的</b>（最近 7 天平均）：每天真正消化＝每天上限 − 每天新增。新增的比上限多就會寫「追不上」，並告訴你上限至少要調到多少。</li></ul>"},
   {t:"先傳哪些",d:"<ul><li>現在是「<b>舊的場次先傳</b>」。S 級永遠最優先。</li><li><b>開播在最近 "+RU_V('yt.hold_new_days','天',3)+"內的場次先不傳</b>，留給合併同一場被切開的（YouTube 頁可以改天數，0＝不限）。已經開始傳的照傳完。</li></ul>"},
   {t:"傳好之後",d:"<ul><li>YouTube 處理好會把網址存進那一場。</li><li>「傳好原檔留著」沒勾的等級：原檔移到「YouTube 已上傳-刪除隔離區」，"+RU_V('yt.hold_auto_h','小時',24)+"後再跟 YouTube 確認一次就自動刪（設定可以關掉自動刪）。</li></ul>"}]},
  {k:"bg",i:"✨",c:"#b48cff",t:"背景工作：精選、字幕、預覽圖、轉檔順序",s:[
@@ -48645,7 +48654,7 @@ ${I.linked?`<div class="ytRow"><button class="pill ytGo${I.on?" on":""}" data-yt
 <label class="ytCk"><input type="checkbox" data-ys="yt.auto_delete"${I.auto_delete?" checked":""}> 上傳好後原檔移到「YouTube 已上傳-刪除隔離區」（等級設定可以設哪些等級留原檔）</label>
 <button class="pill" data-yt="unlink">取消連結</button></div>
 ${I.long_ok===false?`<div class="ytLong">⚠ <b>你的 YouTube 帳號還不能傳超過 15 分鐘的影片</b>（直播錄影都很長，會被拒絕）。請打開 <a href="https://www.youtube.com/verify" target="_blank" rel="noopener">youtube.com/verify</a>，用你連結的 YouTube 帳號登入、收簡訊驗證，驗證好按 → <button class="pill" data-yt="verified">✔ 我驗證好了</button></div>`:""}${ytHdd(I)}<div class="ytSt"><span>⏳ 排隊 <b>${c.wait||0}</b></span><span>⬆ 上傳中 <b>${c.up||0}</b></span><span>⚙ 處理中 <b>${c.proc||0}</b></span><span>✔ 好了 <b>${c.ready||0}</b></span>${c.fail?`<span class="bad">✖ 失敗 <b>${c.fail}</b></span>`:""}<span>24 小時內 <b>${(I.w24||{}).n??I.today}</b>/${(I.w24||{}).cap??I.daily}</span></div>${ytW24(I.w24)}${(()=>{const E=I.eta;if(!E||!E.n)return "";   /* TK_V1.0.03 全部傳完要幾天 */
-  return `${I.lim?`<details class="ytUp"><summary>🔓 想一天傳超過 ${I.lim} 部？（YouTube「進階功能」）</summary><div>YouTube 說明：<b>進階功能包含「更高的每日上傳量」</b>。開法（只能頻道擁有者，用你連結的那個帳號）：<ol><li>打開 <a href="https://studio.youtube.com" target="_blank" rel="noopener">YouTube Studio</a> → 左下「設定」→「頻道」→「功能使用資格」</li><li>「進階功能」→ 按「取得功能使用權」：<b>用身分證件驗證</b> 或 <b>錄一段影片驗證</b>（不是每個帳號都有這個選項）</li><li>通常 <b>24 小時內</b> 審完、會寄信；第二次被拒要等 30 天才能再試</li><li>沒有這兩個選項的話：頻道持續正常上傳、沒違規，累積夠「頻道紀錄」也會自動開（YouTube 沒公布要多久）</li></ol><small>手機號碼驗證（你已經做了）只開「超過 15 分鐘的影片」，不會增加部數。程式這邊不用改：上限放寬後會自己學到新的部數。</small></div></details>`:""}<div class="ytEta">🗓 排隊 <b>${E.n}</b> 部 · ${E.gb} GB；一天大約傳 <b>${E.rate}</b> 部（${E.why}）→ ${E.days?`約 <b>${E.days}</b> 天後（${E.done_d}）全部傳完`:"今天就傳得完"}<br><small>現在可以傳 ${E.today} 部（${E.today_gb} GB）${E.tom?` · 再下一個 24 小時 ${E.tom} 部（${E.tom_gb} GB）`:""}</small></div>`;})()}${(()=>{const F=I.inflow;if(!F)return "";const lim=+I.daily||0,net=lim-F.a7;   /* V1.1.36 平均一天新增幾部要傳 */
+  return `${I.lim?`<details class="ytUp"><summary>🔓 想一天傳超過 ${I.lim} 部？（YouTube「進階功能」）</summary><div>YouTube 說明：<b>進階功能包含「更高的每日上傳量」</b>。開法（只能頻道擁有者，用你連結的那個帳號）：<ol><li>打開 <a href="https://studio.youtube.com" target="_blank" rel="noopener">YouTube Studio</a> → 左下「設定」→「頻道」→「功能使用資格」</li><li>「進階功能」→ 按「取得功能使用權」：<b>用身分證件驗證</b> 或 <b>錄一段影片驗證</b>（不是每個帳號都有這個選項）</li><li>通常 <b>24 小時內</b> 審完、會寄信；第二次被拒要等 30 天才能再試</li><li>沒有這兩個選項的話：頻道持續正常上傳、沒違規，累積夠「頻道紀錄」也會自動開（YouTube 沒公布要多久）</li></ol><small>手機號碼驗證（你已經做了）只開「超過 15 分鐘的影片」，不會增加部數。程式這邊不用改：上限放寬後會自己學到新的部數。</small></div></details>`:""}<div class="ytEta">🗓 排隊 <b>${E.n}</b> 部 · ${E.gb} GB；一天大約傳 <b>${E.rate}</b> 部（${E.why}）${E.inf?`，但每天還會新增約 <b>${E.inf}</b> 部${E.net>0?` → 每天真正消化 <b>${E.net}</b> 部`:"（比上限還多）"}`:""} → ${E.never?`<b class="w">照現在的速度追不上（新增的比上限多），排隊會越來越長；上限至少要調到約 ${Math.ceil(E.inf)+1} 部，想一個月內追平要約 ${E.need} 部</b>`:E.days?`約 <b>${E.days}</b> 天後（${E.done_d}）追平、全部傳完${E.inf?`<small>（不算新增的話是 ${E.days0} 天${E.days>30?`；想一個月內追平要每天約 ${E.need} 部`:""}）</small>`:""}`:"今天就傳得完"}<br><small>現在可以傳 ${E.today} 部（${E.today_gb} GB）${E.tom?` · 再下一個 24 小時 ${E.tom} 部（${E.tom_gb} GB）`:""}</small></div>`;})()}${(()=>{const F=I.inflow;if(!F)return "";const lim=+I.daily||0,net=lim-F.a7;   /* V1.1.36 平均一天新增幾部要傳 */
   return `<div class="ytInf">📥 <b>平均一天新增要傳的</b>：最近 7 天 <b>${F.a7}</b> 部 · 最近 14 天 <b>${F.a14}</b> 部（照場次開播那天、排進上傳的檔案數，不含今天）。每天上限 <b>${lim}</b> 部 → ${net>0?`每天還能多消化積壓約 <b>${Math.round(net)}</b> 部`:`<b class="w">新增的比上限多約 ${Math.round(-net)} 部，排隊會越來越長</b>，可以把上限調高`}<br><small>${F.days.map(([d,n])=>d+" "+n).join(" · ")}</small></div>`;})()}${(()=>{const R=I.real;if(!R)return "";const mx=Math.max(1,...R.days.map(d=>d[1]));   /* TK_V0.9.36 實際上傳完成的部數（照紀錄，不是推估） */
   return `<div class="ytReal"><div class="ytRealH">📊 實際上傳完成（照紀錄${R.first?`，從 ${R.first} 起`:""}）：最近 24 小時 <b>${R.n24}</b> 部 · 滾動 24 小時最多 <b>${R.max24}</b> 部${R.max24_t?`（${R.max24_t} 那時）`:""} · 單日最多 <b>${R.best_day?R.best_day[1]:0}</b> 部${R.best_day?`（${R.best_day[0]}）`:""} · 共 ${R.total} 部</div>
 <div class="ytRealB">${R.days.map(([d,n])=>`<div title="${d}：${n} 部"><b>${n||""}</b><i style="height:${Math.round(n/mx*70)}%"></i><small>${d.slice(3)}</small></div>`).join("")}</div></div>`;})()}
@@ -50634,6 +50643,7 @@ function scrRestore(key){if(SCR.rest)SCR.rest.stop();SCR.key=key;const y=key?(SC
     window.scrollTo(0,Math.max(0,max));if(performance.now()-t0>4000){R.stop();return;}raf=requestAnimationFrame(step);};raf=requestAnimationFrame(step);}
 function route(){
   clearTimeout(S.timer);S.pending=null;
+  {const ph=S.curH||"";S.curH=location.hash;if(/^#who\//.test(location.hash)&&ph!==location.hash&&!/^#(rp|room)(\/|$)/.test(ph))S.whoBack=(ph&&!/^#(who|hist)(\/|$)/.test(ph))?ph:"";}   /* V1.1.40 從主播分類等頁點進某位主播 → 記住從哪來，給「‹ 上一頁」用 */
   if(location.hash==="#paste"){S.autoPaste=true;history.replaceState(null,"",location.pathname+"#add");}   /* TK_V0.8.80 長按圖示的快捷選單 */
   const h=(location.hash||"#live").slice(1).split("/"),a=h[0]||"live",arg=decodeURIComponent(h[1]||"");
   if(a==="fx"&&typeof lvsMount==="function"){if(arg){try{const f=lvsF();f.q=String(arg);lvsFSet(f);}catch(e){}}location.replace("#fxs");return;}   /* TK_V0.9.17 檔案總管＝連續分級（舊的清單頁不用了；帶主播＝搜尋這位） */
