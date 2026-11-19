@@ -1975,6 +1975,20 @@ body.oldLock{overflow:hidden}
 .cuBox{padding:10px 12px;border:1px solid #3a7bd5;border-radius:12px;background:rgba(58,123,213,.08);line-height:1.55}.cuS{opacity:.7;font-size:12px}.cuT{margin-top:4px}.cuN{margin-top:4px;font-size:13px;opacity:.9}.cuW{color:#f0ad4e}.cuR{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin-top:8px}.cuBar{height:6px;border-radius:3px;background:rgba(127,127,127,.25);margin:6px 0 4px;overflow:hidden}.cuBar i{display:block;height:100%;background:#3a7bd5}
 #migFab{position:fixed;left:10px;bottom:14px;z-index:9680;max-width:min(92vw,420px);padding:8px 14px;border-radius:14px;background:#1d4f7a;color:#fff;box-shadow:0 6px 22px rgba(0,0,0,.45);cursor:pointer;display:flex;flex-direction:column;gap:2px;font-size:14px}#migFab small{opacity:.85;font-size:12px}#migFab.ok{background:#1f7a4a}
 .mrgHead{margin-bottom:10px}.mrgBox{padding:10px 12px;border-radius:12px;background:rgba(127,127,127,.12);margin:8px 0}.mrgBox.ok{background:rgba(69,212,131,.14)}.mrgBox.bad{background:rgba(255,80,80,.14)}.mrgBar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0}.mrgBar span{flex:1 1 100%}.mrgBar .btn{flex:0 0 auto;width:auto;max-width:none;min-width:0;white-space:nowrap;overflow:visible;padding:6px 12px}.mrgBar .btn.start{margin-left:auto}.mrgG{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid rgba(127,127,127,.25);border-radius:12px;margin:6px 0;cursor:pointer}.mrgG.on{border-color:#3a7bd5;background:rgba(58,123,213,.08)}.mrgG input{margin-top:4px;transform:scale(1.3)}.mrgT{line-height:1.5}.mrgS{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12.5px;opacity:.85;margin-top:3px}
+.ruHead{margin-bottom:10px}.ruQ{width:100%;box-sizing:border-box;margin:8px 0;padding:9px 12px;border-radius:12px;border:1px solid var(--line,rgba(127,127,127,.3));background:transparent;color:inherit;font:inherit}
+.ruToc{display:flex;flex-wrap:wrap;gap:6px}.ruToc button{border:1px solid var(--c);background:transparent;color:inherit;border-radius:16px;padding:4px 10px;font:inherit;font-size:13px;cursor:pointer}
+.ruC{border:1px solid rgba(127,127,127,.25);border-left:4px solid var(--c);border-radius:12px;margin:10px 0;overflow:hidden;scroll-margin-top:8px}
+.ruC h3{margin:0;padding:10px 12px;display:flex;gap:8px;align-items:center;cursor:pointer;font-size:16px;background:rgba(127,127,127,.06)}.ruC h3 em{margin-left:auto;font-style:normal;font-size:12px;opacity:.6}.ruC h3 i{font-style:normal;opacity:.6}
+.ruB{display:none;padding:2px 12px 10px}.ruC.on .ruB{display:block}
+.ruI{padding:8px 0;border-bottom:1px dashed rgba(127,127,127,.2)}.ruI:last-child{border-bottom:0}.ruI h4{margin:4px 0 6px;font-size:14.5px;color:var(--c)}
+.ruI ul{margin:4px 0;padding-left:20px;line-height:1.65}.ruI li{margin:2px 0}
+.ruFlow{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:6px 0 8px}.ruChip{border:1px solid var(--c,#888);background:color-mix(in srgb,var(--c,#888) 14%,transparent);border-radius:10px;padding:5px 9px;font-size:13px;font-weight:700}.ruAr{font-style:normal;opacity:.6}
+.ruBar{display:flex;border-radius:10px;overflow:hidden;margin:6px 0 8px;font-size:12px;font-weight:700}.ruBar span{background:color-mix(in srgb,var(--c) 35%,transparent);padding:6px 8px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ruT{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}.ruT th,.ruT td{border:1px solid rgba(127,127,127,.25);padding:5px 7px;text-align:left;vertical-align:top}.ruT th{background:rgba(127,127,127,.1)}
+.ruG{display:inline-block;min-width:26px;text-align:center;border-radius:7px;padding:1px 5px;margin-right:6px;background:var(--c);color:#111;font-weight:900}
+.ruLv{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}.ruLv span{border:2px solid var(--c);border-radius:10px;padding:5px 12px;font-weight:800}
+.ruQuad{display:grid;grid-template-columns:1fr 1fr;gap:4px;max-width:300px;margin:6px 0}.ruQuad span{border:1px solid rgba(127,127,127,.35);border-radius:8px;padding:8px;text-align:center;font-size:12.5px}
+.ruNone{padding:20px;text-align:center;opacity:.7}
 </style></head>
 <body><div id="app"><aside id="side"><div id="sdCount">● 0 / 0 直播間</div><div class="ss"><button class="sstart" id="btnStart">▶ 開始監控</button><button class="sstop" id="btnStop">■ 停止監控</button></div><div id="sdStatus">● 連線中...</div><nav id="nav"></nav><div id="sysBox">電腦狀態讀取中…</div><button id="netBtn">⬇ —
 本日 — MB</button><button id="qBtn" title="排隊轉檔的數量、還要搬到 HDD 的 MP4 大小、全部處理完（轉檔＋搬檔）預估還要多久。點一下看轉檔排隊">🎬 轉檔排隊：讀取中…</button></aside>
@@ -2183,7 +2197,7 @@ class VT{
 const S={page:(p=>p===6?0:p===28?29:p===26?31:p)(LS.get("page",0)),tab:null,hist:LS.get("hist",[]),tabMode:LS.get("tabMode","expanded"),pins:LS.get("pins",[]),st:null,mode:"dark",sbT:0,data:{}};
 const NAV=[["緊急事件","#ff4d6d",[[37,"緊急處理","🚨"]]],["總覽","#4dc9ff",[[0,"直播總覽","⌂"],[31,"檔案總管","▦"],[38,"主播審核","🗂"],[33,"精選","✨"],[30,"後台狀態","🖥"]]],["目前直播","#45d4b0",[[1,"即時聊天室","◌"],[2,"禮物","◈"],[4,"進入紀錄","↳"],[5,"按讚","♥"]]],
   ["歷史資料","#b48cff",[[7,"歷史直播場次","▤"],[3,"送禮者","◇"],[8,"使用者","◎"]]],["影片工具","#f0ad4e",[[27,"批量剪輯","✂"],[29,"整理 MP4","🗂"],[32,"批量截 20 張","📸"],[34,"YouTube 上傳","▶"],[45,"手機錄屏","📱"],[40,"Chrome 上傳限速","🌐"],[25,"語音轉字幕","🎙"]]],
-  ["電腦與檔案","#45d483",[[43,"精選／審核 開關","⏯"],[16,"電腦效能","▦"],[39,"🧪 實驗工作區","🧪"],[17,"開播統計","↗"],[35,"主播特性","🧭"],[36,"每週報告","📰"],[12,"錄音／錄影","◉"],[19,"FLV 待處理","▧"],[20,"影片庫重整","⊞"],[21,"清理工具","✧"],[22,"LOG 與問題","⇪"],[46,"自動處理紀錄","🕘"],[47,"小檔備份","🗂"],[48,"HEVC 壓縮試算","🧪"],[49,"硬碟健康紀錄","🩺"],[50,"主播總覽","👤"],[53,"一頁健檢","🩺"],[57,"E → R 搬硬碟","💽"],[58,"合併重複場次","⧉"],[55,"顯示卡供需","🎛"],[56,"YouTube 隔離區抽查","🗑"],[51,"一天的時間軸","📅"],[52,"匯出場次表","📤"],[15,"LIVE 時移（BETA）","◷"]]],
+  ["電腦與檔案","#45d483",[[43,"精選／審核 開關","⏯"],[16,"電腦效能","▦"],[39,"🧪 實驗工作區","🧪"],[17,"開播統計","↗"],[35,"主播特性","🧭"],[36,"每週報告","📰"],[12,"錄音／錄影","◉"],[19,"FLV 待處理","▧"],[20,"影片庫重整","⊞"],[21,"清理工具","✧"],[22,"LOG 與問題","⇪"],[59,"規則說明","📖"],[46,"自動處理紀錄","🕘"],[47,"小檔備份","🗂"],[48,"HEVC 壓縮試算","🧪"],[49,"硬碟健康紀錄","🩺"],[50,"主播總覽","👤"],[53,"一頁健檢","🩺"],[57,"E → R 搬硬碟","💽"],[58,"合併重複場次","⧉"],[55,"顯示卡供需","🎛"],[56,"YouTube 隔離區抽查","🗑"],[51,"一天的時間軸","📅"],[52,"匯出場次表","📤"],[15,"LIVE 時移（BETA）","◷"]]],
   ["設定","#9aa5b3",[[11,"設定","⚙"],[10,"主播清單","☷"],[18,"主播分類","◐"],[24,"連線管控／縮編","⛽"],[23,"送禮動畫","❋"],[9,"連線診斷","⌁"],[14,"線上更新","⟳"],[13,"升級資訊","✦"]]]];
 const NAV_OPEN0=["總覽","目前直播","歷史資料","影片工具"];   /* V0.6.95 左邊選單分組可以收合：預設只打開常用的，其他按標題展開（目前這頁所在的組一定打開） */
 function applyTheme(mode){S.mode=mode;const t=THEMES[mode]||THEMES.dark,r=document.documentElement.style;for(const k in t)r.setProperty("--"+k,t[k]);document.documentElement.dataset.mode=mode;}
@@ -7846,6 +7860,76 @@ async function mrgMount(root){   /* V1.1.25 ⧉ 合併重複場次 */
   const tick=async()=>{clearTimeout(tm);if(!root.isConnected)return;I=await get("/api/pc/merge");if(I&&!I.scan&&!I.scanning&&!(I.run&&I.run.state==="running")){await get("/api/pc/merge/scan");I=await get("/api/pc/merge");}
     draw();tm=setTimeout(tick,I&&(I.scanning||(I.run&&I.run.state==="running"))?1500:15000);};
   tick();}
+/* V1.1.32 📖 規則說明：程式實際怎麼做（照程式碼整理，改規則時這裡一起改） */
+const RU_F=(a)=>'<div class="ruFlow">'+a.map((x,i)=>(i?'<i class="ruAr">→</i>':'')+'<span class="ruChip" style="'+(x[1]?'--c:'+x[1]:'')+'">'+x[0]+'</span>').join('')+'</div>';
+const RU_G=(k,n,c)=>'<span class="ruG" style="--c:'+c+'">'+k+'</span><b>'+n+'</b>';
+const RU_BAR=(segs)=>'<div class="ruBar">'+segs.map(s=>'<span style="flex:'+s[0]+';--c:'+s[2]+'">'+s[1]+'</span>').join('')+'</div>';
+const RULES=[
+ {k:"rec",i:"🎥",c:"#ff6b8a",t:"錄影與監控：怎麼錄、存在哪",s:[
+  {t:"一場直播的檔案怎麼走",d:RU_F([["直播中","#ff4d6d"],["FLV 先寫 C 槽 SSD","#f0ad4e"],["下播：在 SSD 轉 MP4","#4dc9ff"],["搬進影片庫（R 槽）","#45d483"]])+
+   "<ul><li>錄影時畫面直接複製串流、<b>不重新壓縮</b>，所以錄影本身幾乎不吃 CPU。</li><li>下播後在 SSD 上把 FLV 轉成 MP4：畫面大小沒變就直接複製（幾秒～幾分鐘）；直播中畫面大小變過（例如 PK）才重新壓縮成同一個大小，這時用<b>顯示卡</b>。</li><li>轉好才一次搬到影片庫硬碟（HDD 只寫一次完整的 MP4，不會邊錄邊轉卡住）。轉成功就刪 FLV；<b>轉失敗一定保留 FLV</b>（放「FLV轉檔失敗」，之後可以重轉）。</li><li>聲音另外錄一份 M4A（48 kbps 單聲道，一小時約 22 MB），也是先放 SSD、轉好再搬。<b>就算 MP4 刪了，M4A、留言、禮物都還在</b>。</li></ul>"},
+  {t:"空間不夠時",d:"<ul><li>SSD 剩不到 <b>60 GB</b>：新的錄影改成直接錄在影片庫硬碟。</li><li>影片硬碟剩不到 <b>30 GB</b>：不開始新的錄影（<b>聲音照錄</b>）。</li><li>🛡 C 槽守門員每分鐘看 C 剩多少、減少多快：第 1 級先停不急的背景工作；第 2 級全速把東西搬走；第 3 級（剩不到 15 GB 或 20 分鐘內會滿）才會一位一位停掉正在錄到 C 的影片（F → E → 未分級先停）。</li></ul>"},
+  {t:"同一場直播的判定（斷線、重開）",d:"<ul><li>主播斷線後 <b>10 分鐘內</b>連回同一個直播間＝<b>續寫同一場</b>（錄影會分成第 2 段、第 3 段…）。</li><li>直播中卻 <b>30 分鐘</b>沒有任何留言、禮物、進場、人數也沒變（而且沒在錄影）→ 重新連一次確認：還在播就續寫，結束了就把結束時間改回最後有資料的時間。</li><li>程式重開、斷電、超過 10 分鐘才連回來 → 會變成<b>另一場</b>。這種被切開的，用「⧉ 合併重複場次」合回一場（見「場次合併」）。</li></ul>"},
+  {t:"開程式、熱更新時的監控",d:"<ul><li>開程式 3 秒後自動開始監控（設定可以關）。正在錄的場次在熱更新、重開時會<b>接著錄同一場</b>。</li><li>搬硬碟切換後，如果找不到影片硬碟（例如 R 槽代號跑掉），程式<b>先不開始監控</b>，不會錄到別的地方，會提示你去磁碟管理改代號。</li></ul>"},
+  {t:"只錄聲音的主播",d:"<ul><li>主播設成只錄聲音時，直播中照樣錄畫面（FLV 先放 C 槽），下播後直接從 FLV 截 <b>20 張圖</b>就刪掉 FLV，不轉 MP4、不進影片庫；截不到圖才照原本轉 MP4。</li><li>直播中每 <b>2 分鐘</b>另外拍一張快照，回放時在影片的位置左右翻看。</li></ul>"}]},
+ {k:"play",i:"📺",c:"#4dc9ff",t:"回放與直播中觀看：延遲、預載入",s:[
+  {t:"為什麼要「+3 秒」",d:RU_BAR([[3,"留言／禮物（資料）","#4dc9ff"],[1,"約 3 秒","#f0ad4e"],[3,"畫面上才看到","#45d483"]])+"<ul><li>TikTok 的畫面比留言、禮物的資料<b>晚大約 3 秒</b>。所以在回放點一則留言或禮物，會跳到「那個時間 <b>+3 秒</b>」，畫面才對得上（秒數在回放設定可以改）。</li><li>送禮動畫也跟著這個延遲一起延後，畫面上出現禮物那一刻才跳動畫。</li><li>點<b>禮物</b>時會再<b>早 0.5 秒</b>落地，播放 0.5 秒後動畫完整出現。</li></ul>"},
+  {t:"看還在直播的場次（LIVE 時移）",d:RU_F([["錄影中的 FLV","#ff4d6d"],["切成 2 秒一片","#f0ad4e"],["手機／平板播放","#4dc9ff"]])+"<ul><li>還在直播、而且正在錄影的場次，回放會用「直播畫面（可回看）」：把錄影中的 FLV 切成 2 秒一片給手機播。</li><li>一打開先從<b>大約 30 秒前</b>開始，跟著最新畫面走；最新那一兩片寫到一半不給，所以最新畫面再晚約 4 秒，加上 TikTok 本身的延遲。</li><li>往回看：程式從尾巴往前<b>每次補 2 分鐘</b>（限速每秒約 3 MB，不搶錄影），補到哪裡才看得到哪裡，所以<b>剛打開時只能往回拉一點點</b>，等一下才能拉到開播。這就是「預載入速度會影響回放」。</li><li>同時最多 <b>3 位</b>主播用這種方式看；沒人看 <b>90 秒</b>就自動停掉、清掉暫存。</li></ul>"},
+  {t:"已經下播的回放",d:"<ul><li>播的是影片庫裡的 MP4，可以直接跳到任何位置（程式一次只送一小段，不會整支讀完）。</li><li>一場有好幾段影片時，照時間軸<b>一段接一段</b>播；中間沒錄到的地方自動跳過。</li><li>影片在傳統硬碟上，硬碟很忙（轉檔、搬檔、搬硬碟）時，開始播放和跳轉會慢一點。設定「手機回放加速」打開後，有人在手機看回放時背景工作全部讓路。</li><li>MP4 已經刪掉的場次：用刪之前截的 60 張圖（或 20 張）在影片的位置左右翻看，留言、禮物、M4A 照舊。</li><li>剪輯成品手機放不出畫面時（HEVC、10-bit…），背景自動用顯示卡轉一份相容的，原檔留著。</li></ul>"},
+  {t:"平板版回放（4 格）",d:'<div class="ruQuad"><span>左上<br>💬 留言</span><span>右上<br>🎁 禮物</span><span>左下<br>🎵 點歌</span><span>右下<br>👋 進入</span></div>'+"<ul><li>右上角「📱 手機／▭ 平板」切換（預設看螢幕大小）。平板<b>橫著</b>看回放時，右邊分成 4 格，每格選要看什麼。</li><li>中間一條直線貫穿上下，左右兩欄的橫線<b>各自</b>拖，可以上下不對稱；點兩下恢復。大小和選擇會記住。</li><li>App 以後的修正手機、平板一起改，除非你說「平板更正」。</li></ul>"}]},
+ {k:"grade",i:"🏷",c:"#ffc94d",t:"主播等級（🗂 主播審核）",s:[
+  {t:"每個等級的意思與自動規則",d:'<table class="ruT"><tr><th>等級</th><th>自動傳 YouTube</th><th>傳好後原檔</th><th>特別規則</th></tr>'+
+   '<tr><td>'+RU_G("S","無條件保存","#ffc94d")+'</td><td>✔ 最優先</td><td>✔ 留著</td><td>不會被自動刪</td></tr>'+
+   '<tr><td>'+RU_G("A","保存","#45d483")+'</td><td>✔</td><td>移到隔離區</td><td></td></tr>'+
+   '<tr><td>'+RU_G("AD","A-Dance","#56e39f")+'</td><td>✔</td><td>✔ 留著</td><td></td></tr>'+
+   '<tr><td>'+RU_G("AS","A-Sing","#f78fb3")+'</td><td>✔</td><td>移到隔離區</td><td></td></tr>'+
+   '<tr><td>'+RU_G("B","普通","#2ec4b6")+'</td><td>—</td><td>留著</td><td></td></tr>'+
+   '<tr><td>'+RU_G("E","觀察","#4dc9ff")+'</td><td>—</td><td>留著</td><td>C 槽快滿、要停錄影時：F 先停、再來 E、再來未分級</td></tr>'+
+   '<tr><td>'+RU_G("G","只錄聲音","#b48cff")+'</td><td>✔</td><td>移到隔離區</td><td>截 60 張＋字幕做好後才傳</td></tr>'+
+   '<tr><td>'+RU_G("F","刪除","#ff4d6d")+'</td><td>✖ 不傳</td><td>—</td><td>按「處置 F」會把這位整個刪掉</td></tr></table>'+
+   "<ul><li>上面是預設值。審核頁「🏷 等級設定」可以新增、改名、改色、排序，也可以改每一級要不要傳 YouTube、傳好原檔要不要留（S、F、G 的特別作用不能刪）。</li><li>「傳 YouTube」的等級：那一場的轉檔、截圖、字幕、預覽圖都做好之後才自動上傳。</li></ul>"},
+  {t:"審核頁怎麼看",d:"<ul><li>每位主播所有場次、每 2 分鐘一張圖接成一長條（新的在上），用來決定等級。</li><li>圖只拿檔案總管已經做好的預覽圖，不另外跑 FFmpeg；還沒做好的先用 20 張截圖，都沒有就標「預覽圖排隊中」。</li></ul>"}]},
+ {k:"lv",i:"🗂",c:"#45d483",t:"場次標記（−2／0／+1／+2）與刪除",s:[
+  {t:"四種標記",d:'<div class="ruLv"><span style="--c:#ff4d6d">−2 可丟</span><span style="--c:#f0ad4e">0 未分類</span><span style="--c:#45d483">+1 待剪輯</span><span style="--c:#2ec4b6">+2 保存</span></div>'+"<ul><li>在檔案總管按等級＝存好、自動捲到下一場。</li><li><b>沒按就滑到下一場＝上一場自動標 −2</b>；有選片段的話，那些片段先合併輸出成 1 部剪輯成品。按「↩ 復原自動 −2」可以還原。</li></ul>"},
+  {t:"−2 的場次要刪 MP4 時（重要）",d:RU_F([["標 −2、按刪除","#ff4d6d"],["這位的等級要傳 YouTube？","#f0ad4e"],["先傳 YouTube","#4dc9ff"],["傳好 → 移到隔離區","#b48cff"],["你抽查後全部刪","#45d483"]])+
+   "<ul><li>例如 <b>S 級主播的場次標 −2 後，一定要等它傳上 YouTube 才會處理原檔</b>：還沒傳完的先不刪、自動排進 YouTube，傳好才移到「YouTube 已上傳-刪除隔離區」。A、A-Dance、A-Sing、G 也一樣。</li><li>不用傳 YouTube 的等級：直接照你按的刪。</li><li>查不到 YouTube 狀態時<b>寧可先不刪</b>。</li><li>隔離區裡的不會自己消失：在「工具 → 🗑 隔離區」逐項抽查（看 YouTube、看原檔）後，按一次全部刪。</li><li>還在直播／錄影中的場次<b>不能刪影片</b>。</li></ul>"},
+  {t:"刪 MP4 之前一定先截圖",d:"<ul><li>不管從哪裡刪 MP4（歷史紀錄、檔案總管、整理 MP4、手機、網頁），刪之前先在影片 10%、20%…100% 各截圖，共 <b>60 張</b>（原檔不完整的 20 張），每張約 100 KB。</li><li>剪輯成品、留言、禮物、錄音全部留著；剪輯成品<b>永久保留</b>。</li><li>有 ⭐ 收藏片段的場次：刪 MP4／轉出時會跳過那些片段。</li></ul>"},
+  {t:"程式自己會清的",d:"<ul><li><b>冗餘 14 天+</b>：放超過 14 天、沒有場次紀錄的 MP4（檔案總管「冗餘」那些）。</li><li><b>暫存</b>：只錄聲音的場次留著的 MP4，<b>5 天後</b>沒按「📌 留下」就自動刪。</li><li>每 30 秒一張的預覽圖：C 槽最多 40 GB，超過從最久沒看的刪；要看時再做。精選用的每 2 秒圖保留 15 天、最多 60 GB。</li></ul>"}]},
+ {k:"yt",i:"▶",c:"#ff4d4d",t:"YouTube 上傳",s:[
+  {t:"上傳規則",d:"<ul><li>照「主播等級」自動上傳（見主播等級），也可以在 YouTube 上傳頁手動加。隱私預設<b>不公開</b>（搜尋不到，只有拿到網址的人看得到；回放頁可以內嵌 YouTube 跟留言同步播）。</li><li>每 <b>24 小時最多 100 個</b>，照<b>上傳完成時間滾動</b>算；頁面會顯示第 101 個什麼時候可以開始。額度用完自動等 6 小時。</li><li>速度上限預設 20 Mbps，不搶錄影的網路；可以設只在某個時段開始傳新的。<b>正在傳的那部一定照傳完</b>，不會中途斷。</li></ul>"},
+  {t:"先傳哪些",d:"<ul><li>現在是「<b>舊的場次先傳</b>」。S 級永遠最優先。</li><li><b>開播在最近 3 天內的場次先不傳</b>，留給合併同一場被切開的（YouTube 頁可以改天數，0＝不限）。已經開始傳的照傳完。</li></ul>"},
+  {t:"傳好之後",d:"<ul><li>YouTube 處理好會把網址存進那一場。</li><li>「傳好原檔留著」沒勾的等級：原檔移到「YouTube 已上傳-刪除隔離區」，等你抽查再刪（「上傳好後自動移到隔離區」預設關）。</li></ul>"}]},
+ {k:"bg",i:"✨",c:"#b48cff",t:"背景工作：精選、字幕、預覽圖、轉檔順序",s:[
+  {t:"誰先誰後",d:RU_F([["監控、錄影（永遠最先）","#ff4d6d"],["FLV → MP4 轉檔","#f0ad4e"],["語音轉字幕","#4dc9ff"],["預覽圖、截圖","#2ec4b6"],["✨ 精選（最後）","#b48cff"]])+"<ul><li>精選是非必要的工作，排最後：轉檔、字幕、搬檔、截圖在做，或 CPU 超過 55%、顯示卡超過 50%、硬碟忙超過 50% 時就先停（做到一半的之後重做那場）。</li><li>你正在檔案總管看的那場、排著要上傳 YouTube 的，精選和每 2 秒圖永遠先做。</li></ul>"},
+  {t:"語音轉字幕",d:"<ul><li>下播、錄音整理好後（約 5 分鐘）自動排進來，只在顯示卡加速版可以用時自動轉（CPU 轉太吃效能）。</li><li>每場最慢 6 小時轉完，程式算出剛好轉完需要的最低用量，平常顯示卡幾乎閒著；排隊到 8 成以上會自動加快。</li></ul>"},
+  {t:"以前留下的 FLV",d:"<ul><li>新的錄影一律自動轉。以前留在硬碟上的 FLV 預設不自動處理，到「FLV 待處理」勾選（V1.1.28 已經把積欠的一次全部排進去）。</li><li>一次轉一部；大部分只是換容器、直接複製畫面，速度看硬碟，顯示卡用不太到，這是正常的。</li></ul>"},
+  {t:"每日精選影片",d:"<ul><li>每天早上把前一天的精彩片段（不含 PK）剪成一支，最長 30 分鐘、只留 7 天；你自己剪的成品不受影響。</li></ul>"}]},
+ {k:"th",i:"🌡",c:"#f0ad4e",t:"控溫、斷電、效能保護（不准讓主程式過載）",s:[
+  {t:"CPU 預算",d:RU_BAR([[45,"整台 CPU 預算 45%（SortCut 有開）","#f0ad4e"],[55,"留給你和系統","#3a4250"]])+"<ul><li>背景的轉檔、合併、預覽、截圖、字幕全部算一組，用 Windows 內建的 CPU 硬上限壓住（只會變慢，不會停，最少留 5%）。</li><li>上限＝整台預算 −（錄影和其他程式用的）。SortCut 有開時 45%，沒開時 60%。<b>錄影、監控、畫面不受限制</b>。</li><li>顯示卡 <b>75°C</b> 以上，新的背景轉檔先等（跑到一半的照跑完，最多等 10 分鐘）。</li></ul>"},
+  {t:"斷電偵測（通知 SortCut）",d:"<ul><li>程式沒按「停止監控並退出」就沒了、而且電腦重開過，再對照事件檢視器的 Kernel-Power 41 → 判定為<b>非人為斷電</b>。</li><li>重開後通知 SortCut：12 小時內降到最低（Lv 1、CPU 最低、同時 1 個）；24 小時內斷電 2 次以上 → 叫 SortCut 停止轉檔至少 24 小時。TikLive 自己的背景重活也少 15%。</li><li>顯示卡供需頁可以「解除警報」。</li></ul>"},
+  {t:"效能自我保護",d:"<ul><li>CPU 95% 以上超過 2 分鐘、錄影用的硬碟忙超過 85% 超過 1 分鐘，或 70 位以上同時在播且 CPU 超過 85% → 精選、預告、預覽圖、搜尋、報告先暫停，閒下來自動繼續。</li><li>主程式畫面卡住超過 6 秒 → 自動切到不用更新的「休息畫面」，監控、錄影照常。</li><li>資料庫寫不進去：3 分鐘先停背景資料庫工作，10 分鐘重開卡住的連線，20 分鐘自動重開程式。</li></ul>"}]},
+ {k:"conn",i:"🔌",c:"#2ec4b6",t:"連線與開播檢查（不被 TikTok 擋）",s:[
+  {t:"多久查一次有沒有開播",d:'<table class="ruT"><tr><th>主播</th><th>檢查間隔</th></tr><tr><td>重點（紅色）</td><td>3 秒起，慢慢拉長到 10 秒</td></tr><tr><td>一般</td><td>60 秒（他平常開播的時段加快到 30 秒）</td></tr><tr><td>7 天以上沒開播</td><td>× 3（3 分鐘一次）</td></tr><tr><td>帳號不存在（連續 3 次）</td><td>× 10</td></tr></table>'+"<ul><li>全部檢查排隊進行：續寫中的直播 → 重點 → 一般，<b>每分鐘最多 80 次</b>。TikTok 開始拒絕就自動放慢一級（45%）、最多兩級（22%），恢復正常 10 分鐘才加回來。</li><li>開播時間很固定的主播，快到平常時間前 3 分鐘就排到最前面。</li></ul>"},
+  {t:"重開程式不是萬靈丹",d:"<ul><li>TikTok 正在拒絕、或簽章額度用完時，重開程式不會換網址，反而會斷掉直播中的場次（程式會先提醒你）。</li></ul>"}]},
+ {k:"upd",i:"☁",c:"#3a7bd5",t:"更新、搬硬碟、場次合併",s:[
+  {t:"雲端更新（GitHub）",d:RU_F([["開程式 1 分鐘後、每 6 小時檢查","#3a7bd5"],["有新版只提示","#f0ad4e"],["你按「更新」","#45d483"],["熱更新（不中斷錄影）","#2ec4b6"]])+"<ul><li><b>一定要你按才更新，不會自己重開</b>。下載限速、比對檔案完整才裝。</li><li>以後<b>只熱更新、絕對不換 EXE 外殼</b>（不會再要你關程式重裝）。</li><li>更新後有問題，可以在更新頁「退回前面的版本」（一樣不中斷錄影）。</li></ul>"},
+  {t:"場次合併（⧉ 合併重複場次）",d:RU_F([["第 1 段","#4dc9ff"],["第 2 段","#4dc9ff"],["第 3 段","#4dc9ff"],["⧉ 合併 → 1 場","#45d483"]])+"<ul><li>同一位主播、<b>TikTok 開播時間一樣（相差 1 分鐘內）</b>＝同一場直播，只是程式重開、斷電、斷線被切開。</li><li>合併後留言、禮物、送禮者、觀看人數都歸到同一場；<b>影片不重新輸出</b>，回放照時間一段接一段播，中間沒錄到的自動跳過。留下編號最大的那一場。</li><li>合併前自動備份資料庫；直播中的場次不會動（等它下播）。</li></ul>"},
+  {t:"搬硬碟（E → R，已完成）",d:"<ul><li>先複製、每個檔讀回來比對一樣才算數 → 第一輪搬完自動切換（錄影不停）→ 舊硬碟上的逐一確認後刪 → 「搬硬碟完成」。</li><li>舊硬碟上剩的十幾 GB 是 Windows 自己的（回收筒、系統還原、檔案系統本身），格式化就清掉。</li></ul>"}]},
+ {k:"dev",i:"📱",c:"#9aa5b3",t:"手機、平板、網頁版",s:[
+  {t:"差別",d:"<ul><li>手機版與平板版是同一個 App，右上角切換；除了回放（平板 4 格），其他畫面一樣。</li><li>網頁版（電腦瀏覽器）：右下角可以調滾輪倍數（×0.5～×8）、「滾輪 ∿」絲滑開關、介面大小。每個瀏覽器自己記。</li><li>會改東西的操作（更新、刪除、合併、設定）都要密碼；只看的不用。</li></ul>"}]}
+];
+async function rulesMount(root){if(!root)return;
+  const st=(()=>{try{return JSON.parse(localStorage.getItem("tlm_rules_open")||"{}")||{};}catch(e){return {};}})();
+  const draw=(q)=>{q=(q||"").trim().toLowerCase();let n=0;
+    const h='<div class="ruHead"><b>📖 規則說明</b><div class="snote">程式實際怎麼做（照程式碼整理，V1.1.32）。看不懂、跟你遇到的不一樣，截圖跟我說，我改程式或改這裡。</div>'+
+     '<input class="ruQ" placeholder="🔍 找規則（例如：−2、YouTube、延遲、斷電）" value="'+(q?q.replace(/"/g,"&quot;"):"")+'"><div class="ruToc">'+RULES.map(c=>'<button data-go="'+c.k+'" style="--c:'+c.c+'">'+c.i+' '+c.t.split("：")[0].split("（")[0]+'</button>').join("")+'</div></div>'+
+     RULES.map(c=>{const S=c.s.filter(x=>!q||(c.t+x.t+x.d.replace(/<[^>]+>/g,"")).toLowerCase().includes(q));if(!S.length)return"";n+=S.length;const op=q||st[c.k]!==0;
+      return '<section class="ruC'+(op?" on":"")+'" id="ru_'+c.k+'" style="--c:'+c.c+'"><h3 data-k="'+c.k+'"><span>'+c.i+'</span>'+c.t+'<em>'+S.length+' 項</em><i>'+(op?"▾":"▸")+'</i></h3><div class="ruB">'+S.map(x=>'<div class="ruI"><h4>'+x.t+'</h4>'+x.d+'</div>').join("")+'</div></section>';}).join("")+(q&&!n?'<div class="ruNone">找不到「'+q+'」</div>':"");
+    root.innerHTML=h;const qi=root.querySelector(".ruQ");qi.oninput=()=>{const v=qi.value,p=qi.selectionStart;draw(v);const q2=root.querySelector(".ruQ");q2.focus();try{q2.setSelectionRange(p,p);}catch(e){}};
+    root.querySelectorAll("h3[data-k]").forEach(h3=>h3.onclick=()=>{const k=h3.dataset.k,sec=h3.parentElement,o=!sec.classList.contains("on");sec.classList.toggle("on",o);h3.querySelector("i").textContent=o?"▾":"▸";st[k]=o?1:0;try{localStorage.setItem("tlm_rules_open",JSON.stringify(st));}catch(e){}});
+    root.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{const s=root.querySelector("#ru_"+b.dataset.go);if(s){s.classList.add("on");s.scrollIntoView({behavior:"smooth",block:"start"});}});};
+  draw("");}
+
 async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（照 SortCut「R 碟清空搬移」的樣子） */
   const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   const G=b=>b==null?"—":b>=1e12?(b/1e12).toFixed(2)+" TB":b>=1e9?(b/1e9).toFixed(1)+" GB":b>=1e6?(b/1e6).toFixed(1)+" MB":Math.round(b/1e3)+" KB";
@@ -8018,6 +8102,7 @@ PAGES[51]={render(pg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding
 PAGES[50]={render(pg,arg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding:14px;max-width:820px"><div id="hoRoot"></div></div>`;hostMount(pg.querySelector("#hoRoot"),arg||window.HOST_U);}};   /* TK_V1.0.42 */
 PAGES[54]={render(pg,arg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding:14px;max-width:900px"><div id="gfsRoot"></div></div>`;gfsMount(pg.querySelector("#gfsRoot"),arg||window.GIFS_U);}};   /* TK_V1.0.75 */
 PAGES[56]={render(pg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding:14px;max-width:960px"><div id="yhcRoot"></div></div>`;yhcMount(pg.querySelector("#yhcRoot"));}};   /* TK_V1.0.97 */
+PAGES[59]={render(pg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding:14px;max-width:1000px"><div id="ruRoot"></div></div>`;rulesMount(pg.querySelector("#ruRoot"));}};   /* V1.1.32 */
 PAGES[58]={render(pg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding:14px;max-width:900px"><div id="mrgRoot"></div></div>`;mrgMount(pg.querySelector("#mrgRoot"));}};   /* V1.1.25 */
 PAGES[57]={render(pg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding:14px;max-width:900px"><div id="migRoot"></div></div>`;migMount(pg.querySelector("#migRoot"));}};   /* V1.1.07 */
 PAGES[55]={render(pg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding:14px;max-width:900px"><div id="gsdRoot"></div></div>`;gsdMount(pg.querySelector("#gsdRoot"));}};   /* TK_V1.0.84 */
