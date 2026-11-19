@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.39"
+APP_VERSION = "1.1.40"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -10420,7 +10420,7 @@ class MainWindow(QMainWindow):
         try:
             for x in (self._merge_estimates().get('items') or [])[:200]:
                 it.append({'id': x.get('folder', ''), 'state': 'run' if x.get('state') == 'active' else 'wait', 'text': f"{nm(x.get('user', ''))}　{x.get('folder', '')}",
-                           'sub': (f"轉檔中 {x.get('pct', 0):.0f}%，還要約 {fmt_elapsed(x.get('left') or 0)}" if x.get('state') == 'active' else f"排隊中 · {int(x.get('bytes') or 0) / 1e9:.1f} GB"),
+                           'sub': (f"轉檔中 {x.get('pct', 0):.0f}%，還要約 {fmt_elapsed(x.get('left') or 0)}" + _mq_how(x) if x.get('state') == 'active' else f"排隊中 · {int(x.get('bytes') or 0) / 1e9:.1f} GB"),
                            'pct': x.get('pct') if x.get('state') == 'active' else None, 'cancel': False})
         except Exception: pass
         try:                                                                    # V0.7.22 需要重新壓縮時用哪一個（NVIDIA／Intel 內顯／CPU）
@@ -10434,9 +10434,12 @@ class MainWindow(QMainWindow):
                         if ff_: self._video_encoder(ff_)
                     except Exception: pass
                 threading.Thread(target=_pr, daemon=True).start()
-            enc_ = pref_ if pref_ != 'auto' else next((k for k in ('h264_nvenc', 'h264_qsv', 'h264_amf') if ec.get(k)), '' if not ec else 'libx264')
+            alt_ = bool(ec.get('nvenc_alt')) and not ec.get('h264_nvenc')      # V1.1.40 主 FFmpeg 不行、ffmpeg_gpu 那份可以＝其實是用顯示卡（原本這裡只看主 FFmpeg，誤寫成 CPU）
+            enc_ = pref_ if pref_ != 'auto' else ('h264_nvenc' if alt_ else next((k for k in ('h264_nvenc', 'h264_qsv', 'h264_amf') if ec.get(k)), '' if not ec else 'libx264'))
+            if pref_ == 'auto' and enc_ == 'libx264' and 'nvenc_alt' not in ec and self._ff_gpu(): enc_ = ''      # ffmpeg_gpu 還沒測：偵測中
             enc_t = {'h264_nvenc': 'NVIDIA 顯示卡', 'h264_qsv': 'Intel 內顯', 'h264_amf': 'AMD 顯示卡', 'libx264': 'CPU'}.get(enc_, '偵測中…')
-            if pref_ == 'auto' and ec and not ec.get('h264_nvenc') and enc_ != 'h264_nvenc': enc_t += '（NVIDIA 測試沒通過）'
+            if enc_ == 'h264_nvenc' and alt_: enc_t += '（用 ffmpeg_gpu 那份 FFmpeg；主 FFmpeg 太新、1060 的驅動不支援）'
+            if pref_ == 'auto' and ec and enc_ == 'libx264': enc_t += '（NVIDIA 測試沒通過：' + ('ffmpeg_gpu 那份 FFmpeg 也不行' if self._ff_gpu() else f'程式資料夾裡找不到 ffmpeg_gpu（{Path(PACKAGE_ROOT) / "ffmpeg_gpu"}）') + '）'
         except Exception: enc_t = ''
         S.append({'key': 'merge', 'title': '🎬 錄影 FLV → MP4', 'note': '錄影一定要轉，不能取消（要先暫停請到「FLV 待處理」）' + (f'。一般是直接合併（不壓縮、不用顯示卡）；畫面大小不一樣要重新壓縮時用：{enc_t}（設定 → 錄影 →「合併重新壓縮用」可改）' if enc_t else ''), 'items': it})
         it = []                                                                 # SSD ↔ HDD
@@ -52257,6 +52260,16 @@ def _merge_order(q):
 
 _MO_CACHE = {}
 _MQ_MINE = set()                                                                # V0.8.07 這一版的程式排進轉檔排隊的資料夾
+
+
+def _mq_how(x):
+    """V1.1.40 後台狀態轉檔那一部是怎麼轉的：直接合併（不壓縮）／重新壓縮用顯示卡或 CPU."""
+    try:
+        m = x.get('mode') or ''; e = str(x.get('enc') or '')
+        if m in ('copy', 'audio'): return ' · 直接合併（不壓縮）'
+        if m == 'encode': return ' · 重新壓縮：' + ('NVIDIA 顯示卡' if e.startswith('h264_nvenc') else 'CPU' + ('（顯示卡解碼）' if '顯示卡解碼' in e else '') if e else '準備中')
+    except Exception: pass
+    return ''
 
 
 def _gpu_dec_ok():
