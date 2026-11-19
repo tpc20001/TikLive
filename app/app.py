@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.37"
+APP_VERSION = "1.1.38"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -3000,6 +3000,10 @@ class MainWindow(QMainWindow):
                     except Exception: pass
                 QTimer.singleShot(20000, ok_)
         except Exception: pass
+        try:                                                                  # V1.1.38 只錄聲音照審核等級 G（開程式 20 秒後、之後每分鐘）
+            QTimer.singleShot(20000, lambda: self._nv_sync_g())
+            self._nv_tm = QTimer(self); self._nv_tm.timeout.connect(lambda: self._nv_sync_g(log=True)); self._nv_tm.start(60000)
+        except Exception: pass
         try: self._ret_loop()                                                 # V1.1.36 原檔保留期限（10 分鐘後開始，之後每 30 分鐘）
         except Exception: pass
         try: self._cu_loop()                                                  # V1.1.13 ☁ 雲端更新：1 分鐘後檢查，之後每 6 小時（只提示）
@@ -3941,6 +3945,26 @@ class MainWindow(QMainWindow):
         elif ch is a_del: self.delete_streamer_record(uid)
 
     # ================= V0.6.59 只錄聲音的主播（照常監控，不錄 MP4，M4A 照錄） =================
+    def _nv_sync_g(self, log=True):
+        """V1.1.38 使用者 11/19：「只錄聲音的主播」清單拿掉，改成照主播審核的等級——G＝只錄聲音，其他等級＝照常錄影片。
+        （🧪 實驗「標 F 先改只錄聲音」開著時，那些 F 照舊。）每分鐘對一次，不一樣就照等級改."""
+        try:
+            gr = self._rv_grades() or {}; roster = list(self.streamer_names.keys()) if getattr(self, 'streamer_names', None) else []
+            lo = {str(u).lower(): u for u in roster}
+            want = set()
+            for k, x in gr.items():
+                if not isinstance(x, dict): continue
+                u = lo.get(str(k).lower())
+                if not u: continue
+                if x.get('g') == 'G' or (x.get('g') == 'F' and x.get('nv_auto') and self._exp_mode('rv_f_audio') == 'A'): want.add(u)
+            ns = set(getattr(self, 'novideo_streamers', set()) or set())
+            add = sorted(want - ns); drop = sorted(u for u in ns - want if u in lo.values() or True)
+            if add: self._set_novideo(add, True)
+            if drop: self._set_novideo(drop, False)
+            if (add or drop) and log: self._wd_log(f'🎧 只錄聲音改照審核等級 G：改只錄聲音 {len(add)} 位、恢復錄影片 {len(drop)} 位')
+            return {'add': add, 'drop': drop}
+        except Exception as ex: return {'err': str(ex)}
+
     def _set_novideo(self, users, on, delete=False):
         users=[str(u).lstrip('@').strip() for u in users if str(u).strip()]
         ns=self.__dict__.setdefault('novideo_streamers',set()); stopped=[]
@@ -4050,6 +4074,8 @@ class MainWindow(QMainWindow):
         """Returns '' (nothing changed), 'on', 'del' (on + deleting the MP4 in the background) or 'off'."""
         parent = parent or self; u = str(u or '').lstrip('@'); name = self.streamer_names.get(u, u)
         if not u: return ''
+        QMessageBox.information(parent, '只錄聲音', f'只錄聲音現在照「主播審核」的等級決定：\n\n把「{name}」標成 G＝只錄聲音；改成別的等級就恢復錄影片。')   # V1.1.38
+        return ''
         if u in getattr(self, 'novideo_streamers', set()):
             if QMessageBox.question(parent, '恢復錄影片', f'{name}　@{u} 目前只錄聲音。\n\n要恢復錄影片嗎？（下次開播開始錄 MP4）') != QMessageBox.Yes: return ''
             QMessageBox.information(parent, '恢復錄影片', self._set_novideo([u], False)['message']); return 'off'
@@ -31160,6 +31186,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         self.streamers_reload_btn.clicked.connect(self.start_profile_reload); head.addSpacing(10); head.addWidget(self.streamers_reload_btn)
         b_exp=QPushButton('⇪ 匯出清單'); b_exp.setToolTip('把主播陣容（頭像、帳號、暱稱）存成資料夾，可分享到其他電腦；不含任何歷史紀錄'); b_exp.clicked.connect(self.open_streamer_export); head.addWidget(b_exp)
         b_nv=QPushButton('🎧 只錄聲音的主播'); b_nv.setToolTip('批次設定：照常監控（留言、禮物、數據都記），只錄 M4A 聲音、不錄 MP4；可以順便刪掉已經存的 MP4'); b_nv.clicked.connect(lambda: self.open_novideo_dialog()); head.addWidget(b_nv)
+        b_nv.setVisible(False)   # V1.1.38 只錄聲音改照審核等級 G
         b_imp=QPushButton('⇩ 匯入清單'); b_imp.setToolTip('載入別人分享的主播清單，先列出差異讓你勾選'); b_imp.clicked.connect(self.open_streamer_import); head.addWidget(b_imp)
         b_deep=QPushButton('🔬 深度連線測試'); b_deep.setToolTip('對久未開播和 0 場的主播，用 15 種不同方式測試連線，找出是「沒開播」「帳號不見」「需要登入」還是「被 TikTok 擋」')
         b_deep.clicked.connect(self.open_deep_test); head.addWidget(b_deep)
@@ -44418,7 +44445,7 @@ function drawSetSearch(){const q=(S.setQ||"").trim().toLowerCase(),sb=$("#sbody"
 /* ---------------- V0.6.95 工具（主頁分頁）：原本放在設定左邊的工作流 ---------------- */
 const TOOLS=[["緊急事件",[["emg","🚨","緊急處理","C／I 槽堆積、轉檔與搬檔進度、速度、模式、顯示卡"]]],["🧪 實驗工作區",[["exp","🧪","實驗工作區","新想法先放這裡：同一件事的幾種做法並排，A／B 對照自動比較"]]],["資料",[["gift","🎁","送禮者","誰送了多少、送禮排行、每位的紀錄"],["hrank","🏆","主播收禮排行","每位主播收了多少鑽石、裡面誰送最多（送禮者反過來看）"]]],["影片工具",[["vg","▦","檔案總管（影片快速瀏覽 v2）","每幾秒一張圖排滿畫面，選起來初剪；上面分頁也可以直接進"],["tkd","📥","TKDownloader","新增主播頁貼影片網址下載的短影片：篩選、播放、存到手機"],["igd","📸","IGDownloader","新增主播頁貼 IG 網址下載的照片／影片：篩選、看、存到手機"],["feat","⏯","精選／審核 開關","暫停省效能（功能保留），之後在這裡再打開"],["sp","✂","批量剪輯","選主播＋禮物，一次剪很多段"],["org","🗂","整理 MP4","依保存等級／已剪輯過的，一次刪 MP4"],["shp","📸","批量截 20 張","歷史場次先截好 20 張圖（不用等刪 MP4）"],["yt","▶","YouTube 上傳","自動上傳（不公開）、拿到網址後移到暫放"],["phr","📱","手機錄屏","從外接硬碟限速匯入手機錄的畫面，用聲音自動對上是哪一場，回放可以切換版本"],["cul","🌐","Chrome 上傳限速","看 K 槽忙不忙自動調 Chrome 的上傳速度"],["stt","🎙","語音轉字幕","下播後自動轉；進度、效能上限"]]],
   ["電腦與連線",[["bg","🖥","後台狀態","現在在跑什麼、排隊什麼，可以取消"],["stat","📈","開播統計","主播什麼時候開播、播多久"],["prof","🧭","主播特性","習慣、PK 比例、你標的等級、錄到幾成 → 建議"],["csv","📤","匯出場次表（Excel）","最近 7／30／90 天或一年的場次，或只匯出某位主播，CSV 直接用 Excel 開"],["dtl","📅","一天的時間軸","今天（或任一天）每位主播幾點播到幾點、錄到哪裡、漏了開頭沒有"],["ythold","🗑","YouTube 已上傳-刪除隔離區","傳好 YouTube 的原檔都在這：逐項抽查 YouTube／原檔，沒問題就一次全部刪"],["mig","💽","E → R 搬硬碟","把 E 槽整顆慢慢複製到 R 槽（斷電安全），最後一次切換"],["merge","⧉","合併重複場次","程式重開、斷電切成好幾段的同一場直播，合成一場（影片照時間接著播）"],["gsd","🎛","顯示卡供需","顯示卡每天閒多久、忙多久；字幕每天錄到的量轉不轉得完（要不要換顯示卡看這裡）"],["hp","🩺","一頁健檢","所有要處理／要留意的事一次看，加上記憶體、熱更新、備份、字幕搜尋庫等數字"],["host","👤","主播總覽","選一位主播：開播時段、下次可能開播、等級、禮物、筆記、最近場次"],["dhh","🩺","硬碟健康紀錄","每顆硬碟 30 天的溫度、讀寫錯誤趨勢；錯誤一直變多就該換了"],["hevc","🧪","HEVC 壓縮試算","拿一分鐘影片用顯示卡壓成 H.265，看能省多少空間、畫質比較（只試，不動原檔）"],["act","🕘","自動處理紀錄","程式自己做了什麼：刪除、YouTube、手機錄屏、自動分級、備份、重開"],["sbk","🗂","小檔備份","每天自動備份設定／分級／YouTube 排隊／手機錄屏紀錄，可以下載"],["chv","🆕","版本與更新","這次更新了什麼：可以搜尋、依版本收合，新的標 🆕"],["wkr","📰","每週報告","上週錄了多少、錄到幾成、最精彩的 5 段"],["cg","🚦","連線管控","排隊、被限制時自動放慢"],["conn","🩺","連線狀況","每位主播的連線情形"],["logx","📋","LOG 與問題","錯誤紀錄、異常、自動處理結果"],["rules","📖","規則說明","程式實際怎麼做：等級、刪除、YouTube、回放延遲、控溫…"]]],
-  ["主播與畫面",[["cats","🗂","主播分類","分類顏色、資料夾"],["nv","🎧","只錄聲音的主播","哪些主播只錄 M4A"],["gfx","🎁","送禮動畫","直播畫面上的送禮動畫"]]]];
+  ["主播與畫面",[["cats","🗂","主播分類","分類顏色、資料夾"],["gfx","🎁","送禮動畫","直播畫面上的送禮動畫"]]]];
 function toolName(k){if(k==="host")return "👤 主播總覽";if(k==="gifs")return "🎞 GIF 製作";for(const [,L] of TOOLS)for(const x of L)if(x[0]===k)return x[1]+" "+x[2];return "工具";}
 /* V0.7.42.026 智慧功能狀態：點一行跳到那一頁 */
 /* TK_V1.0.21 「工具」分頁上的紅點：今天要處理的件數（智慧狀態卡裡 warn／bad 的待辦項目），5 分鐘看一次 */
@@ -44551,7 +44578,7 @@ const RULES=[
   {t:"空間不夠時",d:"<ul><li>SSD 剩不到 <b>"+RU_V('rec.ssd_min_free','GB',60)+"</b>：新的錄影改成直接錄在影片庫硬碟。</li><li>影片硬碟剩不到 <b>"+RU_V('rec.video_min_free','GB',30)+"</b>：不開始新的錄影（<b>聲音照錄</b>）。</li><li>🛡 C 槽守門員每分鐘看 C 剩多少、減少多快：第 1 級先停不急的背景工作；第 2 級全速把東西搬走；第 3 級（剩不到 15 GB 或 20 分鐘內會滿）才會一位一位停掉正在錄到 C 的影片（F → E → 未分級先停）。</li></ul>"},
   {t:"同一場直播的判定（斷線、重開）",d:"<ul><li>主播斷線後 <b>"+RU_V('conn.grace_minutes','分鐘',10)+"內</b>連回同一個直播間＝<b>續寫同一場</b>（錄影會分成第 2 段、第 3 段…）。</li><li>直播中卻 <b>"+RU_V('monitor.silent_min','分鐘',30)+"</b>沒有任何留言、禮物、進場、人數也沒變（而且沒在錄影）→ 重新連一次確認：還在播就續寫，結束了就把結束時間改回最後有資料的時間。</li><li>程式重開、斷電、超過 10 分鐘才連回來 → 會變成<b>另一場</b>。這種被切開的，用「⧉ 合併重複場次」合回一場（見「場次合併」）。</li></ul>"},
   {t:"開程式、熱更新時的監控",d:"<ul><li>開程式 3 秒後自動開始監控（設定可以關）。正在錄的場次在熱更新、重開時會<b>接著錄同一場</b>。</li><li>搬硬碟切換後，如果找不到影片硬碟（例如 R 槽代號跑掉），程式<b>先不開始監控</b>，不會錄到別的地方，會提示你去磁碟管理改代號。</li></ul>"},
-  {t:"只錄聲音的主播",d:"<ul><li>主播設成只錄聲音時，直播中照樣錄畫面（FLV 先放 C 槽），下播後直接從 FLV 截 <b>20 張圖</b>就刪掉 FLV，不轉 MP4、不進影片庫；截不到圖才照原本轉 MP4。</li><li>直播中每 <b>"+RU_V('rec.snap_min','分鐘',2)+"</b>另外拍一張快照，回放時在影片的位置左右翻看。</li></ul>"}]},
+  {t:"只錄聲音的主播（照審核等級 G）",d:"<ul><li><b>在「主播審核」標 G＝只錄聲音</b>；改成別的等級就恢復錄影片。以前另外的「只錄聲音的主播」清單已經拿掉，程式每分鐘照等級對一次，以審核等級為準。</li><li>G 的主播直播中照樣錄畫面（FLV 先放 C 槽），下播後截 60 張圖＋字幕，自動傳 YouTube，傳好才移走原檔。</li><li>直播中每 <b>"+RU_V('rec.snap_min','分鐘',2)+"</b>另外拍一張快照，回放時在影片的位置左右翻看。</li></ul>"}]},
  {k:"play",i:"📺",c:"#4dc9ff",t:"回放與直播中觀看：延遲、預載入",s:[
   {t:"為什麼要「+3 秒」",d:RU_BAR([[3,"留言／禮物（資料）","#4dc9ff"],[1,"約 3 秒","#f0ad4e"],[3,"畫面上才看到","#45d483"]])+"<ul><li>TikTok 的畫面比留言、禮物的資料<b>晚大約 3 秒</b>。所以在回放點一則留言或禮物，會跳到「那個時間 <b>+3 秒</b>」，畫面才對得上（秒數在回放設定可以改）。</li><li>送禮動畫也跟著這個延遲一起延後，畫面上出現禮物那一刻才跳動畫。</li><li>點<b>禮物</b>時會再<b>早 0.5 秒</b>落地，播放 0.5 秒後動畫完整出現。</li></ul>"},
   {t:"看還在直播的場次（LIVE 時移）",d:RU_F([["錄影中的 FLV","#ff4d6d"],["切成 2 秒一片","#f0ad4e"],["手機／平板播放","#4dc9ff"]])+"<ul><li>還在直播、而且正在錄影的場次，回放會用「直播畫面（可回看）」：把錄影中的 FLV 切成 2 秒一片給手機播。</li><li>一打開先從<b>大約 30 秒前</b>開始，跟著最新畫面走；最新那一兩片寫到一半不給，所以最新畫面再晚約 4 秒，加上 TikTok 本身的延遲。</li><li>往回看：程式從尾巴往前<b>每次補 2 分鐘</b>（限速每秒約 3 MB，不搶錄影），補到哪裡才看得到哪裡，所以<b>剛打開時只能往回拉一點點</b>，等一下才能拉到開播。這就是「預載入速度會影響回放」。</li><li>同時最多 <b>3 位</b>主播用這種方式看；沒人看 <b>90 秒</b>就自動停掉、清掉暫存。</li></ul>"},
@@ -47800,7 +47827,7 @@ function lwOrgMount(root,which){root.classList.add("lwOrg");const W=which||(()=>
 /* V0.6.94 手機「工作區」：常用工具放一起（不用再到設定裡找） */
 function wsMount(root){root.classList.add("ws");
   const T=[["vg","▦","檔案總管","影片快速瀏覽 v2：每幾秒一張圖排滿畫面，選起來初剪",typeof vgOpen==="function"],["sp","✂","批量剪輯","選主播＋禮物，一次剪出很多段",typeof spOpen==="function"],
-    ["stt","🎙","語音轉字幕","下播後自動轉；這裡看進度、設定",true],["nv","🎧","只錄聲音的主播","哪些主播只錄 M4A、不錄 MP4",typeof nvOpen==="function"],["bg","🖥","後台狀態","電腦現在在跑什麼、排隊什麼",true]];
+    ["stt","🎙","語音轉字幕","下播後自動轉；這裡看進度、設定",true],["bg","🖥","後台狀態","電腦現在在跑什麼、排隊什麼",true]];
   root.innerHTML=`<div class="wsGrid">${T.filter(x=>x[4]).map(([k,ic,t,sub])=>`<button class="wsCard" data-ws="${k}"><i>${ic}</i><b>${t}</b><small>${sub}</small></button>`).join("")}</div><div class="wsSec">🗂 整理 MP4</div><div id="wsOrg"></div>`;
   root.querySelector(".wsGrid").onclick=e=>{const b=e.target.closest("[data-ws]");if(!b)return;const k=b.dataset.ws;
     if(k==="vb")vbOpen();else if(k==="vg"){if(typeof PAGES==="undefined")location.hash="fx";else vgOpen();}else if(k==="sp")spOpen();else if(k==="nv")nvOpen();else if(k==="bg")location.hash="bg";

@@ -1193,7 +1193,9 @@ def route(win, sock, method, rest, q, body):
         J(win._mp4fix(int(d.get('sid') or 0), 'cut' if d.get('mode') == 'cut' else 'remux', str(d.get('nm') or ''), float(d.get('at') or 0))); return True
     if name == 'lv/del':                                                  # V0.6.91 等級整理：-2／-1 刪 MP4（先截 20 張圖）
         J(win._lv_delete([int(x) for x in (d.get('sids') or []) if str(x).strip()])); return True
-    if name == 'novideo/set':
+    if name == 'novideo/set':                                                # V1.1.38 只錄聲音改照審核等級 G：這裡不再手動改
+        J({'ok': False, 'message': '只錄聲音現在照「主播審核」的等級：標 G＝只錄聲音，改成別的等級就恢復錄影片'}); return True
+    if name == 'novideo/set_old':
         us = [str(x) for x in (d.get('users') or []) if str(x).strip()][:2000]
         if not us: J({'ok': False, 'message': '還沒有勾選主播'}); return True
         J(win._set_novideo(us, bool(d.get('on')), bool(d.get('delete')))); return True
