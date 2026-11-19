@@ -1989,6 +1989,7 @@ body.oldLock{overflow:hidden}
 .ruLv{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}.ruLv span{border:2px solid var(--c);border-radius:10px;padding:5px 12px;font-weight:800}
 .ruQuad{display:grid;grid-template-columns:1fr 1fr;gap:4px;max-width:300px;margin:6px 0}.ruQuad span{border:1px solid rgba(127,127,127,.35);border-radius:8px;padding:8px;text-align:center;font-size:12.5px}
 .ruNone{padding:20px;text-align:center;opacity:.7}
+.ruV{display:inline-flex;align-items:center;gap:3px;border-bottom:1px dashed var(--c,#888);cursor:pointer;padding:0 2px;border-radius:4px}.ruV:hover{background:rgba(127,127,127,.15)}.ruV i{font-style:normal;font-size:11px;opacity:.55}.ruV small{font-size:11px;opacity:.6;font-weight:400}.ruV.ed{background:rgba(58,123,213,.15);padding:2px 6px;border-bottom:0;cursor:default}.ruV.done{background:rgba(69,212,131,.3)}.ruIn{width:84px;padding:3px 6px;border-radius:6px;border:1px solid #3a7bd5;background:transparent;color:inherit;font:inherit;font-weight:800}.ruCk{display:inline-flex;align-items:center;gap:3px;font-size:12.5px;opacity:.5;white-space:nowrap}.ruCk.go{opacity:1;color:#45d483;font-weight:800}.ruCk input{transform:scale(1.25)}.ruX{border:0;background:transparent;color:inherit;cursor:pointer;opacity:.6}
 </style></head>
 <body><div id="app"><aside id="side"><div id="sdCount">● 0 / 0 直播間</div><div class="ss"><button class="sstart" id="btnStart">▶ 開始監控</button><button class="sstop" id="btnStop">■ 停止監控</button></div><div id="sdStatus">● 連線中...</div><nav id="nav"></nav><div id="sysBox">電腦狀態讀取中…</div><button id="netBtn">⬇ —
 本日 — MB</button><button id="qBtn" title="排隊轉檔的數量、還要搬到 HDD 的 MP4 大小、全部處理完（轉檔＋搬檔）預估還要多久。點一下看轉檔排隊">🎬 轉檔排隊：讀取中…</button></aside>
@@ -7875,15 +7876,16 @@ async function mrgMount(root){   /* V1.1.25 ⧉ 合併重複場次 */
 /* V1.1.32 📖 規則說明：程式實際怎麼做（照程式碼整理，改規則時這裡一起改） */
 const RU_F=(a)=>'<div class="ruFlow">'+a.map((x,i)=>(i?'<i class="ruAr">→</i>':'')+'<span class="ruChip" style="'+(x[1]?'--c:'+x[1]:'')+'">'+x[0]+'</span>').join('')+'</div>';
 const RU_G=(k,n,c)=>'<span class="ruG" style="--c:'+c+'">'+k+'</span><b>'+n+'</b>';
+const RU_V=(k,u,d)=>'<span class="ruV" data-k="'+k+'" data-u="'+u+'"><b>'+d+'</b> '+u+'<i>✎</i></span>';   /* V1.1.35 規則裡的數字＝設定，可以直接改（要打勾確認） */
 const RU_BAR=(segs)=>'<div class="ruBar">'+segs.map(s=>'<span style="flex:'+s[0]+';--c:'+s[2]+'">'+s[1]+'</span>').join('')+'</div>';
 const RULES=[
  {k:"rec",i:"🎥",c:"#ff6b8a",t:"錄影與監控：怎麼錄、存在哪",s:[
   {t:"一場直播的檔案怎麼走",d:RU_F([["直播中","#ff4d6d"],["FLV 先寫 C 槽 SSD","#f0ad4e"],["下播：在 SSD 轉 MP4","#4dc9ff"],["搬進影片庫（R 槽）","#45d483"]])+
    "<ul><li>錄影時畫面直接複製串流、<b>不重新壓縮</b>，所以錄影本身幾乎不吃 CPU。</li><li>下播後在 SSD 上把 FLV 轉成 MP4：畫面大小沒變就直接複製（幾秒～幾分鐘）；直播中畫面大小變過（例如 PK）才重新壓縮成同一個大小，這時用<b>顯示卡</b>。</li><li>轉好才一次搬到影片庫硬碟（HDD 只寫一次完整的 MP4，不會邊錄邊轉卡住）。轉成功就刪 FLV；<b>轉失敗一定保留 FLV</b>（放「FLV轉檔失敗」，之後可以重轉）。</li><li>聲音另外錄一份 M4A（48 kbps 單聲道，一小時約 22 MB），也是先放 SSD、轉好再搬。<b>就算 MP4 刪了，M4A、留言、禮物都還在</b>。</li></ul>"},
-  {t:"空間不夠時",d:"<ul><li>SSD 剩不到 <b>60 GB</b>：新的錄影改成直接錄在影片庫硬碟。</li><li>影片硬碟剩不到 <b>30 GB</b>：不開始新的錄影（<b>聲音照錄</b>）。</li><li>🛡 C 槽守門員每分鐘看 C 剩多少、減少多快：第 1 級先停不急的背景工作；第 2 級全速把東西搬走；第 3 級（剩不到 15 GB 或 20 分鐘內會滿）才會一位一位停掉正在錄到 C 的影片（F → E → 未分級先停）。</li></ul>"},
-  {t:"同一場直播的判定（斷線、重開）",d:"<ul><li>主播斷線後 <b>10 分鐘內</b>連回同一個直播間＝<b>續寫同一場</b>（錄影會分成第 2 段、第 3 段…）。</li><li>直播中卻 <b>30 分鐘</b>沒有任何留言、禮物、進場、人數也沒變（而且沒在錄影）→ 重新連一次確認：還在播就續寫，結束了就把結束時間改回最後有資料的時間。</li><li>程式重開、斷電、超過 10 分鐘才連回來 → 會變成<b>另一場</b>。這種被切開的，用「⧉ 合併重複場次」合回一場（見「場次合併」）。</li></ul>"},
+  {t:"空間不夠時",d:"<ul><li>SSD 剩不到 <b>"+RU_V('rec.ssd_min_free','GB',60)+"</b>：新的錄影改成直接錄在影片庫硬碟。</li><li>影片硬碟剩不到 <b>"+RU_V('rec.video_min_free','GB',30)+"</b>：不開始新的錄影（<b>聲音照錄</b>）。</li><li>🛡 C 槽守門員每分鐘看 C 剩多少、減少多快：第 1 級先停不急的背景工作；第 2 級全速把東西搬走；第 3 級（剩不到 15 GB 或 20 分鐘內會滿）才會一位一位停掉正在錄到 C 的影片（F → E → 未分級先停）。</li></ul>"},
+  {t:"同一場直播的判定（斷線、重開）",d:"<ul><li>主播斷線後 <b>"+RU_V('conn.grace_minutes','分鐘',10)+"內</b>連回同一個直播間＝<b>續寫同一場</b>（錄影會分成第 2 段、第 3 段…）。</li><li>直播中卻 <b>"+RU_V('monitor.silent_min','分鐘',30)+"</b>沒有任何留言、禮物、進場、人數也沒變（而且沒在錄影）→ 重新連一次確認：還在播就續寫，結束了就把結束時間改回最後有資料的時間。</li><li>程式重開、斷電、超過 10 分鐘才連回來 → 會變成<b>另一場</b>。這種被切開的，用「⧉ 合併重複場次」合回一場（見「場次合併」）。</li></ul>"},
   {t:"開程式、熱更新時的監控",d:"<ul><li>開程式 3 秒後自動開始監控（設定可以關）。正在錄的場次在熱更新、重開時會<b>接著錄同一場</b>。</li><li>搬硬碟切換後，如果找不到影片硬碟（例如 R 槽代號跑掉），程式<b>先不開始監控</b>，不會錄到別的地方，會提示你去磁碟管理改代號。</li></ul>"},
-  {t:"只錄聲音的主播",d:"<ul><li>主播設成只錄聲音時，直播中照樣錄畫面（FLV 先放 C 槽），下播後直接從 FLV 截 <b>20 張圖</b>就刪掉 FLV，不轉 MP4、不進影片庫；截不到圖才照原本轉 MP4。</li><li>直播中每 <b>2 分鐘</b>另外拍一張快照，回放時在影片的位置左右翻看。</li></ul>"}]},
+  {t:"只錄聲音的主播",d:"<ul><li>主播設成只錄聲音時，直播中照樣錄畫面（FLV 先放 C 槽），下播後直接從 FLV 截 <b>20 張圖</b>就刪掉 FLV，不轉 MP4、不進影片庫；截不到圖才照原本轉 MP4。</li><li>直播中每 <b>"+RU_V('rec.snap_min','分鐘',2)+"</b>另外拍一張快照，回放時在影片的位置左右翻看。</li></ul>"}]},
  {k:"play",i:"📺",c:"#4dc9ff",t:"回放與直播中觀看：延遲、預載入",s:[
   {t:"為什麼要「+3 秒」",d:RU_BAR([[3,"留言／禮物（資料）","#4dc9ff"],[1,"約 3 秒","#f0ad4e"],[3,"畫面上才看到","#45d483"]])+"<ul><li>TikTok 的畫面比留言、禮物的資料<b>晚大約 3 秒</b>。所以在回放點一則留言或禮物，會跳到「那個時間 <b>+3 秒</b>」，畫面才對得上（秒數在回放設定可以改）。</li><li>送禮動畫也跟著這個延遲一起延後，畫面上出現禮物那一刻才跳動畫。</li><li>點<b>禮物</b>時會再<b>早 0.5 秒</b>落地，播放 0.5 秒後動畫完整出現。</li></ul>"},
   {t:"看還在直播的場次（LIVE 時移）",d:RU_F([["錄影中的 FLV","#ff4d6d"],["切成 2 秒一片","#f0ad4e"],["手機／平板播放","#4dc9ff"]])+"<ul><li>還在直播、而且正在錄影的場次，回放會用「直播畫面（可回看）」：把錄影中的 FLV 切成 2 秒一片給手機播。</li><li>一打開先從<b>大約 30 秒前</b>開始，跟著最新畫面走；最新那一兩片寫到一半不給，所以最新畫面再晚約 4 秒，加上 TikTok 本身的延遲。</li><li>往回看：程式從尾巴往前<b>每次補 2 分鐘</b>（限速每秒約 3 MB，不搶錄影），補到哪裡才看得到哪裡，所以<b>剛打開時只能往回拉一點點</b>，等一下才能拉到開播。這就是「預載入速度會影響回放」。</li><li>同時最多 <b>3 位</b>主播用這種方式看；沒人看 <b>90 秒</b>就自動停掉、清掉暫存。</li></ul>"},
@@ -7903,29 +7905,29 @@ const RULES=[
   {t:"審核頁怎麼看",d:"<ul><li>每位主播所有場次、每 2 分鐘一張圖接成一長條（新的在上），用來決定等級。</li><li>圖只拿檔案總管已經做好的預覽圖，不另外跑 FFmpeg；還沒做好的先用 20 張截圖，都沒有就標「預覽圖排隊中」。</li></ul>"}]},
  {k:"lv",i:"🗂",c:"#45d483",t:"場次標記（−2／0／+1／+2）與刪除",s:[
   {t:"四種標記",d:'<div class="ruLv"><span style="--c:#ff4d6d">−2 可丟</span><span style="--c:#f0ad4e">0 未分類</span><span style="--c:#45d483">+1 待剪輯</span><span style="--c:#2ec4b6">+2 保存</span></div>'+"<ul><li>在檔案總管按等級＝存好、自動捲到下一場。</li><li><b>沒按就滑到下一場＝上一場自動標 −2</b>；有選片段的話，那些片段先合併輸出成 1 部剪輯成品。按「↩ 復原自動 −2」可以還原。</li></ul>"},
-  {t:"−2 的場次要刪 MP4 時（重要）",d:RU_F([["標 −2、按刪除","#ff4d6d"],["這位的等級要傳 YouTube？","#f0ad4e"],["先傳 YouTube","#4dc9ff"],["傳好 → 移到隔離區","#b48cff"],["你抽查後全部刪","#45d483"]])+
-   "<ul><li>例如 <b>S 級主播的場次標 −2 後，一定要等它傳上 YouTube 才會處理原檔</b>：還沒傳完的先不刪、自動排進 YouTube，傳好才移到「YouTube 已上傳-刪除隔離區」。A、A-Dance、A-Sing、G 也一樣。</li><li>不用傳 YouTube 的等級：直接照你按的刪。</li><li>查不到 YouTube 狀態時<b>寧可先不刪</b>。</li><li>隔離區裡的不會自己消失：在「工具 → 🗑 隔離區」逐項抽查（看 YouTube、看原檔）後，按一次全部刪。</li><li>還在直播／錄影中的場次<b>不能刪影片</b>。</li></ul>"},
+  {t:"−2 的場次要刪 MP4 時（重要）",d:RU_F([["標 −2、按刪除","#ff4d6d"],["這位的等級要傳 YouTube？","#f0ad4e"],["先傳 YouTube","#4dc9ff"],["傳好 → 移到隔離區","#b48cff"],["再確認 YouTube → 自動刪","#45d483"]])+
+   "<ul><li>例如 <b>S 級主播的場次標 −2 後，一定要等它傳上 YouTube 才會處理原檔</b>：還沒傳完的先不刪、自動排進 YouTube，傳好才移到「YouTube 已上傳-刪除隔離區」。A、A-Dance、A-Sing、G 也一樣。</li><li>不用傳 YouTube 的等級：直接照你按的刪。</li><li>查不到 YouTube 狀態時<b>寧可先不刪</b>。</li><li><b>隔離區會自己清</b>：放進來超過 "+RU_V('yt.hold_auto_h','小時',24)+"，而且當下再問 YouTube 一次（影片還在、已經處理好）→ 自動刪原檔。問不到、找不到的一律留著。這段時間內可以反悔（隔離區頁「全部搬回去」），也可以自己先抽查、按全部刪。</li><li>還在直播／錄影中的場次<b>不能刪影片</b>。</li></ul>"},
   {t:"刪 MP4 之前一定先截圖",d:"<ul><li>不管從哪裡刪 MP4（歷史紀錄、檔案總管、整理 MP4、手機、網頁），刪之前先在影片 10%、20%…100% 各截圖，共 <b>60 張</b>（原檔不完整的 20 張），每張約 100 KB。</li><li>剪輯成品、留言、禮物、錄音全部留著；剪輯成品<b>永久保留</b>。</li><li>有 ⭐ 收藏片段的場次：刪 MP4／轉出時會跳過那些片段。</li></ul>"},
-  {t:"程式自己會清的",d:"<ul><li><b>冗餘 14 天+</b>：放超過 14 天、沒有場次紀錄的 MP4（檔案總管「冗餘」那些）。</li><li><b>暫存</b>：只錄聲音的場次留著的 MP4，<b>5 天後</b>沒按「📌 留下」就自動刪。</li><li>每 30 秒一張的預覽圖：C 槽最多 40 GB，超過從最久沒看的刪；要看時再做。精選用的每 2 秒圖保留 15 天、最多 60 GB。</li></ul>"}]},
+  {t:"程式自己會清的",d:"<ul><li><b>冗餘 14 天+</b>：放超過 14 天、沒有場次紀錄的 MP4（檔案總管「冗餘」那些）。</li><li><b>暫存</b>：只錄聲音的場次留著的 MP4，<b>5 天後</b>沒按「📌 留下」就自動刪。</li><li>每 30 秒一張的預覽圖：C 槽最多 "+RU_V('vg.cache_gb','GB',40)+"，超過從最久沒看的刪；要看時再做。精選用的每 2 秒圖保留 15 天、最多 "+RU_V('hl.keep2s_gb','GB',60)+"。</li></ul>"}]},
  {k:"yt",i:"▶",c:"#ff4d4d",t:"YouTube 上傳",s:[
-  {t:"上傳規則",d:"<ul><li>照「主播等級」自動上傳（見主播等級），也可以在 YouTube 上傳頁手動加。隱私預設<b>不公開</b>（搜尋不到，只有拿到網址的人看得到；回放頁可以內嵌 YouTube 跟留言同步播）。</li><li>每 <b>24 小時最多 100 個</b>，照<b>上傳完成時間滾動</b>算；頁面會顯示第 101 個什麼時候可以開始。額度用完自動等 6 小時。</li><li>速度上限預設 20 Mbps，不搶錄影的網路；可以設只在某個時段開始傳新的。<b>正在傳的那部一定照傳完</b>，不會中途斷。</li></ul>"},
-  {t:"先傳哪些",d:"<ul><li>現在是「<b>舊的場次先傳</b>」。S 級永遠最優先。</li><li><b>開播在最近 3 天內的場次先不傳</b>，留給合併同一場被切開的（YouTube 頁可以改天數，0＝不限）。已經開始傳的照傳完。</li></ul>"},
-  {t:"傳好之後",d:"<ul><li>YouTube 處理好會把網址存進那一場。</li><li>「傳好原檔留著」沒勾的等級：原檔移到「YouTube 已上傳-刪除隔離區」，等你抽查再刪（「上傳好後自動移到隔離區」預設關）。</li></ul>"}]},
+  {t:"上傳規則",d:"<ul><li>照「主播等級」自動上傳（見主播等級），也可以在 YouTube 上傳頁手動加。隱私預設<b>不公開</b>（搜尋不到，只有拿到網址的人看得到；回放頁可以內嵌 YouTube 跟留言同步播）。</li><li>每 <b>24 小時最多 "+RU_V('yt.daily','個',100)+"</b>，照<b>上傳完成時間滾動</b>算；頁面會顯示第 101 個什麼時候可以開始。額度用完自動等 6 小時。</li><li>速度上限 "+RU_V('yt.mbps','Mbps',20)+"，不搶錄影的網路；可以設只在某個時段開始傳新的。<b>正在傳的那部一定照傳完</b>，不會中途斷。</li></ul>"},
+  {t:"先傳哪些",d:"<ul><li>現在是「<b>舊的場次先傳</b>」。S 級永遠最優先。</li><li><b>開播在最近 "+RU_V('yt.hold_new_days','天',3)+"內的場次先不傳</b>，留給合併同一場被切開的（YouTube 頁可以改天數，0＝不限）。已經開始傳的照傳完。</li></ul>"},
+  {t:"傳好之後",d:"<ul><li>YouTube 處理好會把網址存進那一場。</li><li>「傳好原檔留著」沒勾的等級：原檔移到「YouTube 已上傳-刪除隔離區」，"+RU_V('yt.hold_auto_h','小時',24)+"後再跟 YouTube 確認一次就自動刪（設定可以關掉自動刪）。</li></ul>"}]},
  {k:"bg",i:"✨",c:"#b48cff",t:"背景工作：精選、字幕、預覽圖、轉檔順序",s:[
-  {t:"誰先誰後",d:RU_F([["監控、錄影（永遠最先）","#ff4d6d"],["FLV → MP4 轉檔","#f0ad4e"],["語音轉字幕","#4dc9ff"],["預覽圖、截圖","#2ec4b6"],["✨ 精選（最後）","#b48cff"]])+"<ul><li>精選是非必要的工作，排最後：轉檔、字幕、搬檔、截圖在做，或 CPU 超過 55%、顯示卡超過 50%、硬碟忙超過 50% 時就先停（做到一半的之後重做那場）。</li><li>你正在檔案總管看的那場、排著要上傳 YouTube 的，精選和每 2 秒圖永遠先做。</li></ul>"},
+  {t:"誰先誰後",d:RU_F([["監控、錄影（永遠最先）","#ff4d6d"],["FLV → MP4 轉檔","#f0ad4e"],["語音轉字幕","#4dc9ff"],["預覽圖、截圖","#2ec4b6"],["✨ 精選（最後）","#b48cff"]])+"<ul><li>精選是非必要的工作，排最後：轉檔、字幕、搬檔、截圖在做，或 CPU 超過 "+RU_V('hl.max_cpu','%',55)+"、顯示卡超過 "+RU_V('hl.max_gpu','%',50)+"、硬碟忙超過 "+RU_V('hl.max_disk','%',50)+"時就先停（做到一半的之後重做那場）。</li><li>你正在檔案總管看的那場、排著要上傳 YouTube 的，精選和每 2 秒圖永遠先做。</li></ul>"},
   {t:"語音轉字幕",d:"<ul><li>下播、錄音整理好後（約 5 分鐘）自動排進來，只在顯示卡加速版可以用時自動轉（CPU 轉太吃效能）。</li><li>每場最慢 6 小時轉完，程式算出剛好轉完需要的最低用量，平常顯示卡幾乎閒著；排隊到 8 成以上會自動加快。</li></ul>"},
   {t:"以前留下的 FLV",d:"<ul><li>新的錄影一律自動轉。以前留在硬碟上的 FLV 預設不自動處理，到「FLV 待處理」勾選（V1.1.28 已經把積欠的一次全部排進去）。</li><li>一次轉一部；大部分只是換容器、直接複製畫面，速度看硬碟，顯示卡用不太到，這是正常的。</li></ul>"},
-  {t:"每日精選影片",d:"<ul><li>每天早上把前一天的精彩片段（不含 PK）剪成一支，最長 30 分鐘、只留 7 天；你自己剪的成品不受影響。</li></ul>"}]},
+  {t:"每日精選影片",d:"<ul><li>每天早上把前一天的精彩片段（不含 PK）剪成一支，最長 "+RU_V('reel.max_min','分鐘',30)+"、只留 "+RU_V('reel.keep','天',7)+"；你自己剪的成品不受影響。</li></ul>"}]},
  {k:"th",i:"🌡",c:"#f0ad4e",t:"控溫、斷電、效能保護（不准讓主程式過載）",s:[
-  {t:"CPU 預算",d:RU_BAR([[45,"整台 CPU 預算 45%（SortCut 有開）","#f0ad4e"],[55,"留給你和系統","#3a4250"]])+"<ul><li>背景的轉檔、合併、預覽、截圖、字幕全部算一組，用 Windows 內建的 CPU 硬上限壓住（只會變慢，不會停，最少留 5%）。</li><li>上限＝整台預算 −（錄影和其他程式用的）。SortCut 有開時 45%，沒開時 60%。<b>錄影、監控、畫面不受限制</b>。</li><li>顯示卡 <b>75°C</b> 以上，新的背景轉檔先等（跑到一半的照跑完，最多等 10 分鐘）。</li></ul>"},
-  {t:"斷電偵測（通知 SortCut）",d:"<ul><li>程式沒按「停止監控並退出」就沒了、而且電腦重開過，再對照事件檢視器的 Kernel-Power 41 → 判定為<b>非人為斷電</b>。</li><li>重開後通知 SortCut：12 小時內降到最低（Lv 1、CPU 最低、同時 1 個）；24 小時內斷電 2 次以上 → 叫 SortCut 停止轉檔至少 24 小時。TikLive 自己的背景重活也少 15%。</li><li>顯示卡供需頁可以「解除警報」。</li></ul>"},
-  {t:"效能自我保護",d:"<ul><li>CPU 95% 以上超過 2 分鐘、錄影用的硬碟忙超過 85% 超過 1 分鐘，或 70 位以上同時在播且 CPU 超過 85% → 精選、預告、預覽圖、搜尋、報告先暫停，閒下來自動繼續。</li><li>主程式畫面卡住超過 6 秒 → 自動切到不用更新的「休息畫面」，監控、錄影照常。</li><li>資料庫寫不進去：3 分鐘先停背景資料庫工作，10 分鐘重開卡住的連線，20 分鐘自動重開程式。</li></ul>"}]},
+  {t:"CPU 預算",d:RU_BAR([[45,"整台 CPU 預算 45%（SortCut 有開）","#f0ad4e"],[55,"留給你和系統","#3a4250"]])+"<ul><li>背景的轉檔、合併、預覽、截圖、字幕全部算一組，用 Windows 內建的 CPU 硬上限壓住（只會變慢，不會停，最少留 "+RU_V('th.min','%',5)+"）。</li><li>上限＝整台預算 −（錄影和其他程式用的）。SortCut 有開時 "+RU_V('th.cpu','%',45)+"，沒開時 "+RU_V('th.cpu_solo','%',60)+"。<b>錄影、監控、畫面不受限制</b>。</li><li>顯示卡 <b>"+RU_V('th.gpu','°C',75)+"</b>以上，新的背景轉檔先等（跑到一半的照跑完，最多等 10 分鐘）。</li></ul>"},
+  {t:"斷電偵測（通知 SortCut）",d:"<ul><li>程式沒按「停止監控並退出」就沒了、而且電腦重開過，再對照事件檢視器的 Kernel-Power 41 → 判定為<b>非人為斷電</b>。</li><li>重開後通知 SortCut："+RU_V('th.alert_h','小時',12)+"內降到最低（Lv 1、CPU 最低、同時 1 個）；24 小時內斷電 "+RU_V('th.alert_stop_n','次',2)+"以上 → 叫 SortCut 停止轉檔至少 24 小時。TikLive 自己的背景重活也少 15%。</li><li>顯示卡供需頁可以「解除警報」。</li></ul>"},
+  {t:"效能自我保護",d:"<ul><li>CPU 95% 以上超過 2 分鐘、錄影用的硬碟忙超過 85% 超過 1 分鐘，或 70 位以上同時在播且 CPU 超過 85% → 精選、預告、預覽圖、搜尋、報告先暫停，閒下來自動繼續。</li><li>主程式畫面卡住超過 "+RU_V('ui.freeze_rest_s','秒',6)+" → 自動切到不用更新的「休息畫面」，監控、錄影照常。</li><li>資料庫寫不進去：3 分鐘先停背景資料庫工作，10 分鐘重開卡住的連線，"+RU_V('health.restart_min','分鐘',20)+"自動重開程式。</li></ul>"}]},
  {k:"conn",i:"🔌",c:"#2ec4b6",t:"連線與開播檢查（不被 TikTok 擋）",s:[
-  {t:"多久查一次有沒有開播",d:'<table class="ruT"><tr><th>主播</th><th>檢查間隔</th></tr><tr><td>重點（紅色）</td><td>3 秒起，慢慢拉長到 10 秒</td></tr><tr><td>一般</td><td>60 秒（他平常開播的時段加快到 30 秒）</td></tr><tr><td>7 天以上沒開播</td><td>× 3（3 分鐘一次）</td></tr><tr><td>帳號不存在（連續 3 次）</td><td>× 10</td></tr></table>'+"<ul><li>全部檢查排隊進行：續寫中的直播 → 重點 → 一般，<b>每分鐘最多 80 次</b>。TikTok 開始拒絕就自動放慢一級（45%）、最多兩級（22%），恢復正常 10 分鐘才加回來。</li><li>開播時間很固定的主播，快到平常時間前 3 分鐘就排到最前面。</li></ul>"},
+  {t:"多久查一次有沒有開播",d:'<table class="ruT"><tr><th>主播</th><th>檢查間隔</th></tr><tr><td>重點（紅色）</td><td>3 秒起，慢慢拉長到 '+RU_V('retry.priority','秒',10)+'</td></tr><tr><td>一般</td><td>'+RU_V('retry.normal','秒',60)+'（他平常開播的時段加快）</td></tr><tr><td>'+RU_V('conn.stale_days','天',7)+'以上沒開播</td><td>× '+RU_V('conn.stale_mult','倍',3)+'</td></tr><tr><td>帳號不存在（連續 3 次）</td><td>× 10</td></tr></table>'+"<ul><li>全部檢查排隊進行：續寫中的直播 → 重點 → 一般，<b>每分鐘最多 "+RU_V('conn.rate','次',80)+"</b>。TikTok 開始拒絕就自動放慢一級（45%）、最多兩級（22%），恢復正常 10 分鐘才加回來。</li><li>開播時間很固定的主播，快到平常時間前 3 分鐘就排到最前面。</li></ul>"},
   {t:"重開程式不是萬靈丹",d:"<ul><li>TikTok 正在拒絕、或簽章額度用完時，重開程式不會換網址，反而會斷掉直播中的場次（程式會先提醒你）。</li></ul>"}]},
  {k:"upd",i:"☁",c:"#3a7bd5",t:"更新、搬硬碟、場次合併",s:[
   {t:"雲端更新（GitHub）",d:RU_F([["開程式 1 分鐘後、每 6 小時檢查","#3a7bd5"],["有新版只提示","#f0ad4e"],["你按「更新」","#45d483"],["熱更新（不中斷錄影）","#2ec4b6"]])+"<ul><li><b>一定要你按才更新，不會自己重開</b>。下載限速、比對檔案完整才裝。</li><li>以後<b>只熱更新、絕對不換 EXE 外殼</b>（不會再要你關程式重裝）。</li><li>更新後有問題，可以在更新頁「退回前面的版本」（一樣不中斷錄影）。</li></ul>"},
-  {t:"場次合併（⧉ 合併重複場次）",d:RU_F([["第 1 段","#4dc9ff"],["第 2 段","#4dc9ff"],["第 3 段","#4dc9ff"],["⧉ 合併 → 1 場","#45d483"]])+"<ul><li>同一位主播、<b>TikTok 開播時間一樣（相差 1 分鐘內）</b>＝同一場直播，只是程式重開、斷電、斷線被切開。</li><li>合併後留言、禮物、送禮者、觀看人數都歸到同一場；<b>影片不重新輸出</b>，回放照時間一段接一段播，中間沒錄到的自動跳過。留下編號最大的那一場。</li><li>合併前自動備份資料庫；直播中的場次不會動（等它下播）。</li></ul>"},
+  {t:"場次合併（⧉ 合併重複場次）",d:RU_F([["第 1 段","#4dc9ff"],["第 2 段","#4dc9ff"],["第 3 段","#4dc9ff"],["⧉ 合併 → 1 場","#45d483"]])+"<ul><li>同一位主播、<b>TikTok 開播時間一樣（相差 "+RU_V('history.merge_tol','秒',60)+"內）</b>＝同一場直播，只是程式重開、斷電、斷線被切開。</li><li>合併後留言、禮物、送禮者、觀看人數都歸到同一場；<b>影片不重新輸出</b>，回放照時間一段接一段播，中間沒錄到的自動跳過。留下編號最大的那一場。</li><li>合併前自動備份資料庫；直播中的場次不會動（等它下播）。</li></ul>"},
   {t:"搬硬碟（E → R，已完成）",d:"<ul><li>先複製、每個檔讀回來比對一樣才算數 → 第一輪搬完自動切換（錄影不停）→ 舊硬碟上的逐一確認後刪 → 「搬硬碟完成」。</li><li>舊硬碟上剩的十幾 GB 是 Windows 自己的（回收筒、系統還原、檔案系統本身），格式化就清掉。</li></ul>"}]},
  {k:"dev",i:"📱",c:"#9aa5b3",t:"手機、平板、網頁版",s:[
   {t:"差別",d:"<ul><li>手機版與平板版是同一個 App，右上角切換；除了回放（平板 4 格），其他畫面一樣。</li><li>網頁版（電腦瀏覽器）：右下角可以調滾輪倍數（×0.5～×8）、「滾輪 ∿」絲滑開關、介面大小。每個瀏覽器自己記。</li><li>會改東西的操作（更新、刪除、合併、設定）都要密碼；只看的不用。</li></ul>"}]}
@@ -7937,10 +7939,28 @@ async function rulesMount(root){if(!root)return;
      '<input class="ruQ" placeholder="🔍 找規則（例如：−2、YouTube、延遲、斷電）" value="'+(q?q.replace(/"/g,"&quot;"):"")+'"><div class="ruToc">'+RULES.map(c=>'<button data-go="'+c.k+'" style="--c:'+c.c+'">'+c.i+' '+c.t.split("：")[0].split("（")[0]+'</button>').join("")+'</div></div>'+
      RULES.map(c=>{const S=c.s.filter(x=>!q||(c.t+x.t+x.d.replace(/<[^>]+>/g,"")).toLowerCase().includes(q));if(!S.length)return"";n+=S.length;const op=q||st[c.k]!==0;
       return '<section class="ruC'+(op?" on":"")+'" id="ru_'+c.k+'" style="--c:'+c.c+'"><h3 data-k="'+c.k+'"><span>'+c.i+'</span>'+c.t+'<em>'+S.length+' 項</em><i>'+(op?"▾":"▸")+'</i></h3><div class="ruB">'+S.map(x=>'<div class="ruI"><h4>'+x.t+'</h4>'+x.d+'</div>').join("")+'</div></section>';}).join("")+(q&&!n?'<div class="ruNone">找不到「'+q+'」</div>':"");
-    root.innerHTML=h;const qi=root.querySelector(".ruQ");qi.oninput=()=>{const v=qi.value,p=qi.selectionStart;draw(v);const q2=root.querySelector(".ruQ");q2.focus();try{q2.setSelectionRange(p,p);}catch(e){}};
+    root.innerHTML=h;rulesPaintVals(root);const qi=root.querySelector(".ruQ");qi.oninput=()=>{const v=qi.value,p=qi.selectionStart;draw(v);const q2=root.querySelector(".ruQ");q2.focus();try{q2.setSelectionRange(p,p);}catch(e){}};
     root.querySelectorAll("h3[data-k]").forEach(h3=>h3.onclick=()=>{const k=h3.dataset.k,sec=h3.parentElement,o=!sec.classList.contains("on");sec.classList.toggle("on",o);h3.querySelector("i").textContent=o?"▾":"▸";st[k]=o?1:0;try{localStorage.setItem("tlm_rules_open",JSON.stringify(st));}catch(e){}});
     root.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{const s=root.querySelector("#ru_"+b.dataset.go);if(s){s.classList.add("on");s.scrollIntoView({behavior:"smooth",block:"start"});}});};
-  draw("");}
+  draw("");rulesVals(root);}
+/* V1.1.35 規則裡的數字：讀現在的設定值；點 ✎ → 改數字 → 旁邊打勾「確認修改」才存（雙重確認） */
+async function rulesVals(root){const ks=[...new Set([...root.querySelectorAll(".ruV[data-k]")].map(x=>x.dataset.k))];if(!ks.length)return;
+  let j=null;try{j=await (typeof api==="function"?api:J)("/api/pc/rules/vals?k="+ks.join(","));}catch(e){}if(!j||!j.vals)return;RU_VALS=j.vals;rulesPaintVals(root);}
+let RU_VALS={};
+function rulesPaintVals(root){root.querySelectorAll(".ruV[data-k]").forEach(sp=>{const k=sp.dataset.k,V=RU_VALS[k];if(!V||sp._ed)return;const u=sp.dataset.u;
+  sp.innerHTML='<b>'+V.v+'</b> '+u+(V.v!==V.def?'<small title="預設 '+V.def+'">（預設 '+V.def+'）</small>':'')+'<i>✎</i>';sp.title=V.label+(V.help?'\n'+V.help:'')+'\n點一下可以改';
+  sp.onclick=e=>{if(sp._ed)return;e.stopPropagation();rulesEdit(root,sp);};});}
+function rulesEdit(root,sp){const k=sp.dataset.k,V=RU_VALS[k],u=sp.dataset.u;sp._ed=1;sp.classList.add("ed");
+  sp.innerHTML='<input type="number" class="ruIn" value="'+V.v+'"'+(V.min!=null?' min="'+V.min+'"':'')+(V.max!=null?' max="'+V.max+'"':'')+(V.step!=null?' step="'+V.step+'"':'')+'> '+u+' <label class="ruCk"><input type="checkbox" disabled> 確認修改</label><button class="ruX" title="不改">✕</button>';
+  const inp=sp.querySelector(".ruIn"),ck=sp.querySelector(".ruCk input"),lb=sp.querySelector(".ruCk");inp.focus();inp.select();
+  const close=()=>{sp._ed=0;sp.classList.remove("ed");rulesPaintVals(root);};
+  inp.oninput=()=>{const n=parseFloat(inp.value),bad=isNaN(n)||(V.min!=null&&n<V.min)||(V.max!=null&&n>V.max);ck.disabled=bad||n===V.v;lb.classList.toggle("go",!ck.disabled);lb.title=bad?("範圍 "+(V.min??"")+"～"+(V.max??"")):"";};
+  inp.onkeydown=e=>{if(e.key==="Escape")close();};sp.querySelector(".ruX").onclick=e=>{e.stopPropagation();close();};
+  sp.onclick=e=>e.stopPropagation();
+  ck.onchange=async()=>{if(!ck.checked)return;const n=parseFloat(inp.value);ck.disabled=true;inp.disabled=true;
+    const f=(typeof kPost==="function"?kPost:rvPost);let r=null;try{r=await f("/api/pc/rules/set",{k,v:n});}catch(e){}
+    if(r&&r.ok){RU_VALS[k].v=r.value;if(typeof toast==="function")toast("✔ "+(r.message||"已改"),3000);close();root.querySelectorAll('.ruV[data-k="'+k+'"]').forEach(x=>{x.classList.add("done");setTimeout(()=>x.classList.remove("done"),2500);});}
+    else{if(typeof toast==="function")toast("✖ "+((r&&r.message)||"沒有改成"),3500);ck.checked=false;ck.disabled=false;inp.disabled=false;}};}
 
 async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（照 SortCut「R 碟清空搬移」的樣子） */
   const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));

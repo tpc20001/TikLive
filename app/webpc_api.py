@@ -910,7 +910,8 @@ def route(win, sock, method, rest, q, body):
     if name == 'host/sum' and method == 'GET':                           # TK_V1.0.90 主播小視窗統計（只讀）
         u_ = str(q.get('u', '') or ''); _bg(win, sock, lambda: win._host_sum(u_)); return True
     if name == 'mig' and method == 'GET': J(win._mig_info()); return True
-    if name == 'merge' and method == 'GET': J(win._web_merge_status()); return True                     # V1.1.25 合併重複場次（只讀）
+    if name == 'merge' and method == 'GET': J(win._web_merge_status()); return True
+    if name == 'rules/vals' and method == 'GET': J(win._rules_vals([s_ for s_ in str(q.get('k', '') or '').split(',') if s_][:60])); return True   # V1.1.35 規則頁的數字（只讀）                     # V1.1.25 合併重複場次（只讀）
     if name == 'merge/scan' and method == 'GET': J(win._web_merge_scan(force=bool(q.get('force')))); return True
     if name == 'cloud' and method == 'GET': J(win._cu_info()); return True      # V1.1.13 ☁ 雲端更新狀態（只讀）      # V1.1.07 搬硬碟狀態（只讀）
     if name == 'th' and method == 'GET':                                           # TK_V1.0.100 控溫狀態（只讀）
@@ -1129,7 +1130,8 @@ def route(win, sock, method, rest, q, body):
     if name == 'rv/gdefs': J(win._rv_gedit(d)); return True
     if name == 'mig/set': J(win._mig_set(d)); return True
     if name == 'cloud/set': J(win._cu_set(d)); return True
-    if name == 'merge/run': J(win._web_merge_run(d)); return True                    # V1.1.25 合併重複場次（要密碼）                      # V1.1.13 ☁ 雲端更新：檢查／更新／略過（要密碼）                      # V1.1.07 搬硬碟（要密碼）
+    if name == 'merge/run': J(win._web_merge_run(d)); return True
+    if name == 'rules/set': J(win._rules_set(d)); return True                        # V1.1.35 規則頁改數字（要密碼）                    # V1.1.25 合併重複場次（要密碼）                      # V1.1.13 ☁ 雲端更新：檢查／更新／略過（要密碼）                      # V1.1.07 搬硬碟（要密碼）
     if name == 'th/alert':                                                         # TK_V1.0.100 解除斷電警報（要密碼）
         if str(d.get('op') or '') == 'clear': J(_th_mod(win)._Thermal.get().clear_alert()); return True
         J({'ok': False, 'message': '不認得'}); return True                        # TK_V1.0.93 等級設定（要密碼）
