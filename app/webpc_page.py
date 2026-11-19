@@ -1992,6 +1992,8 @@ body.oldLock{overflow:hidden}
 .ruV{display:inline-flex;align-items:center;gap:3px;border-bottom:1px dashed var(--c,#888);cursor:pointer;padding:0 2px;border-radius:4px}.ruV:hover{background:rgba(127,127,127,.15)}.ruV i{font-style:normal;font-size:11px;opacity:.55}.ruV small{font-size:11px;opacity:.6;font-weight:400}.ruV.ed{background:rgba(58,123,213,.15);padding:2px 6px;border-bottom:0;cursor:default}.ruV.done{background:rgba(69,212,131,.3)}.ruIn{width:84px;padding:3px 6px;border-radius:6px;border:1px solid #3a7bd5;background:transparent;color:inherit;font:inherit;font-weight:800}.ruCk{display:inline-flex;align-items:center;gap:3px;font-size:12.5px;opacity:.5;white-space:nowrap}.ruCk.go{opacity:1;color:#45d483;font-weight:800}.ruCk input{transform:scale(1.25)}.ruX{border:0;background:transparent;color:inherit;cursor:pointer;opacity:.6}
 .ytInf{margin:8px 0;padding:8px 12px;border-radius:10px;border:1px solid rgba(77,201,255,.4);background:rgba(77,201,255,.07);line-height:1.6}.ytInf small{opacity:.7}.ytInf .w{color:#f0ad4e}
 .ruWarn{border:2px solid #ff4d6d;background:rgba(255,77,109,.1);border-radius:10px;padding:8px 12px;margin:6px 0 8px;line-height:1.6}
+.lvsColW{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}.lvsColW input[type=range]{width:120px}.lvsColW input[type=number]{width:52px;padding:2px 4px;border-radius:6px;border:1px solid var(--line,#444);background:transparent;color:inherit;font:inherit;text-align:center}.lvsColB{padding:2px 8px}
+.lvsDense .lvsT span{font-size:9px;transform:scale(.85);transform-origin:left bottom}.lvsDense2 .lvsT span{display:none}
 </style></head>
 <body><div id="app"><aside id="side"><div id="sdCount">● 0 / 0 直播間</div><div class="ss"><button class="sstart" id="btnStart">▶ 開始監控</button><button class="sstop" id="btnStop">■ 停止監控</button></div><div id="sdStatus">● 連線中...</div><nav id="nav"></nav><div id="sysBox">電腦狀態讀取中…</div><button id="netBtn">⬇ —
 本日 — MB</button><button id="qBtn" title="排隊轉檔的數量、還要搬到 HDD 的 MP4 大小、全部處理完（轉檔＋搬檔）預估還要多久。點一下看轉檔排隊">🎬 轉檔排隊：讀取中…</button></aside>
@@ -5558,7 +5560,7 @@ async function lvsMount(root,opt){if(opt&&opt.pc&&typeof lvpMount==="function")r
 async function lvsWire(root,F){const $r=s=>root.querySelector(s);
   LVS.box=root.querySelector("#lvsBox");LVS.strip=root.querySelector("#lvsStrip");
   if($r("[data-a=back]"))root.querySelector("[data-a=back]").onclick=()=>{window.lvsList=true;if(typeof PAGES==="undefined")location.hash="fx";else if(typeof go==="function")go(31);};   /* 回一般檔案總管（這次開著就不再自動跳回來） */
-  root.querySelector("#lvsStep").onchange=e=>{lvsPrefSet("step",e.target.value);lvsRebuild();};root.querySelector("#lvsCols").onchange=e=>{lvsPrefSet("cols",e.target.value);lvsRebuild();};
+  root.querySelector("#lvsStep").onchange=e=>{lvsPrefSet("step",e.target.value);lvsRebuild();};lvsColWire(root);
   if($r("#lvsDef"))root.querySelector("#lvsDef").onchange=e=>{try{localStorage.setItem("lvsDef",e.target.checked?"1":"0");}catch(x){}lvsToast(e.target.checked?"✔ 以後按「檔案總管」直接開連續分級":"以後按「檔案總管」開一般清單");};
   let qt=0;root.querySelector("#lvsQ").oninput=e=>{clearTimeout(qt);qt=setTimeout(()=>{F.q=e.target.value.trim();lvsFSet(F);lvsApply(0);},350);};
   root.querySelector("#lvsO").onchange=e=>{F.o=e.target.value;lvsFSet(F);lvsLoad(0);};
@@ -5683,7 +5685,7 @@ async function lvsBuild(s,refresh){s._built=true;const sid=+s.dataset.sid;let I=
   s._miss=nmiss>0;const nt=s.querySelector(".lvsWait");if(nt)nt.remove();
   {const real=s._tiles.length?Math.round((s._tiles.length-nmiss)/s._tiles.length*100):0;const row=(LVS.all||[]).find(r=>r.sid===sid);if(row){row.prx=real;if(LVS.F&&LVS.F.pv&&real<80)lvsSkipBad(sid);}}   /* TK_V0.9.41 勾了「跳過沒好的」：實際預覽圖不到八成 → 跳過 */
   if(nmiss>0&&nmiss>s._tiles.length*0.3)s.querySelector(".lvsH").insertAdjacentHTML("afterend",`<div class="lvsWait">⏳ 這場預覽圖還沒做完（${s._tiles.length-nmiss}/${s._tiles.length}），已排到背景最前面，做好會自動補上</div>`);
-  g.innerHTML=H.join("");lvsSheets(g);}
+  g.innerHTML=H.join("");lvsSheets(g);if(LVS.box){const c_=lvsColsN();LVS.box.classList.toggle("lvsDense",c_>24);LVS.box.classList.toggle("lvsDense2",c_>40);}}
 /* TK_V0.9.41 打開才發現預覽圖沒好的場次：從清單拿掉（停在原本那一場；如果正在看的就是它，換到下一場） */
 function lvsSkipBad(sid){LVS.badQ=LVS.badQ||new Set();LVS.badQ.add(sid);clearTimeout(LVS.badT);LVS.badT=setTimeout(()=>{const B_=LVS.badQ;LVS.badQ=new Set();if(!B_.size||!LVS.L.length)return;
   /* TK_V0.9.48 不再重新整理左邊清單（以前會整個重排，剛標過的就找不回來）：只在「現在這場」還沒好時跳到下一場還好的；左邊卡片照樣留著 */
@@ -5716,7 +5718,17 @@ function lvsList(){let ov=document.getElementById("lvsLst");if(ov){ov.remove();r
   document.body.appendChild(ov);const w=ov.querySelector(".lvsLstW"),cu=ov.querySelector(".lvsLI.cur");if(cu)w.scrollTop=cu.offsetTop-w.clientHeight/3;
   const top=(LVS.root.querySelector("#lvsCurN").getBoundingClientRect().bottom+4)|0;w.style.top=top+"px";
   ov.onclick=e=>{const it=e.target.closest(".lvsLI");ov.remove();if(it)lvsJump(+it.dataset.i);};}
-function lvsColsN(){const v=+lvsPref("cols",0);return v>0?v:((typeof VG!=="undefined"&&VG.cols)||((window.innerWidth<700)?4:8));}
+/* V1.1.37 一列 4～64 張：拉桿／－＋／打數字／方向鍵；邊拉邊看（等手停 0.25 秒才重排，不卡） */
+function lvsColWire(root){const R=root.querySelector("#lvsColR"),N=root.querySelector("#lvsCols");if(!N)return;
+  if(!R){N.onchange=e=>{lvsPrefSet("cols",e.target.value);lvsColApply();};return;}   /* 窄版工具列（下拉選單） */
+  let tm=0;
+  const set=(v,now)=>{v=Math.max(4,Math.min(64,Math.round(+v||lvsColsN())));R.value=v;N.value=v;lvsPrefSet("cols",v);clearTimeout(tm);tm=setTimeout(()=>{lvsColApply();},now?0:250);};
+  R.oninput=()=>set(R.value);N.onchange=()=>set(N.value,1);N.onkeydown=e=>{if(e.key==="Enter")set(N.value,1);};
+  [R,N].forEach(el=>el.addEventListener("keydown",e=>{if(e.key==="ArrowUp"||e.key==="ArrowRight"||e.key==="ArrowDown"||e.key==="ArrowLeft"){e.preventDefault();e.stopPropagation();const d=(e.key==="ArrowUp"||e.key==="ArrowRight"?1:-1)*(e.shiftKey?4:1);set(lvsColsN()+d);}}));
+  root.querySelectorAll(".lvsColB").forEach(b=>b.onclick=e=>{set(lvsColsN()+(+b.dataset.cd)*(e.shiftKey?4:1));});}
+function lvsColApply(){const c=lvsColsN();if(!LVS.box)return;LVS.box.classList.toggle("lvsDense",c>24);LVS.box.classList.toggle("lvsDense2",c>40);
+  LVS.box.querySelectorAll(".lvsG").forEach(g=>{g.style.gridTemplateColumns=`repeat(${c},1fr)`;});}
+function lvsColsN(){const v=Math.min(64,+lvsPref("cols",0));return v>0?v:((typeof VG!=="undefined"&&VG.cols)||((window.innerWidth<700)?4:8));}
 /* 改秒數／一列幾張：已經排好的場次重排（保留捲動位置在同一場） */
 function lvsRebuild(){if(!LVS.box)return;const cur=LVS.box.querySelector(`.lvsS[data-i="${LVS.cur}"]`);
   if(LVS.sel&&LVS.sel.set.size){lvsToast("改了間隔：已選的格子清掉了");}lvsSelClear();
@@ -5925,7 +5937,7 @@ async function lvpMount(root){LVS.pc=true;LVS.root=root;LVS.auto=0;LVS.autoL=[];
 <main class="lvpR"><div class="lvpHd" id="lvpHd"></div>
 <div class="lvpTb" id="lvpTb"><button data-t="prev">◀ 上一則</button>${["-2","0","1","2"].map(k=>`<button class="lvpLv" data-t="lv" data-v="${k}" style="--c:${LVSC[k][2]}">${LVSC[k][0]} ${LVSC[k][1]}</button>`).join("")}<button class="lvpLv" data-t="lv" data-v="" style="--c:#8a93a3" title="清除保存等級">—</button><button data-t="next">下一則 ▶</button>
 <span class="lvpSp"></span><button data-t="cut" class="pri" id="lvpCut">✂ 輸出初剪（0 段）</button><button data-t="pv">▶ 預覽選的片段</button><button data-t="clr">清除選取</button><button data-t="rp">▶ 播放</button><button data-t="clips" title="所有剪好的片段">✂ 初剪片段</button>
-<label>間隔 <select id="lvsStep">${LVS_STEPS.map(([v,t])=>`<option value="${v}"${+lvsPref("step",0)===v?" selected":""}>${t}</option>`).join("")}</select></label><label>一列 <select id="lvsCols">${[4,5,6,7,8,10,12,14,16,20].map(n=>`<option value="${n}"${lvsColsN()===n?" selected":""}>${n} 張</option>`).join("")}</select></label>
+<label>間隔 <select id="lvsStep">${LVS_STEPS.map(([v,t])=>`<option value="${v}"${+lvsPref("step",0)===v?" selected":""}>${t}</option>`).join("")}</select></label><span class="lvsColW" title="一列幾張（4～64）：拉桿、－／＋、直接打數字，或點拉桿後用方向鍵；Shift＋方向鍵一次 4">一列 <button class="pill lvsColB" data-cd="-1">－</button><input type="range" id="lvsColR" min="4" max="64" step="1" value="${lvsColsN()}"><input type="number" id="lvsCols" min="4" max="64" step="1" value="${lvsColsN()}"><button class="pill lvsColB" data-cd="1">＋</button> 張</span>
 <button data-t="undo" id="lvpUndo" hidden>↩ 復原自動 −2（0）</button><label class="lvsDef" title="往下滑的時候，已經標過 −2／−1／+1／+2 的場次直接跳過（0 不算標過）"><input type="checkbox" id="lvpSkipG"${lvsSkipG()?" checked":""}> 滑動跳過已標記</label><label class="lvsDef"><input type="checkbox" id="lvsDef"${lvsDefOn()?" checked":""}> 預設開這頁</label><span class="lvsAuto" id="lvsAuto"></span></div>
 <div class="lvpHint">點一格＝選；再點＝取消；按住拖曳＝圈一段；Shift＋點＝連選；長按 1.5 秒＝播放。滑到下一部＝上一部沒標的自動 −2（有選的片段會合併輸出成 1 部）</div>
 <div class="lvsBox lvpBox" id="lvsBox"></div></main></div>`;
