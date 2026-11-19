@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.40"
+APP_VERSION = "1.1.41"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -3005,6 +3005,13 @@ class MainWindow(QMainWindow):
             self._nv_tm = QTimer(self); self._nv_tm.timeout.connect(lambda: self._nv_sync_g(log=True)); self._nv_tm.start(60000)
         except Exception: pass
         try: self._ret_loop()                                                 # V1.1.36 原檔保留期限（10 分鐘後開始，之後每 30 分鐘）
+        except Exception: pass
+        try:                                                                  # V1.1.41 轉檔排隊先看哪些可以直接合併（背景一條）；熱更新後舊版排的交給這一版重新排
+            QTimer.singleShot(8000, self._mqc_start)
+            app_ = QApplication.instance()
+            if not getattr(app_, '_tlm_mq_take141', False):
+                setattr(app_, '_tlm_mq_take141', True)
+                QTimer.singleShot(40000, lambda: threading.Thread(target=self._mq_take141, daemon=True).start())
         except Exception: pass
         try: self._cu_loop()                                                  # V1.1.13 ☁ 雲端更新：1 分鐘後檢查，之後每 6 小時（只提示）
         except Exception: pass
@@ -6418,7 +6425,7 @@ class MainWindow(QMainWindow):
         except Exception: pass
         for _w in range(600):                                                      # 影片在轉 MP4、剪輯在輸出：先等它們（最多 10 分鐘）
             busy = False
-            try: busy = bool(_merge_queue().get('active'))
+            try: busy = any(_mq_act_t(_merge_queue()))
             except Exception: pass
             try: busy = busy or bool(self._edit_state().get('cur'))
             except Exception: pass
@@ -10296,7 +10303,7 @@ class MainWindow(QMainWindow):
         try: nrec = len(getattr(self, 'video_recorders', {}) or {}); nlive = sum(1 for v in (getattr(self, 'engine_status', {}) or {}).values() if v == 'LIVE')
         except Exception: nrec = nlive = 0
         add('rec', '① 監控、錄影、錄音', True, f'永遠最優先：{nlive} 位在播、{nrec} 部在錄影')
-        try: q = _merge_queue(); conv = [x for x in (q.get('active'), q.get('active2')) if x]; nq = len(q.get('waiting') or [])
+        try: q = _merge_queue(); conv = [x for x in _mq_act_t(q) if x]; nq = len(q.get('waiting') or [])
         except Exception: conv, nq = [], 0
         add('conv', '② 轉成 MP4', bool(conv), (f'{len(conv)} 部在轉' if conv else '沒有在轉') + (f'、{nq} 部排隊' if nq else ''))
         try: sb = self._stt_busy(); sq = len(self._stt_queued())
@@ -10420,7 +10427,7 @@ class MainWindow(QMainWindow):
         try:
             for x in (self._merge_estimates().get('items') or [])[:200]:
                 it.append({'id': x.get('folder', ''), 'state': 'run' if x.get('state') == 'active' else 'wait', 'text': f"{nm(x.get('user', ''))}　{x.get('folder', '')}",
-                           'sub': (f"轉檔中 {x.get('pct', 0):.0f}%，還要約 {fmt_elapsed(x.get('left') or 0)}" + _mq_how(x) if x.get('state') == 'active' else f"排隊中 · {int(x.get('bytes') or 0) / 1e9:.1f} GB"),
+                           'sub': (({'main': '⚡快 1 · ', 'M2': '⚡快 2 · ', 'X': '🐢慢的那條 · '}.get(x.get('slot'), '') if _mq_split_on() else '') + f"轉檔中 {x.get('pct', 0):.0f}%，還要約 {fmt_elapsed(x.get('left') or 0)}" + _mq_how(x) if x.get('state') == 'active' else f"排隊中 · {int(x.get('bytes') or 0) / 1e9:.1f} GB" + (' · 🐢 要重新壓縮（慢的那條）' if x.get('cls') == 'encode' else '')),
                            'pct': x.get('pct') if x.get('state') == 'active' else None, 'cancel': False})
         except Exception: pass
         try:                                                                    # V0.7.22 需要重新壓縮時用哪一個（NVIDIA／Intel 內顯／CPU）
@@ -11847,7 +11854,7 @@ class MainWindow(QMainWindow):
                 except Exception: pass
                 conv = False
                 try:
-                    q = _merge_queue(); conv = bool(q.get('active') or q.get('active2'))
+                    q = _merge_queue(); conv = any(_mq_act_t(q))
                 except Exception: pass
                 try:
                     if any((j or {}).get('state') == 'convert' for j in list(_flv_jobs().values())): conv = True
@@ -15131,7 +15138,7 @@ try { NLConnect | Out-Null; Unset
           if p not in acache: acache[p] = self._reel_has_audio(ff, p)
           if enc != 'libx264':                                            # V0.7.42.014 錄影正在轉 MP4 時不跟它搶顯示卡的編碼器（GeForce 同時能開的有限）：等，等太久就改用 CPU
               tw = time.time()
-              while (_merge_queue().get('active') or self._flv_busy_now()) and time.time() - tw < 1200:
+              while (any(_mq_act_t(_merge_queue())) or self._flv_busy_now()) and time.time() - tw < 1200:
                   st['msg'] = f'等錄影轉檔先做完（{int((time.time() - tw) // 60)} 分）…'; time.sleep(10)
                   if gen is not None and st.get('gen') is not gen: st['msg'] = '已停止'; return 'stop'
               if time.time() - tw >= 1200: st['msg'] = '錄影一直在轉：改用 CPU（閒置優先權）'; return 'switch'
@@ -18413,7 +18420,10 @@ try { NLConnect | Out-Null; Unset
         over = float(MM.get('over') or 20.0)
         items = []; t = now
         gov = _IoGovernor.get()
-        if cur and q.get('active'):
+        split = _mq_split_on(); tl = {}                                         # V1.1.41 每條各自的時間線（快的兩條、慢的一條、I 一條）
+        for sl, (ak, ck) in _MQ_KEYS.items():
+            cur = dict(q.get(ck) or {})
+            if not (cur and q.get(ak)): continue
             total = max(1, int(cur.get('bytes') or 1)); el = max(0.0, now - float(cur.get('t0') or now))
             try: out = Path(cur['out']).stat().st_size if cur.get('out') and Path(cur['out']).exists() else 0
             except Exception: out = 0
@@ -18427,8 +18437,8 @@ try { NLConnect | Out-Null; Unset
             if el > 60 and out > 0 and cur.get('mode') != 'encode':           # V0.6.65 today's load: the file converting now says how fast the next ones go
                 w = min(0.6, el / 600.0); base_copy = w * (out / el) + (1 - w) * base_copy
             items.append({'folder': Path(cur.get('folder', '')).name, 'user': cur.get('user', ''), 'bytes': total, 'state': 'active', 'mode': cur.get('mode', ''), 'enc': cur.get('enc', ''),
-                          'pct': round(pct, 1), 'elapsed': round(el), 'left': round(left), 'finish': round(now + left), 'paused': bool(gov.paused)})
-            t = now + left
+                          'pct': round(pct, 1), 'elapsed': round(el), 'left': round(left), 'finish': round(now + left), 'paused': bool(gov.paused), 'slot': sl})
+            tl[sl] = now + left
         try: p2 = self._mq_apply_prio()
         except Exception: p2 = []
         prl = [x for x in _merge_order(q) if Path(x).name in p2]
@@ -18438,12 +18448,16 @@ try { NLConnect | Out-Null; Unset
             except Exception: b = 0
             try: rate = base_copy if self._is_ssd_path(f) == ssd_now else (MM['copy_ssd'] if self._is_ssd_path(f) else MM['copy'])
             except Exception: rate = base_copy
-            dur = b / max(1e6, rate) + over
+            c = _merge_class(f); cl = _mq_cls_get(f)
+            dur = (b / max(1e6, base_enc) if cl == 'encode' else b / max(1e6, rate)) + over
+            sls = _mq_class_slots(c)
+            sl = min(sls, key=lambda x: tl.get(x, now))                             # 快的兩條：哪條先空就排哪條
+            t0_ = max(now, tl.get(sl, now)); tl[sl] = t0_ + dur
             m = re.match(r'session_(\d+)_(.+?)_\d{8}', fo.name)
-            items.append({'folder': fo.name, 'user': m.group(2) if m else fo.parent.name, 'bytes': b, 'state': 'wait', 'mode': '',
-                          'left': round(t + dur - now), 'finish': round(t + dur), 'dur': round(dur),
+            items.append({'folder': fo.name, 'user': m.group(2) if m else fo.parent.name, 'bytes': b, 'state': 'wait', 'mode': '', 'cls': cl, 'slot': sl if split else '',
+                          'left': round(t0_ + dur - now), 'finish': round(t0_ + dur), 'dur': round(dur),
                           'prio': (p2.index(fo.name) + 1) if fo.name in p2 and f in prl else 0, 'old': not _merge_alive(q, f)})
-            t += dur
+        t = max([now] + list(tl.values()))
         lane = self._mq_lane_obj(); fl = []                                    # V0.6.66 files still to be copied HDD → SSD: listed (and pickable) too
         if lane is not None:
             try:
@@ -18463,7 +18477,7 @@ try { NLConnect | Out-Null; Unset
         if ls.get('name'):
             m = re.match(r'session_(\d+)_(.+?)_\d{8}', ls['name']); u = m.group(2) if m else ''
             ls['who'] = (getattr(self, 'streamer_names', {}) or {}).get(u, u) or ls['name']
-        return {'items': items, 'all_left': round(max(0.0, t - now)), 'all_finish': round(t), 'speed': round(base_copy), 'speed_enc': round(base_enc),
+        return {'items': items, 'all_left': round(max(0.0, t - now)), 'all_finish': round(t), 'speed': round(base_copy), 'speed_enc': round(base_enc), 'split': split,
                 'samples': sum(len(v) for v in hist.values()), 'over': round(over), 'ngap': MM.get('ngap', 0), 'last': ls or None}
 
     def _mq_adopt(self):
@@ -21329,20 +21343,26 @@ try { NLConnect | Out-Null; Unset
         except Exception: pass
         self._dhb_c = (time.time(), res); return res
 
-    def _disk_hist(self, days=30, drive=''):
+    def _disk_hist(self, days=30, drive=''):  # noqa
         """V0.7.27 容量變化：{'drives':[...], 'pts':[[t, used, total], ...]}（最多約 500 點）."""
         days = float(days or 0); t0 = time.time() - days * 86400 if days > 0 else 0; drive = str(drive or '').upper(); pts = []; drv = set()
         try:
+            XS = []
             with open(self._disk_hist_path(), encoding='utf-8') as fh:
                 for ln in fh:
                     try: x = json.loads(ln)
                     except Exception: continue
                     dd = x.get('d') or {}; drv.update(dd.keys())
                     if x.get('t', 0) < t0: continue
-                    if not drive:                                               # V1.1.08 預設＝影片資料夾那顆（搬到 R 之後就是 R）
-                        try: vd_ = (Path(str(self.video_root())).drive or '').upper()
-                        except Exception: vd_ = ''
-                        drive = vd_ if vd_ in dd else ('E:' if 'E:' in dd else (sorted(dd)[0] if dd else ''))
+                    XS.append(x)
+            if not drive:                                                       # V1.1.08 預設＝影片資料夾那顆（搬到 R 之後就是 R）；V1.1.41 整段裡有出現就用它（原本只看第一筆，R 是後來才有的 → 跑去 E）
+                try: vd_ = (Path(str(self.video_root())).drive or '').upper()
+                except Exception: vd_ = ''
+                drive = vd_ if vd_ in drv else ('E:' if 'E:' in drv else (sorted(drv)[0] if drv else ''))
+            since_ = DH_SINCE.get(drive, 0)                                     # V1.1.41 這顆槽從哪天開始算（R：11/17 起才是現在這顆）
+            for x in XS:
+                    dd = x.get('d') or {}
+                    if x.get('t', 0) < since_: continue
                     v = dd.get(drive)
                     if v:
                         bf = (x.get('b2') or {}).get(drive)                     # TK_V0.9.61 那一刻的系統檔案
@@ -23760,7 +23780,7 @@ try { NLConnect | Out-Null; Unset
         catf = {c['folder'].lower() for c in cats}; fixed = {x.lower() for x in self.LIB_V2_FIXED}
         rename = str(self.ui_settings.value('lib_tidy_rename', '1')) == '1'
         active = set(self._active_rec_dirs())
-        try: q = _merge_queue(); busy = {str(Path(x)) for x in list(q['waiting']) + [x for x in (q.get('active'), q.get('active2')) if x]}
+        try: q = _merge_queue(); busy = {str(Path(x)) for x in list(q['waiting']) + [x for x in _mq_act_t(q) if x]}
         except Exception: busy = set()
         J = _flv_jobs(); failed = self._tidy_failed()
         ssd = str(self._ssd_dir()).lower()
@@ -25421,8 +25441,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
             for j in range(tb.columnCount()): tb.setItem(len(L), j, QTableWidgetItem(f'…還有 {more} 部（完整清單看手機／網頁版）' if j == 1 else ''))
         for i, x in enumerate(L):
             act = x.get('state') == 'active'
-            mode = ({'encode': '重新壓縮', 'audio': '重整聲音'}.get(x.get('mode'), '直接複製') + (('（顯示卡）' if str(x.get('enc')).startswith('h264_nvenc') else '（CPU）') if x.get('mode') == 'encode' and x.get('enc') else '')) if act else f'單檔約 {self._fmt_dur(x.get("dur"))}'
-            prog = (('⏸ 讓路中 ' if x.get('paused') else '▶ ') + f'{x.get("pct", 0):.0f}% · 已 {self._fmt_dur(x.get("elapsed"))}') if act else ('等複製到 SSD' if x.get('state') == 'fetch' else '等待')
+            mode = ({'encode': '重新壓縮', 'audio': '重整聲音'}.get(x.get('mode'), '直接複製') + (('（顯示卡）' if str(x.get('enc')).startswith('h264_nvenc') else '（CPU）') if x.get('mode') == 'encode' and x.get('enc') else '')) if act else f'單檔約 {self._fmt_dur(x.get("dur"))}' + ('（🐢 要重新壓縮）' if x.get('cls') == 'encode' else '')
+            prog = (('⏸ 讓路中 ' if x.get('paused') else '▶ ') + ({'main': '快1 ', 'M2': '快2 ', 'X': '慢 '}.get(x.get('slot'), '') if _mq_split_on() else '') + f'{x.get("pct", 0):.0f}% · 已 {self._fmt_dur(x.get("elapsed"))}') if act else ('等複製到 SSD' if x.get('state') == 'fetch' else '等待')
             vals = [str(i + 1), f'{x.get("name") or x.get("user")}', self._fmt_b(x.get('bytes')), mode, prog, self._fmt_dur(x.get('left')), self._fmt_clk(x.get('finish'))]
             for j, s in enumerate(vals):
                 it = QTableWidgetItem(s)
@@ -27088,7 +27108,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         """V0.8.12（背景，每分鐘）：轉檔排隊裡「資料夾已經不在」（改名接手、搬走、轉完了）或「已經沒有 FLV」的、重複的，從清單拿掉.
         以前會留下來：排隊顯示 320 部，C 上其實只有 126 場還沒轉. 拿掉的那些，原本等著的執行緒輪到時看不到檔案，會自己結束."""
         q = _merge_queue(); w = list(q.get('waiting') or []); seen = set(); drop = []
-        act = {str(x) for x in (q.get('active'), q.get('active2'), (q.get('cur') or {}).get('folder'), (q.get('cur2') or {}).get('folder')) if x}
+        act = {str(x) for x in (_mq_act_t(q) + tuple((c_ or {}).get('folder') for c_ in _mq_cur_t(q))) if x}
         for f in w:
             f = str(f)
             if f in act: continue
@@ -27112,7 +27132,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         d = self._ovf_dir()
         if d is None or not d.exists(): return
         q = _merge_queue(); busy = set(str(x) for x in list(q.get('waiting') or [])) | set(str(x) for x in (self.__dict__.get('_video_finalizing') or ()))
-        busy |= {str(x) for x in (q.get('active'), q.get('active2'), (q.get('cur') or {}).get('folder'), (q.get('cur2') or {}).get('folder')) if x}
+        busy |= {str(x) for x in (_mq_act_t(q) + tuple((c_ or {}).get('folder') for c_ in _mq_cur_t(q))) if x}
         busy |= set(self.__dict__.get('_ovf_busy') or ()); n = 0
         for sd in d.iterdir():
             if not sd.is_dir(): continue
@@ -27145,7 +27165,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             if not self.cfg('rec.catchup') and self._ssd_free() < 2 * float(self.cfg('rec.ssd_min_free') or 60) * 1024 ** 3: return
         except Exception: return
         busy = self.__dict__.get('_ovf_busy') or set(); q = _merge_queue()
-        conv = set(str(x) for x in list(q.get('waiting') or [])) | {str(q.get('active') or ''), str(q.get('active2') or '')} | set(self.__dict__.get('_video_finalizing') or ())
+        conv = set(str(x) for x in list(q.get('waiting') or [])) | {str(x or '') for x in _mq_act_t(q)} | set(self.__dict__.get('_video_finalizing') or ())
         best = None
         try:
             for sd in d.iterdir():
@@ -27510,6 +27530,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         for f in (reversed(order[1:]) if len(order) >= 2 else []):            # 最後才會轉的先搬（離輪到它最遠）
             p = Path(f)
             if f in (act, cur, lc) or f in rec or not self._is_ssd_path(p) or self._fetched_info(p): continue
+            if f in {str(x_ or '') for x_ in _mq_act_t(q)} | {str((c_ or {}).get('folder') or '') for c_ in _mq_cur_t(q)}: continue   # V1.1.41 其他條在轉的也不動
             if time.time() - sk.get(f, 0) < 300: continue
             if (p / '_merge_work').exists() or any(p.glob('*.part')) or not any(p.glob('*.flv')): continue
             return f
@@ -27630,7 +27651,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             if shutil.disk_usage(str(root)).free - need < 30 * 1024 ** 3:
                 self.__dict__['_ovf_c'] = (time.time(), None); self._ovf_why = f'{root.drive} 空間不夠'; return
             _mq_take(q, key); time.sleep(1.0)
-            def converting(): return str(q.get('active') or '') == key or str((q.get('cur') or {}).get('folder') or '') == key or (folder / '_merge_work').exists()
+            def converting(): return key in {str(x_ or '') for x_ in _mq_act_t(q)} or key in {str((c_ or {}).get('folder') or '') for c_ in _mq_cur_t(q)} or (folder / '_merge_work').exists()   # V1.1.41 四條
             def put_back():
                 if _merge_alive(q, key) and key not in list(q.get('waiting') or []): list.append(q['waiting'], key)
             if converting() or key in self._active_rec_dirs(): S['skip'][key] = time.time(); return
@@ -27813,7 +27834,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         except Exception: encc = {}
         sc = self.__dict__.get('_emg_sc') or {}
         return {'ok': True, 't': now, 'drives': {'C': dk(Cd), 'I': dk(Id), 'E': dk(Ed)}, 'scan': sc,
-                'conv': {'C': cur_of('active', 'cur'), 'I': cur_of('active2', 'cur2'), 'wait': cnt, 'n': len(w)}, 'hdd': hdd,
+                'conv': {'C': cur_of('active', 'cur'), 'I': cur_of('active2', 'cur2'), 'X': cur_of('active3', 'cur3'), 'C2': cur_of('active4', 'cur4'), 'wait': cnt, 'n': len(w)}, 'hdd': hdd,
                 'ovf': {'n': S.get('n', 0), 'b': S.get('b', 0), 'cur': S.get('cur', ''), 'pct': round(float(S.get('pct') or 0)), 'err': S.get('err', ''), 'why': getattr(self, '_ovf_why', ''),
                         'left_c': S.get('c_b'), 'left_i': S.get('i_b'), 'rate': S.get('rate'), 'urgent': self._c_urgent()},
                 'mode': {'catchup': bool(self.cfg('rec.catchup')), 'parallel': bool(self.cfg('rec.conv_parallel')), 'enc': str(self.cfg('rec.video_encoder') or 'auto'),
@@ -28109,9 +28130,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 if lane.cur and lane.cur[1] == k: lane.cancel_current()
             elif st in ('ssd_wait', 'convert'):
                 j['cancel'] = True
-                cur = _merge_queue().get('cur') or {}
+                cur = next((c_ for c_ in _mq_cur_t(_merge_queue()) if c_ and str(c_.get('folder')) == j.get('ssd')), None) or {}   # V1.1.41 四條裡找這部
                 if st == 'convert' and j.get('ssd') and str(cur.get('folder')) == j.get('ssd'):
-                    p = _merge_queue().get('proc')
+                    p = (_merge_queue().get('procs') or {}).get(cur.get('tid')) or _merge_queue().get('proc')
                     try:
                         if p and p.poll() is None: _IoGovernor._suspend(p, False); p.kill()
                     except Exception: pass
@@ -28124,7 +28145,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
     def _flv_state_text(self, j, act=None):
         if not j: return ''
         s = j.get('state'); pct = j.get('pct') or 0
-        if s == 'convert' and j.get('ssd') and act and str((_merge_queue().get('cur') or {}).get('folder')) == j.get('ssd'):
+        if s == 'convert' and j.get('ssd') and act and any(c_ and str(c_.get('folder')) == j.get('ssd') for c_ in _mq_cur_t(_merge_queue())):
             return f'⚙ SSD 轉檔中 {act["pct"]:.0f}%，還要約 {self._fmt_dur(act["left"])}'
         return {'queued': '⏳ 排隊中', 'copy_in': f'⬇ 複製到 SSD {pct:.0f}%', 'ssd_wait': '⏳ 在 SSD 等轉檔', 'convert': '⚙ 轉檔中' + (j.get('msg') or ''),
                 'copy_out': f'⬆ 搬回 HDD {pct:.0f}%', 'done': '✔ 完成（已放進影片庫）', 'failed': '✖ ' + (j.get('msg') or '失敗')}.get(s, s or '')
@@ -29058,7 +29079,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         sess={int(r[0]):(str(r[1]),r[2],r[3]) for r in self._web_db('SELECT id,username,live_start_epoch,started_at FROM sessions')}
         active_v={str(Path(r.get('dir',''))) for r in list(getattr(self,'video_recorders',{}).values())}
         active_a={str(Path(r.get('dir',''))) for r in list(getattr(self,'experiment_recorders',{}).values())}
-        try: q=_merge_queue(); busy={str(Path(x)) for x in list(q['waiting'])+[x for x in (q.get('active'),q.get('active2')) if x]}
+        try: q=_merge_queue(); busy={str(Path(x)) for x in list(q['waiting'])+[x for x in _mq_act_t(q) if x]}
         except Exception: busy=set()
         dirs=[]
         if only_dirs is not None: dirs=[(Path(d),k) for d,k in only_dirs]
@@ -29332,7 +29353,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
         try:
             q = _merge_queue()
             for f in list(q.get('waiting') or []): add(f)
-            add(q.get('active')); add((q.get('cur') or {}).get('folder')); add(q.get('active2')); add((q.get('cur2') or {}).get('folder'))
+            for a_ in _mq_act_t(q): add(a_)
+            for c_ in _mq_cur_t(q): add((c_ or {}).get('folder'))
         except Exception: pass
         try:
             lane = _HddLane.get(); pub, fet = lane.waiting()
@@ -31974,10 +31996,74 @@ $r | ConvertTo-Json -Depth 4 -Compress
             threading.Thread(target=worker,daemon=True).start()
 
     # ---- V0.4.96 merge all parts of a live into one MP4 (largest picture size) ----
+    MQC_VER = 1
+
+    def _mqc_start(self):
+        """V1.1.41 背景一條：排隊裡還沒看過的，讀 FLV 標頭（只讀標頭、SSD 上很快）判斷「直接合併」還是「要重新壓縮」，結果存 _DB_SSD/mq_cls.json."""
+        app_ = QApplication.instance(); rt = getattr(app_, '_tlm_mqc', None)
+        if rt is None:
+            rt = {}
+            try: setattr(app_, '_tlm_mqc', rt)
+            except Exception: pass
+        rt['ver'] = self.MQC_VER; rt['gen'] = rt.get('gen', 0) + 1; gen = rt['gen']
+        def loop():
+            while rt.get('gen') == gen and not _app_closing():
+                n = 0
+                try:
+                    if _mq_split_on(): n = self._mqc_once(rt, gen)
+                except Exception:
+                    try: self._ui_error('mq classify')
+                    except Exception: pass
+                time.sleep(1 if n else 5)
+        threading.Thread(target=loop, name='TikLiveMqCls', daemon=True).start()
+
+    def _mqc_once(self, rt, gen):
+        q = _merge_queue(); busy = {str(x or '') for x in _mq_act_t(q)} | set(self._active_rec_dirs())
+        d = _mq_cls_store()
+        for f in list(q.get('waiting') or []):
+            if rt.get('gen') != gen: return 0
+            f = str(f); p = Path(f)
+            if f in busy: continue
+            try:
+                if not (self._is_ssd_path(p) or self._is_ovf_path(p)): continue    # HDD 上的先不讀（搬到 SSD 轉之前再看）
+            except Exception: continue
+            sig = _mq_sig(p)
+            if not sig: continue
+            v = d.get(p.name)
+            if v and v[0] == sig: continue
+            t0 = time.time(); scans = []
+            for x in sorted(p.glob('*.flv')):
+                try:
+                    st = flv_scan(x)
+                    if st.get('vh'): scans.append(st)
+                except Exception: pass
+                time.sleep(0.05)
+            if not scans: continue
+            mode = plan_video_merge(scans)
+            _mq_cls_set(p, mode, sig)
+            rt['last'] = {'name': p.name, 'mode': mode, 'secs': round(time.time() - t0, 2), 't': time.time()}
+            if mode == 'encode':
+                try: self._wd_log(f'轉檔排隊：{p.name} 畫面大小有變，要重新壓縮 → 排到慢的那條（看標頭 {time.time() - t0:.1f} 秒）')
+                except Exception: pass
+            return 1
+        return 0
+
+    def _mq_take141(self):
+        """V1.1.41 熱更新後一次：舊版排的（不動正在轉的）交給這一版，才會照「快的先轉」分組."""
+        try:
+            if not _mq_split_on(): return
+            q = _merge_queue()
+            if not any(str(f) not in _MQ_MINE for f in list(q.get('waiting') or [])): return
+            r = self._mq_takeover()
+            self._wd_log('V1.1.41 快的先轉：' + str(r.get('message')))
+        except Exception:
+            try: self._ui_error('mq take141')
+            except Exception: pass
+
     def _mq_takeover(self):
         """V0.8.07 強制套用：排隊中、由舊版程式排的每一部（不動正在轉的）→ 資料夾改名（同一顆硬碟，瞬間完成）後用這一版重新排隊，
         之後的模式（C／I 各自顯示卡或 CPU）馬上生效，不用重開. 原本等著的舊執行緒輪到時資料夾已經不在，什麼都不做."""
-        q = _merge_queue(); act = {str(x) for x in (q.get('active'), q.get('active2'), (q.get('cur') or {}).get('folder'), (q.get('cur2') or {}).get('folder')) if x}
+        q = _merge_queue(); act = {str(x) for x in (_mq_act_t(q) + tuple((c_ or {}).get('folder') for c_ in _mq_cur_t(q))) if x}
         moved = 0; skip = 0
         for f in list(q.get('waiting') or []):
             f = str(f)
@@ -32065,7 +32151,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 'h264_amf':['-c:v','h264_amf','-quality','balanced','-rc','cqp','-qp_i','21','-qp_p','23','-pix_fmt','yuv420p']}.get(enc,
                ['-c:v','libx264','-preset','veryfast','-crf','21','-pix_fmt','yuv420p','-threads','2'])      # V0.5.22 at most ~2 cores
 
-    def _video_finalize(self, folder, adopt=False):
+    def _video_finalize(self, folder, adopt=False, front=False):
         """Runs on a worker thread; one merge at a time so recording keeps the CPU.
         adopt=True (V0.6.63): take over a folder an older version queued before the hot update (it is already in the list)."""
         folder=Path(folder)
@@ -32074,7 +32160,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
         if not adopt and self._nv_flv_finish(folder): return      # V0.6.75 只錄聲音（開程式時接手的 FLV 也一樣）：直接截圖，不排隊轉 MP4
         busy.add(str(folder)); token='merge#'+str(folder); self.experiment_audio_conversions.add(token)
         q=_merge_queue(); q.setdefault('alive',{})[str(folder)]=time.time()      # V0.6.63 heartbeat first, so it is never taken for an old waiter
-        if not adopt: q['waiting'].append(str(folder))      # V0.5.23 visible queue: first come, first converted
+        if not adopt:
+            if front: q['waiting'].insert(0, str(folder))  # V1.1.41 快的那條發現要重新壓縮：排在慢的那條下一部
+            else: q['waiting'].append(str(folder))      # V0.5.23 visible queue: first come, first converted
+        requeue = False
         _MQ_MINE.add(str(folder))                           # V0.8.07 這一版自己排的（強制套用時不用接手）
         try:
             if len(q['waiting'])>1 or q['active']:
@@ -32087,7 +32176,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     ls = q.get('last_start') or {}
                     if ls.get('name') == folder.name: self._wd_log(f'轉檔開始：{folder.name}' + ('（⬆ 插隊）' if ls.get('prio') else '（照順序）'))
                 except Exception: pass
-                ak,ck=('active2','cur2') if _merge_lane(folder)=='I' else ('active','cur')     # V0.7.42.050 I 槽那條另外記（C、I 同時各轉一部）
+                ak,ck=_mq_keys(folder)     # V0.7.42.050 I 槽那條另外記；V1.1.41 四條各自記
                 q[ak]=str(folder)
                 on_ssd=self._is_ssd_path(folder); fe=self._fetched_info(folder) if on_ssd else None
                 jkey=(fe or {}).get('origin') or str(folder)
@@ -32097,11 +32186,16 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 try: res=None if self._flv_cancelled(folder) else self._video_finalize_sync(folder)
                 finally:
                     q[ak]=None; q[ck]=None; _io_background(False)
+                if res=='to_enc':                                      # V1.1.41 讓出來：等鎖放掉後排到慢的那條
+                    requeue=True
+                    if jkey in _flv_jobs(): self._flv_job(jkey,state='queued',msg='要重新壓縮，排到慢的那條')
+                    raise _MqRequeue()
                 if not on_ssd and jkey in _flv_jobs():
                     ok=not any(f.stat().st_size>0 for f in folder.glob('*.flv'))
                     self._flv_job(jkey,state='done' if ok else 'failed',msg='' if ok else '轉檔沒有成功，FLV 保留')
                 if on_ssd and res not in ('busy','nv') and str(folder) not in self._active_rec_dirs():
                     _HddLane.get().put('publish',str(folder))      # V0.5.76 SSD -> video library on the HDD
+        except _MqRequeue: pass
         except Exception as ex:
             try: self._experiment_status(f'影片合併失敗：{folder.name}（{ex}）')
             except Exception: pass
@@ -32110,6 +32204,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
             _mq_take(q, folder)
             try: (q.get('alive') or {}).pop(str(folder), None)
             except Exception: pass
+        if requeue:
+            try: self._wd_log(f'轉檔：{folder.name} 要重新壓縮 → 讓出快的那條，排到慢的那條下一部')
+            except Exception: pass
+            self._video_finalize(folder, front=True)
 
     def _video_finalize_sync(self, folder):
         ff=self._experiment_ffmpeg()
@@ -32162,8 +32260,12 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 tmp_out=ssd/f'{folder.name}_{out.name}.part'
         except Exception: pass
         mode=plan_video_merge([s for _,_,s in scans])
+        try: _mq_cls_set(folder, mode)                          # V1.1.41 記下來（排隊分組用）
+        except Exception: pass
+        fast_slot = _mq_slot(folder) in ('main','M2') and _mq_split_on()
+        if mode=='encode' and fast_slot: return 'to_enc'        # V1.1.41 快的那條遇到要重新壓縮的：讓出來
         try:                                                     # V0.5.63 progress / estimate for the phone
-            _merge_queue()['cur2' if _merge_lane(folder)=='I' else 'cur']={'folder':str(folder),'user':user,'bytes':sum(f.stat().st_size for f,_,_ in scans),'out':str(tmp_out),'t0':time.time(),'mode':mode}
+            _merge_queue()[_mq_keys(folder)[1]]={'folder':str(folder),'user':user,'slot':_mq_slot(folder),'tid':threading.get_ident(),'bytes':sum(f.stat().st_size for f,_,_ in scans),'out':str(tmp_out),'t0':time.time(),'mode':mode}
         except Exception: pass
         # largest picture size among every format that appeared
         dims=[]
@@ -32189,13 +32291,14 @@ $r | ConvertTo-Json -Depth 4 -Compress
             if mode in ('copy','audio'):
                 rc,err=concat([f for f,_,_ in scans],['-c:v','copy']+(['-c:a','copy'] if mode=='copy' else ['-c:a','aac','-b:a','160k','-ar','48000','-ac','2']))
                 durs=[flv_duration(st) for _,_,st in scans]; ok=rc==0
+                if not ok and fast_slot: raise _MqRequeue()   # V1.1.41 直接合併不行、要重新壓縮：讓到慢的那條
                 if not ok: mode='encode'                      # copy refused -> fall back to a clean re-encode
             if mode=='encode':
                 if not (tw and th):
                     w,h,_c,_d=ffmpeg_info(ff,scans[0][0]); tw,th=w-w%2,h-h%2
                 vf=f'scale={tw}:{th}:force_original_aspect_ratio=decrease,pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2,setsar=1' if tw and th else 'setsar=1'
                 enc=self._lane_encoder(ff, folder); pieces=[]; durs=[]      # V0.8.07 每條可以各自選顯示卡／CPU
-                ck_=_merge_queue().get('cur2' if _merge_lane(folder)=='I' else 'cur') or {}
+                ck_=_merge_queue().get(_mq_keys(folder)[1]) or {}
                 prog=work/'progress.txt'                                    # V0.8.10 真實進度：FFmpeg 每 0.5 秒寫一次已經轉到第幾秒
                 try:
                     ck_['dur_total']=sum(max(0.0,flv_duration(st_)) for _f,_x,st_ in scans); ck_['dur_done']=0.0; ck_['prog']=str(prog)
@@ -32227,7 +32330,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     if i==0:
                         try: self._wd_log(f'轉檔重新壓縮：{folder.name} 用 {used}' + ('（顯示卡解碼＋壓縮）' if used.startswith('h264_nvenc') else ''))
                         except Exception: pass
-                        try: (_merge_queue().get('cur2' if _merge_lane(folder)=='I' else 'cur') or {})['enc']=used
+                        try: (_merge_queue().get(_mq_keys(folder)[1]) or {})['enc']=used
                         except Exception: pass
                     if rc!=0 or not piece.exists(): raise RuntimeError(err or 'encode failed')
                     pieces.append(piece); durs.append(ffmpeg_info(ff,piece)[3] or flv_duration(st))
@@ -32238,6 +32341,13 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 got=ffmpeg_info(ff,tmp_out)[3]; want=sum(durs)
                 ok=tmp_out.exists() and tmp_out.stat().st_size>0 and (want<20 or got>=want*0.9)
                 if not ok: err=f'長度不足（{got:.0f}/{want:.0f} 秒）'
+        except _MqRequeue:
+            try: tmp_out.unlink()
+            except Exception: pass
+            shutil.rmtree(work,ignore_errors=True)
+            try: _mq_cls_set(folder, 'encode')
+            except Exception: pass
+            return 'to_enc'
         except Exception as ex:
             ok=False; err=str(ex)
         if not ok:
@@ -32256,7 +32366,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             self._experiment_status(f'@{user}：MP4 複製回資料硬碟失敗，FLV 保留（{ex}）'); return
         shutil.rmtree(work,ignore_errors=True)
         try:                                                     # V0.5.63 remember how fast this computer converts (estimates)
-            c=_merge_queue().get('cur') or {}
+            c=_merge_queue().get(_mq_keys(folder)[1]) or {}
             if c.get('t0'):
                 with open(_merge_speed_log(),'a',encoding='utf-8') as fh:
                     fh.write(json.dumps({'t':round(time.time()),'bytes':int(c.get('bytes') or 0),'secs':round(time.time()-float(c['t0']),1),'mode':mode,'files':len(scans),'user':user,'ssd':1 if on_ssd else 0},ensure_ascii=False)+'\n')
@@ -34318,7 +34428,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             else:
                 try: free=shutil.disk_usage(str(self.video_root() if self.video_root().exists() else self.video_root().anchor or '.')).free/1024**3; ftxt=f' · 剩餘 {free:,.0f} GB'
                 except Exception: ftxt=''
-                q=_merge_queue(); qtxt=(f' · 轉 MP4：{"1 部進行中" if q["active"] else "無進行中"}' + (f'、{len(q["waiting"])} 部排隊' if q['waiting'] else '')) if (q['active'] or q['waiting']) else ''
+                q=_merge_queue(); na_=sum(1 for x_ in _mq_act_t(q) if x_); qtxt=(f' · 轉 MP4：{f"{na_} 部進行中" if na_ else "無進行中"}' + (f'、{len(q["waiting"])} 部排隊' if q['waiting'] else '')) if (na_ or q['waiting']) else ''
                 self.exp_video_state.setText(f'錄影：開啟 · {dict(VIDEO_QUALITIES).get(self.cfg("rec.video_quality"),"")} · 錄影下載合計 {fmt_rate(getattr(self,"_net_video_rate",0))}{qtxt} · {self.video_root()}{ftxt}')
         if force or now-self._exp_last_done>=10: self._experiment_refresh_done(); self._exp_last_done=now     # TK_V0.8.34.021 完成清單改在背景算（_experiment_refresh_done 自己最多 20 秒重算一次），這裡只是把結果放上去
 
@@ -34565,7 +34675,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             vtxt=(f'✔ MP4 {self._fmt_bytes(mp4)}' if mp4 else ('⚠ 只有 FLV '+self._fmt_bytes(flv) if flv else '— 無影片'))
             try:
                 pre=f"session_{int(meta.get('session_id'))}_"; q=_merge_queue()
-                if q['active'] and Path(q['active']).name.startswith(pre): vtxt='⏳ 轉成 MP4 中…' + (f'（FLV {self._fmt_bytes(flv)}）' if flv else '')
+                if any(x_ and Path(x_).name.startswith(pre) for x_ in _mq_act_t(q)): vtxt='⏳ 轉成 MP4 中…' + (f'（FLV {self._fmt_bytes(flv)}）' if flv else '')
                 else:
                     pos=next((i+1 for i,f in enumerate(q['waiting']) if Path(f).name.startswith(pre)),0)
                     if pos: vtxt=f'⏸ 排隊轉檔（第 {pos} 位）' + (f'（FLV {self._fmt_bytes(flv)}）' if flv else '')
@@ -37570,7 +37680,7 @@ exit /b 1
         """有沒有轉檔正在用顯示卡（壓縮或解碼）."""
         try:
             q = _merge_queue()
-            for k in ('cur', 'cur2'):
+            for k in ('cur', 'cur2', 'cur3', 'cur4'):
                 c = q.get(k) or {}
                 if str(c.get('enc') or '').startswith('h264_nvenc') or (c.get('mode') == 'encode' and _gpu_dec_ok()): return True
         except Exception: pass
@@ -39655,11 +39765,11 @@ exit /b 1
         q = _merge_queue(); now = time.time()
         w = list(q.get('waiting') or [])
         if not w: return
-        for lane, ak in (('main', 'active'), ('I', 'active2')):
-            if q.get(ak): q.pop('kick_' + lane, None); continue
+        for lane in (('F', 'X', 'I') if _mq_split_on() else ('main', 'I')):     # V1.1.41 照分組看
+            if any(q.get(_MQ_KEYS[sl][0]) for sl in _mq_class_slots(lane)): q.pop('kick_' + lane, None); continue
             t0 = q.setdefault('kick_' + lane, now)
             if now - t0 < 6: continue
-            nxt = next((x for x in _merge_order(q) if _merge_alive(q, x) and _merge_lane(x) == lane), None)
+            nxt = next((x for x in _merge_order(q) if _merge_alive(q, x) and _merge_class(x) == lane), None)
             if not nxt: continue
             nm = Path(nxt).name; p2 = list(q.get('prio2') if 'prio2' in q else [Path(x).name for x in list(q.get('prio') or [])])
             if p2[:1] != [nm]:
@@ -41036,7 +41146,7 @@ exit /b 1
     def _prep_restart_tick(self):
         if getattr(self, '_handoff', False): return
         el = time.time() - float(getattr(self, '_prep_rs_t0', 0) or time.time())
-        try: q = _merge_queue(); run = [x for x in (q.get('active'), q.get('active2')) if x]
+        try: q = _merge_queue(); run = [x for x in _mq_act_t(q) if x]
         except Exception: run = []
         if not run or el > 600:
             try: self._prep_rs_timer.stop()
@@ -44586,7 +44696,7 @@ const RU_BAR=(segs)=>'<div class="ruBar">'+segs.map(s=>'<span style="flex:'+s[0]
 const RULES=[
  {k:"rec",i:"🎥",c:"#ff6b8a",t:"錄影與監控：怎麼錄、存在哪",s:[
   {t:"一場直播的檔案怎麼走",d:RU_F([["直播中","#ff4d6d"],["FLV 先寫 C 槽 SSD","#f0ad4e"],["下播：在 SSD 轉 MP4","#4dc9ff"],["搬進影片庫（R 槽）","#45d483"]])+
-   "<ul><li>錄影時畫面直接複製串流、<b>不重新壓縮</b>，所以錄影本身幾乎不吃 CPU。</li><li>下播後在 SSD 上把 FLV 轉成 MP4：畫面大小沒變就直接複製（幾秒～幾分鐘）；直播中畫面大小變過（例如 PK）才重新壓縮成同一個大小，這時用<b>顯示卡</b>。</li><li>轉好才一次搬到影片庫硬碟（HDD 只寫一次完整的 MP4，不會邊錄邊轉卡住）。轉成功就刪 FLV；<b>轉失敗一定保留 FLV</b>（放「FLV轉檔失敗」，之後可以重轉）。</li><li>聲音另外錄一份 M4A（48 kbps 單聲道，一小時約 22 MB），也是先放 SSD、轉好再搬。<b>就算 MP4 刪了，M4A、留言、禮物都還在</b>。</li></ul>"},
+   "<ul><li>錄影時畫面直接複製串流、<b>不重新壓縮</b>，所以錄影本身幾乎不吃 CPU。</li><li>下播後在 SSD 上把 FLV 轉成 MP4：畫面大小沒變就直接複製（幾秒～幾分鐘）；直播中畫面大小變過（例如 PK）才重新壓縮成同一個大小，這時用<b>顯示卡</b>（主 FFmpeg 太新、1060 驅動不支援，用 ffmpeg_gpu 那份 FFmpeg 7.1.1）。</li><li><b>快的先轉</b>：排隊時先讀 FLV 標頭，看每部是「直接合併」還是「要重新壓縮」。直接合併的<b>兩條同時轉</b>（電腦忙時只用一條）；要重新壓縮的自己<b>一條、一次一部</b>（顯示卡壓縮、CPU 最多 2 核），不會擋住後面。轉到一半才發現要重新壓縮的，讓出來排到慢的那條<b>下一部</b>。設定 → 錄影「🚀 快的先轉」可以關。</li><li>轉好才一次搬到影片庫硬碟（HDD 只寫一次完整的 MP4，不會邊錄邊轉卡住）。轉成功就刪 FLV；<b>轉失敗一定保留 FLV</b>（放「FLV轉檔失敗」，之後可以重轉）。</li><li>聲音另外錄一份 M4A（48 kbps 單聲道，一小時約 22 MB），也是先放 SSD、轉好再搬。<b>就算 MP4 刪了，M4A、留言、禮物都還在</b>。</li></ul>"},
   {t:"空間不夠時",d:"<ul><li>SSD 剩不到 <b>"+RU_V('rec.ssd_min_free','GB',60)+"</b>：新的錄影改成直接錄在影片庫硬碟。</li><li>影片硬碟剩不到 <b>"+RU_V('rec.video_min_free','GB',30)+"</b>：不開始新的錄影（<b>聲音照錄</b>）。</li><li>🛡 C 槽守門員每分鐘看 C 剩多少、減少多快：第 1 級先停不急的背景工作；第 2 級全速把東西搬走；第 3 級（剩不到 15 GB 或 20 分鐘內會滿）才會一位一位停掉正在錄到 C 的影片（F → E → 未分級先停）。</li></ul>"},
   {t:"同一場直播的判定（斷線、重開）",d:"<ul><li>主播斷線後 <b>"+RU_V('conn.grace_minutes','分鐘',10)+"內</b>連回同一個直播間＝<b>續寫同一場</b>（錄影會分成第 2 段、第 3 段…）。</li><li>直播中卻 <b>"+RU_V('monitor.silent_min','分鐘',30)+"</b>沒有任何留言、禮物、進場、人數也沒變（而且沒在錄影）→ 重新連一次確認：還在播就續寫，結束了就把結束時間改回最後有資料的時間。</li><li>程式重開、斷電、超過 10 分鐘才連回來 → 會變成<b>另一場</b>。這種被切開的，用「⧉ 合併重複場次」合回一場（見「場次合併」）。</li></ul>"},
   {t:"開程式、熱更新時的監控",d:"<ul><li>開程式 3 秒後自動開始監控（設定可以關）。正在錄的場次在熱更新、重開時會<b>接著錄同一場</b>。</li><li>搬硬碟切換後，如果找不到影片硬碟（例如 R 槽代號跑掉），程式<b>先不開始監控</b>，不會錄到別的地方，會提示你去磁碟管理改代號。</li></ul>"},
@@ -44978,13 +45088,15 @@ function mqHtml(P){const M=(P&&P.merge)||{},L=M.items||[],N=M.lane||{},clk=typeo
   if(!L.length)return `<div class="mqx">${qsl}${lane}<div class="mn" style="margin:4px 0 8px">目前沒有影片在排隊轉檔 ✔</div>${cap}</div>`;
   let h=`<div class="mqx"><div class="ms">排隊 <b>${L.length}</b> 部 · 全部預估 <b>${fmtDur(M.all_left)}</b> 後完成（約 ${clk(M.all_finish)}）</div>
 ${qsl}<div class="mn">參考速度 ${fmtR(M.speed)}（依最近 10 次轉檔${M.samples?"":"；還沒有紀錄，先用預設值，之後會越來越準"}）${M.over!=null?` ＋ 每部另外約 <b>${fmtDur(M.over)}</b>（掃描、檢查、換下一部${M.ngap?`，依最近 ${M.ngap} 次實際間隔`:"，預設值"}）`:""}，再和正在轉的這部實際速度混合推算。${gov.watching?"📱 現在有人在用網頁／看影片：硬碟忙超過 "+Math.round(gov.limit||0)+"% 就先暫停轉檔讓路（停用 2 分鐘後恢復全速）。":"沒人在用：全速轉檔（一打開網頁或看影片就會自動讓路）。"}</div>${M.last&&M.last.name?`<div class="mn">🕘 上一部開始轉：<b>${esc(M.last.who||M.last.name)}</b> ${M.last.prio?'<b style="color:#ff4d6d">⬆ 插隊</b>':"（照順序）"} · ${clk(M.last.t)}</div>`:""}${L.some(x=>x.state!=="active"&&!x.old)?`<div class="mn">👆 點一下排隊中的影片＝<b style="color:#ff4d6d">優先</b>（紅框，數字＝先後順序）；再點一下取消，後面的號碼會往前補。正在轉的那部不能調。</div>`:""}`+lane;
-  h+=L.map((x,i)=>x.state==="active"?`<div class="mq a"><div class="r1"><b>▶ ${esc(x.name||x.user)}</b><span>${fmtB(x.bytes)} · ${(md(x.mode)+(x.mode==="encode"&&x.enc?(String(x.enc).startsWith("h264_nvenc")?"（顯示卡）":"（CPU）"):""))}</span></div>
+  const SL={main:"⚡ 快 1",M2:"⚡ 快 2",X:"🐢 慢的那條",I:"I 槽"};   /* V1.1.41 快的先轉 */
+  if(M.split){const nE=L.filter(x=>x.state==="wait"&&x.cls==="encode").length;h+=`<div class="mn">🚀 <b>快的先轉</b>：直接合併的兩條同時轉；要重新壓縮的${nE?` <b>${nE}</b> 部`:""}排在 🐢 慢的那條、一次一部，不擋後面。</div>`;}
+  h+=L.map((x,i)=>x.state==="active"?`<div class="mq a"><div class="r1"><b>▶ ${M.split&&SL[x.slot]?`<em class="mqs">${SL[x.slot]}</em>`:""}${esc(x.name||x.user)}</b><span>${fmtB(x.bytes)} · ${(md(x.mode)+(x.mode==="encode"&&x.enc?(String(x.enc).startsWith("h264_nvenc")?"（顯示卡）":"（CPU）"):""))}</span></div>
 <div class="mqb"><i style="width:${Math.max(1,Math.min(100,+x.pct||0))}%"></i></div><div class="r2">${x.paused?'<span style="color:#f0ad4e">⏸ 硬碟忙，暫停讓路中</span> · ':""}${(+x.pct||0).toFixed(0)}% · 已 ${fmtDur(x.elapsed)} · 還要約 ${fmtDur(x.left)}（約 ${clk(x.finish)}）</div></div>`
-    :`<div class="mq${x.prio?" pr":""}${x.old?" old":""}" data-mqf="${esc(x.folder||"")}"><div class="r1"><b>${x.prio?`<em class="mqp">${x.prio}</em>`:""}${i+1}. ${esc(x.name||x.user)}</b><span>${fmtB(x.bytes)}</span></div><div class="r2">單檔約 ${fmtDur(x.dur)} · 預計 ${clk(x.finish)} 完成（${fmtDur(x.left)} 後）${x.state==="fetch"?" · 還在 HDD，要先複製到 SSD":""}${x.old?" · 剛更新，交接中…":""}</div></div>`).join("");
+    :`<div class="mq${x.prio?" pr":""}${x.old?" old":""}" data-mqf="${esc(x.folder||"")}"><div class="r1"><b>${x.prio?`<em class="mqp">${x.prio}</em>`:""}${i+1}. ${esc(x.name||x.user)}</b><span>${fmtB(x.bytes)}</span></div><div class="r2">單檔約 ${fmtDur(x.dur)} · 預計 ${clk(x.finish)} 完成（${fmtDur(x.left)} 後）${x.state==="fetch"?" · 還在 HDD，要先複製到 SSD":""}${x.cls==="encode"?' · <b style="color:#f0ad4e">🐢 要重新壓縮（慢的那條）</b>':""}${x.old?" · 剛更新，交接中…":""}</div></div>`).join("");
   return h+cap+"</div>";}
 /* V0.6.63 轉檔排隊：點一下＝優先（紅框＋號碼 1、2、3…），再點一下取消（後面的號碼往前補）。正在轉的那部不能點 */
 (function(){if(window.__mqPr)return;window.__mqPr=1;const st=document.createElement("style");
-st.textContent=".mqx .mq[data-mqf]{cursor:pointer;-webkit-tap-highlight-color:transparent}.mqx .mq.pr{border:2px solid #ff4d6d;box-shadow:0 0 0 2px rgba(255,77,109,.18)}.mqx .mq.old{cursor:default}.mqx .mqp{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;border-radius:11px;background:#ff4d6d;color:#fff;font-size:12.5px;font-style:normal;font-weight:800;margin-right:7px;padding:0 6px;vertical-align:1px}";document.head.appendChild(st);
+st.textContent=".mqx .mq[data-mqf]{cursor:pointer;-webkit-tap-highlight-color:transparent}.mqx .mq.pr{border:2px solid #ff4d6d;box-shadow:0 0 0 2px rgba(255,77,109,.18)}.mqx .mq.old{cursor:default}.mqx .mqs{font-style:normal;font-size:11.5px;font-weight:700;color:#7fd3ff;border:1px solid #2f6f95;border-radius:9px;padding:0 6px;margin-right:6px;vertical-align:1px}.mqx .mqp{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;border-radius:11px;background:#ff4d6d;color:#fff;font-size:12.5px;font-style:normal;font-weight:800;margin-right:7px;padding:0 6px;vertical-align:1px}";document.head.appendChild(st);
   document.addEventListener("click",async e=>{const el=e.target.closest(".mqx .mq[data-mqf]");if(!el)return;const say=m=>(typeof toast==="function"?toast(m):alert(m));
     if(el.classList.contains("old")){say("剛更新：這部正在交給新版排隊，大約 15 秒後就能調");return;}
     if(window.__mqBusy)return;window.__mqBusy=1;
@@ -51762,6 +51874,8 @@ SETTINGS_SPEC = [
          help='V0.7.42.048：C→I 分流、背景語音轉字幕的執行緒、補截 20 張圖，降到這個百分比，讓錄影和 FLV 轉 MP4 先跑。10%＝最慢最省；100%＝照原本各自的設定。FLV 轉 MP4 本身不降速。（清倉模式開著時，搬到 E 的速度由清倉模式決定）'),
     dict(key='rec.catchup', cat='record', label='🚚 清倉模式（盡快把 C 和 I 上待處理的都搬到 E）', kind='bool', default=True,
          help='V0.7.42.049：搬到 E 的速度提高到「SSD → HDD 傳輸速度」和 70% 取大的；先清 C（前面搬 E、後面搬 I），C 清完接著把 I 上的一場一場搬到 E；暫停把 E 上的舊 FLV 拿回 C 轉檔（那些不急）。全部搬完就跟平常一樣。狀態列會顯示還剩多少、預估多久。'),
+    dict(key='rec.conv_split', cat='record', label='🚀 快的先轉：直接合併的兩條同時轉，要重新壓縮的另外一條慢慢轉', kind='bool', default=True,
+         help='V1.1.41：排隊時先看每部是「直接合併」（幾十秒）還是「畫面大小變了要重新壓縮」（一小時左右）。直接合併的兩條同時轉；要重新壓縮的自己一條、一次一部（顯示卡壓縮、CPU 最多 2 核），不會擋住後面一大串。轉到一半才發現要重新壓縮的，讓出來排到慢的那條下一部。關掉＝跟以前一樣全部排一條。'),
     dict(key='rec.conv_parallel', cat='record', label='⚡ C 和 I 同時各轉一部 MP4（不同硬碟）', kind='bool', default=True,
          help='V0.7.42.050：分流到 I 槽的 FLV 自己一條轉檔排隊，跟 C 槽那條同時各轉一部（不同硬碟互不搶）。電腦很忙時 I 那條先等。需要重新壓縮的會用顯示卡（設定「合併重新壓縮用」選自動）。關掉＝全部排成一條。'),
     dict(key='rec.enc_c', cat='record', label='C 那條重新壓縮用', kind='choice', default='auto', choices=[('自動', 'auto'), ('顯示卡', 'gpu'), ('CPU', 'cpu')],
@@ -52278,6 +52392,90 @@ def _gpu_dec_ok():
     except Exception: return False
 
 
+DH_SINCE = {'R:': datetime(2026, 11, 17).timestamp()}                      # V1.1.41 使用者 11/20：R 槽 11/17 以前是別顆硬碟的紀錄，容量變化從 11/17 開始
+_MQ_KEYS = {'main': ('active', 'cur'), 'I': ('active2', 'cur2'), 'X': ('active3', 'cur3'), 'M2': ('active4', 'cur4')}   # V1.1.41 每條轉檔記在哪
+_MQ_SLOT = {}                                                                   # V1.1.41 資料夾 → 拿到哪一條（main／M2／X／I）
+
+
+def _mq_act_t(q):
+    """V1.1.41 所有正在轉的資料夾（main、I、慢的那條 X、快的第二條 M2）."""
+    return tuple(q.get(a) for a, _c in _MQ_KEYS.values())
+
+
+def _mq_cur_t(q):
+    return tuple(q.get(c) for _a, c in _MQ_KEYS.values())
+
+
+def _mq_slot(folder):
+    """V1.1.41 這部拿到的那一條（舊版排的照舊：I 槽＝I，其他＝main）."""
+    v = _MQ_SLOT.get(str(folder))
+    return v if v else ('I' if _merge_lane(folder) == 'I' else 'main')
+
+
+def _mq_keys(folder):
+    return _MQ_KEYS.get(_mq_slot(folder), ('active', 'cur'))
+
+
+def _mq_split_on():
+    try:
+        ck = _MO_CACHE; now = time.time()
+        if now - ck.get('spt', 0) > 2:
+            win = getattr(QApplication.instance(), '_tlm_window', None)
+            ck['spon'] = bool(win is not None and win.cfg('rec.conv_split')); ck['spt'] = now
+        return bool(ck.get('spon'))
+    except Exception: return False
+
+
+def _mq_cls_store():
+    """V1.1.41 每部排隊的「直接合併／要重新壓縮」（掛 QApplication，熱更新共用；存 _DB_SSD/mq_cls.json，重開也記得）."""
+    app = QApplication.instance(); d = getattr(app, '_tlm_mq_cls', None) if app is not None else None
+    if d is None:
+        d = {}
+        try:
+            p = Path(PACKAGE_ROOT) / '_DB_SSD' / 'mq_cls.json'
+            if p.exists(): d.update(json.loads(p.read_text(encoding='utf-8')) or {})
+        except Exception: pass
+        try: setattr(app, '_tlm_mq_cls', d)
+        except Exception: pass
+    return d
+
+
+def _mq_cls_save():
+    try:
+        d = _mq_cls_store()
+        if len(d) > 3000:
+            for k in sorted(d, key=lambda k: float((d[k] or [0, 0, 0])[2] if len(d[k] or []) > 2 else 0))[:len(d) - 2000]: d.pop(k, None)
+        p = Path(PACKAGE_ROOT) / '_DB_SSD' / 'mq_cls.json'; p.parent.mkdir(parents=True, exist_ok=True); tp = p.with_suffix('.tmp')
+        tp.write_text(json.dumps(d, ensure_ascii=False), encoding='utf-8'); os.replace(tp, p)
+    except Exception: pass
+
+
+def _mq_sig(folder):
+    try: return '|'.join(f'{x.name}:{x.stat().st_size}' for x in sorted(Path(folder).glob('*.flv')))
+    except Exception: return ''
+
+
+def _mq_cls_get(folder):
+    """'encode'／'copy'／'audio'；還沒看過＝''.（只看名字＋FLV 大小簽章，不讀檔）"""
+    v = _mq_cls_store().get(Path(str(folder)).name)
+    return v[1] if v and len(v) > 1 else ''
+
+
+def _mq_cls_set(folder, mode, sig=None):
+    d = _mq_cls_store(); d[Path(str(folder)).name] = [sig if sig is not None else _mq_sig(folder), mode, time.time()]; _mq_cls_save()
+
+
+def _merge_class(f):
+    """V1.1.41 排隊分哪一組：I＝I 槽那條；X＝要重新壓縮（自己一條）；F＝直接合併（main、M2 兩條）. 關掉 rec.conv_split＝照舊 main／I."""
+    base = _merge_lane(f)
+    if base == 'I' or not _mq_split_on(): return base
+    return 'X' if _mq_cls_get(f) == 'encode' else 'F'
+
+
+def _mq_class_slots(c):
+    return {'F': ['main', 'M2'], 'X': ['X'], 'I': ['I']}.get(c, ['main'])
+
+
 def _merge_lane(f):
     """V0.7.42.050 轉檔分兩條：分流資料夾（I 槽）上的一條，其他（C 槽 SSD、E 槽）一條；不同硬碟同時各轉一部. 設定 rec.conv_parallel 關掉＝全部一條."""
     try:
@@ -52295,11 +52493,12 @@ def _merge_lane(f):
 
 
 def _merge_lock_for(lane):
-    if lane != 'I': return _process_merge_lock()
-    app = QApplication.instance(); lk = getattr(app, '_tlm_merge_lock_I', None) if app is not None else None
+    if lane not in ('I', 'X', 'M2'): return _process_merge_lock()
+    nm = '_tlm_merge_lock_' + lane                                              # V1.1.41 X、M2 各自一把（I 照舊）
+    app = QApplication.instance(); lk = getattr(app, nm, None) if app is not None else None
     if lk is None:
         lk = threading.Lock()
-        try: setattr(app, '_tlm_merge_lock_I', lk)
+        try: setattr(app, nm, lk)
         except Exception: pass
     return lk
 
@@ -52318,45 +52517,62 @@ def _merge_busy_now():
 
 def _merge_turn_wait(folder):
     """V0.6.63 wait for this folder's turn, then hold the one-merge-at-a-time lock (returned; the caller releases it).
-    V0.7.42.050 每條（C／E 一條、I 一條）各自排隊、各自一把鎖."""
-    f = str(folder); lane = _merge_lane(f); lk = _merge_lock_for(lane); q = _merge_queue(); al = q.setdefault('alive', {})
-    def first(fresh=False):
-        w = q.get('waiting') or []; key = (len(w), w[0] if w else None, w[-1] if w else None, len(q.get('prio2') or q.get('prio') or []))
-        c = _MO_CACHE.setdefault('first', {}).get(lane); now = time.time()
-        if not fresh and c and c[1] == key and now - c[0] < 1.0: return c[2]  # 排隊很多時，每條等待的執行緒不用每 0.5 秒都重算整個順序
-        v = next((x for x in _merge_order(q) if _merge_alive(q, x) and _merge_lane(x) == lane), None)
-        _MO_CACHE['first'][lane] = (now, key, v); return v
-    ak = 'active2' if lane == 'I' else 'active'; t_in = time.time()
-    def stuck():
-        """V0.8.03 防呆：這條已經 20 秒沒有任何一部在轉（例如熱更新前後新舊版本排的順序不一樣，大家互等）→ 誰拿到鎖誰先轉，不再空等."""
-        now = time.time()
-        if q.get(ak) or now - t_in < 20: return False
-        last = float(((q.get('last_start') or {}).get('t')) or 0); idle0 = q.setdefault('idle_' + lane, now)
+    V0.7.42.050 每條（C／E 一條、I 一條）各自排隊、各自一把鎖.
+    V1.1.41 分組：F＝直接合併（main、M2 兩條，誰空誰轉）、X＝要重新壓縮（一條）、I＝I 槽. 拿到哪一條記在 _MQ_SLOT."""
+    f = str(folder); q = _merge_queue(); al = q.setdefault('alive', {}); t_in = time.time()
+    def cls(): return _merge_class(f)
+    def first(c, fresh=False):
+        w = q.get('waiting') or []; key = (len(w), w[0] if w else None, w[-1] if w else None, len(q.get('prio2') or q.get('prio') or []), len(_mq_cls_store()))
+        cc = _MO_CACHE.setdefault('first', {}).get(c); now = time.time()
+        if not fresh and cc and cc[1] == key and now - cc[0] < 1.0: return cc[2]  # 排隊很多時，每條等待的執行緒不用每 0.5 秒都重算整個順序
+        v = next((x for x in _merge_order(q) if _merge_alive(q, x) and _merge_class(x) == c), None)
+        _MO_CACHE['first'][c] = (now, key, v); return v
+    def stuck(c):
+        """V0.8.03 防呆：這組已經 20 秒沒有任何一部在轉（例如熱更新前後新舊版本排的順序不一樣，大家互等）→ 誰拿到鎖誰先轉，不再空等."""
+        now = time.time(); aks = [_MQ_KEYS[x][0] for x in _mq_class_slots(c)]
+        if any(q.get(a) for a in aks) or now - t_in < 20: return False
+        last = float(((q.get('last_start') or {}).get('t')) or 0); idle0 = q.setdefault('idle_' + c, now)
         return now - max(last, idle0) >= 20
+    def slot_ok(sl):
+        if sl == 'I' and q.get('active') and _merge_busy_now(): return False       # 電腦忙：I 那條先讓 C 那條轉
+        if sl == 'M2' and _merge_busy_now(): return False                         # V1.1.41 快的第二條：電腦忙就先只用一條
+        if sl == 'X':                                                             # V1.1.41 舊版正在用 main 重新壓縮的那部轉完前，不同時壓兩部
+            for a, ck in (('active', 'cur'), ('active4', 'cur4')):
+                if q.get(a) and (q.get(ck) or {}).get('mode') == 'encode': return False
+        return True
     while True:
-        al[f] = time.time()
-        if q.get(ak): q.pop('idle_' + lane, None)
-        else: q.setdefault('idle_' + lane, time.time())
-        if lane == 'I' and q.get('active') and _merge_busy_now(): time.sleep(2); continue     # 電腦忙：I 那條先讓 C 那條轉
-        nxt = first()
-        if nxt is None or nxt == f or stuck():
-            if lk.acquire(timeout=0.5):
-                al[f] = time.time(); nxt = first(True)
-                if nxt not in (None, f) and not stuck():    # 等鎖的時候順序被改了（有人點了優先）：讓給排前面的
+        al[f] = time.time(); c = cls(); aks = [_MQ_KEYS[x][0] for x in _mq_class_slots(c)]
+        if any(q.get(a) for a in aks): q.pop('idle_' + c, None)
+        else: q.setdefault('idle_' + c, time.time())
+        nxt = first(c)
+        if nxt is None or nxt == f or stuck(c):
+            got = None
+            for k, sl in enumerate(_mq_class_slots(c)):
+                if not slot_ok(sl): continue
+                lk = _merge_lock_for(sl)
+                if lk.acquire(timeout=0.5 if k == 0 else 0): got = (sl, lk); break
+            if got:
+                sl, lk = got
+                al[f] = time.time(); nxt = first(c, True)
+                if (nxt not in (None, f) and not stuck(c)) or cls() != c:   # 等鎖的時候順序被改了（有人點了優先）或分組變了：讓給排前面的
                     lk.release(); time.sleep(0.3); continue
-                q.pop('idle_' + lane, None)
-                al.pop(f, None)
+                q.pop('idle_' + c, None)
+                al.pop(f, None); _MQ_SLOT[f] = sl
                 try:
                     nm = Path(f).name; was = nm in list(q.get('prio2') or []) or f in list(q.get('prio') or [])
                     q['prio'] = [x for x in list(q.get('prio') or []) if x != f]
                     if 'prio2' in q: q['prio2'] = [x for x in list(q.get('prio2') or []) if x != nm]
-                    q['last_start'] = {'name': nm, 'prio': bool(was), 't': time.time()}       # V0.6.66 驗證用：上一部是不是插隊進來的
+                    q['last_start'] = {'name': nm, 'prio': bool(was), 't': time.time(), 'slot': sl}       # V0.6.66 驗證用：上一部是不是插隊進來的
                 except Exception: pass
                 return lk
+            time.sleep(0.5)
         else: time.sleep(0.5)
 
 
 class _MergeAdopted(Exception): pass
+
+
+class _MqRequeue(Exception): pass                                               # V1.1.41
 
 
 class _MergeWaitList(list):
@@ -52388,6 +52604,7 @@ class _MergeTurn:
     def __exit__(self, *a):
         try: self.lk.release()
         except Exception: pass
+        _MQ_SLOT.pop(self.f, None)
         return False
 
 
@@ -52688,7 +52905,11 @@ def _run_low_io(cmd, timeout=None, stdout=subprocess.DEVNULL, stderr=subprocess.
     if governed: _IoGovernor.get().wait()
     if _app_closing(): raise RuntimeError('程式關閉中，不再開新的轉檔')       # TK_V0.8.34.030
     p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, **kw)
-    try: _merge_queue().update(proc=p, proc_gov=governed)   # V0.5.77 so 「取消」 can stop it / 回放加速 can pause the SSD one
+    try:
+        q_ = _merge_queue(); q_.update(proc=p, proc_gov=governed)   # V0.5.77 so 「取消」 can stop it / 回放加速 can pause the SSD one
+        pr_ = q_.setdefault('procs', {}); pr_[threading.get_ident()] = p      # V1.1.41 好幾條同時轉：每條執行緒自己的
+        if len(pr_) > 50:
+            for k_ in [k_ for k_, v_ in list(pr_.items()) if v_.poll() is not None]: pr_.pop(k_, None)
     except Exception: pass
     if governed: _io_low_proc(p)
     gov = _IoGovernor.get()
