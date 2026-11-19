@@ -34,7 +34,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.32"
+APP_VERSION = "1.1.33"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -5476,11 +5476,23 @@ class MainWindow(QMainWindow):
         """TK_V0.8.93 連續分級：你接下來要看的幾場，大圖先在背景拼好（只讀 SSD、單一執行緒、一次一張；換清單就換做新的）."""
         st = self.__dict__.setdefault('_vsp', {'q': [], 'run': False, 'lock': threading.Lock(), 'done': 0})
         with st['lock']:
-            st['q'] = [int(x) for x in sids][:60]; st['t'] = time.time()
+            st['q'] = [int(x) for x in sids][:60]; st['t'] = time.time(); st['first'] = list(st['q'][:12])   # V1.1.33 先做每場前 3 張
             if st['run']: return {'ok': True}
             st['run'] = True
         def work():
             try:
+                while True:                                                     # V1.1.33 第一輪：接下來每場的前 3 張（第一個畫面），近的先
+                    with st['lock']:
+                        if not st.get('first') or _app_closing(): break
+                        sid = st['first'].pop(0)
+                    try: M = self._vg_sheet_meta(sid)
+                    except Exception: M = []
+                    for m in M:
+                        if not m[4]: continue
+                        for si in range(min(3, (len(m[5]) + self.SHEET_N * self.SHEET_N - 1) // (self.SHEET_N * self.SHEET_N))):
+                            try: self._vg_sheet(sid, m[0], si)
+                            except Exception: pass
+                            st['done'] += 1
                 while True:
                     with st['lock']:
                         if not st['q'] or _app_closing(): break
@@ -49284,8 +49296,18 @@ function lvsApply(keepSid){setTimeout(lvsNvAllPaint,0);const F=LVS.F,sk=(typeof 
 function lvsAhead(ci){if(!LVS.L.length)return;const now=Date.now();if(LVS.ahI===ci&&now-(LVS.ahT||0)<20000)return;LVS.ahI=ci;LVS.ahT=now;
   const nx=LVS.L.slice(ci,ci+40).map(r=>r.sid).join(",");lvsGet("/api/pc/vg/sheetpre?q="+nx).catch(()=>{});
   lvsGet("/api/pc/vg/ping?q="+LVS.L.slice(ci,ci+200).map(r=>r.sid).join(",")).catch(()=>{});
-  LVS.L.slice(ci+1,ci+3).forEach(async r=>{LVS.pf=LVS.pf||{};if(LVS.pf[r.sid])return;LVS.pf[r.sid]=1;let I=null;try{I=await lvsGet("/api/pc/vg/sheetinfo?sid="+r.sid);}catch(e){}
-    ((I&&I.parts)||[]).forEach(p=>{if(!p.ok)return;const nm=p.n-(p.m||[]).length;for(let si=0;si<Math.min(2,p.sheets);si++){const im=new Image();im.src=`${lvsB()}/api/pc/vg/sheet?sid=${r.sid}&ri=${p.ri}&i=${si}&n=${nm}`;}});});}
+  lvsPre(ci);}
+/* V1.1.33 照左邊清單的順序，接下來 10 場先載好：每場資訊＋第一個畫面要用的大圖（每段前 3 張）；一次 2 個，近的先；資訊留 3 分鐘給打開時直接用 */
+function lvsPre(ci){LVS.pf=LVS.pf||{};LVS.pfI=LVS.pfI||{};LVS.pfImg=LVS.pfImg||new Map();const want=LVS.L.slice(ci+1,ci+11).map(r=>r.sid);LVS.pfQ=[];
+  want.forEach(sid=>{if(!LVS.pf[sid])LVS.pfQ.push({k:"i",sid});});
+  const run=async()=>{if(LVS.pfRun>=2)return;const it=LVS.pfQ.shift();if(!it)return;LVS.pfRun=(LVS.pfRun||0)+1;
+    try{if(it.k==="i"){if(!LVS.pf[it.sid]){LVS.pf[it.sid]=1;const [I,Inf]=await Promise.all([lvsGet("/api/pc/vg/sheetinfo?sid="+it.sid).catch(()=>null),lvsGet("/api/pc/vg/info?sid="+it.sid).catch(()=>null)]);
+        if(I){LVS.pfI[it.sid]={I,Inf,t:Date.now()};const ims=[];((I.parts)||[]).forEach(p=>{if(!p.ok)return;const nm=p.n-(p.m||[]).length;for(let si=0;si<Math.min(3,p.sheets||1);si++)ims.push({k:"s",sid:it.sid,u:`${lvsB()}/api/pc/vg/sheet?sid=${it.sid}&ri=${p.ri}&i=${si}&n=${nm}`});});
+          const at=LVS.pfQ.findIndex(x=>x.k==="i");LVS.pfQ.splice(at<0?LVS.pfQ.length:at,0,...ims.slice(0,3));LVS.pfQ.push(...ims.slice(3));}else LVS.pf[it.sid]=0;}}
+      else if(!LVS.pfImg.has(it.u)){await new Promise(res=>{const im=new Image();im.onload=im.onerror=()=>res();im.src=it.u;LVS.pfImg.set(it.u,im);});
+        if(LVS.pfImg.size>160){const k=LVS.pfImg.keys().next().value;LVS.pfImg.delete(k);}}}catch(e){}
+    LVS.pfRun--;run();};
+  run();run();}
 function lvsRefreshMiss(){if(!LVS.box||!LVS.box.isConnected){clearInterval(LVS.rt);return;}if(document.hidden)return;
   LVS.box.querySelectorAll(".lvsS").forEach(s=>{const i=+s.dataset.i;if(s._miss&&s._built&&i>=LVS.cur-1&&i<=LVS.cur+2)lvsBuild(s,true);});}
 /* 上面那排：等級顏色、現在這場框起來、放正中間 */
@@ -49314,7 +49336,9 @@ function lvsMore(){const box=LVS.box;if(!box)return;const old=box.querySelector(
   if(LVS.n<LVS.L.length){const m=document.createElement("div");m.className="lvsMore";m.textContent="…";m.style.minHeight=Math.max(200,box.clientHeight-40)+"px";box.appendChild(m);LVS.io.observe(m);}
   else{const z=document.createElement("div");z.className="lvsDone";z.textContent="— 清單裡的場次都看完了 —";z.style.minHeight=Math.max(200,box.clientHeight-40)+"px";box.appendChild(z);}}   /* 最後一場也能滑到最上面（才算換場） */
 async function lvsBuild(s,refresh){s._built=true;const sid=+s.dataset.sid;let I=null,Inf=s._info||null;const tb0=performance.now();
-  try{[I,Inf]=await Promise.all([lvsGet("/api/pc/vg/sheetinfo?sid="+sid),Inf?Promise.resolve(Inf):lvsGet("/api/pc/vg/info?sid="+sid).catch(()=>null)]);}catch(e){}
+  const pc_=!refresh&&LVS.pfI&&LVS.pfI[sid]&&Date.now()-LVS.pfI[sid].t<180000?LVS.pfI[sid]:null;   /* V1.1.33 先載好的直接用 */
+  if(pc_){I=pc_.I;Inf=Inf||pc_.Inf;delete LVS.pfI[sid];}
+  else try{[I,Inf]=await Promise.all([lvsGet("/api/pc/vg/sheetinfo?sid="+sid),Inf?Promise.resolve(Inf):lvsGet("/api/pc/vg/info?sid="+sid).catch(()=>null)]);}catch(e){}
   lvsPerf("i",performance.now()-tb0);const g=s.querySelector(".lvsG");const P=((I&&I.parts)||[]).filter(p=>p.n>0);if(!P.length){if(!refresh)g.innerHTML='<div class="lvsEmpty">這場沒有錄影</div>';const row0=(LVS.all||[]).find(r=>r.sid===sid);if(row0&&I){row0.prx=0;if(LVS.F&&LVS.F.pv)lvsSkipBad(sid);}return;}
   const mis=P.reduce((a,p)=>a+(p.m||[]).length,0);if(refresh&&mis===s._mis)return;s._mis=mis;   /* 背景補好了才重排 */
   const C=I.cols||10,Rw=I.rows||10,per=C*Rw,us=+lvsPref("step",0);   /* TK_V0.8.93 有每 2 秒圖的場次每 10 秒一格（直接拿 2 秒圖）；沒有的每 30 秒 */
