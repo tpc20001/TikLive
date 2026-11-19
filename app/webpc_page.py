@@ -1979,7 +1979,7 @@ body.oldLock{overflow:hidden}
 <body><div id="app"><aside id="side"><div id="sdCount">● 0 / 0 直播間</div><div class="ss"><button class="sstart" id="btnStart">▶ 開始監控</button><button class="sstop" id="btnStop">■ 停止監控</button></div><div id="sdStatus">● 連線中...</div><nav id="nav"></nav><div id="sysBox">電腦狀態讀取中…</div><button id="netBtn">⬇ —
 本日 — MB</button><button id="qBtn" title="排隊轉檔的數量、還要搬到 HDD 的 MP4 大小、全部處理完（轉檔＋搬檔）預估還要多久。點一下看轉檔排隊">🎬 轉檔排隊：讀取中…</button></aside>
 <main><div id="tabsRow"><button id="tabMode" title="點一下切換：展開＝完整直播小卡；收合＝照片＋時長＋鑽石愛心；堆疊＝頭像疊在一起"></button><div id="tabs"></div><div id="miniW"></div><div id="topRight"><span><span id="ver"></span> · 網頁版 · __PCNAME__</span><button id="toPhone" title="切回手機版介面">📱 手機版</button></div></div><section id="page"></section>
-<footer id="statusBar"><span id="sbMsg"></span><button id="themeBtn" title="這個瀏覽器自己的深色／淺色">◐ 深色／淺色</button><span title="滾輪滾一下捲多遠（只影響這個瀏覽器）">滾輪</span><button id="whM" title="滾輪捲慢一點">－</button><span id="whV">×1</span><button id="whP" title="滾輪捲快一點">＋</button><span>介面大小</span><button id="zoomM">－</button><span id="zoomV">100%</span><button id="zoomP">＋</button></footer></main></div>
+<footer id="statusBar"><span id="sbMsg"></span><button id="themeBtn" title="這個瀏覽器自己的深色／淺色">◐ 深色／淺色</button><button id="whS" title="滾輪絲滑（緩進緩出）開／關（只影響這個瀏覽器）">滾輪</button><button id="whM" title="滾輪捲慢一點">－</button><span id="whV">×1</span><button id="whP" title="滾輪捲快一點">＋</button><span>介面大小</span><button id="zoomM">－</button><span id="zoomV">100%</span><button id="zoomP">＋</button></footer></main></div>
 <script>const THEMES=__THEMES__;const THEME0="__MODE__";
 "use strict";
 /* ================= V0.6.01 TikLive Monitor 網頁版（電腦版介面） ================= */
@@ -2259,9 +2259,19 @@ function boot(){applyTheme(THEME0);drawNav();
    $("#whM").onclick=()=>step(-1);$("#whP").onclick=()=>step(1);show();
    const canY=(el,dy)=>{const cs=getComputedStyle(el),o=cs.overflowY;if(!(o==="auto"||o==="scroll"||(el===document.scrollingElement)))return false;if(el.scrollHeight<=el.clientHeight+1)return false;return dy>0?el.scrollTop+el.clientHeight<el.scrollHeight-1:el.scrollTop>0;};
    const canX=(el,dx)=>{const cs=getComputedStyle(el),o=cs.overflowX;if(!(o==="auto"||o==="scroll"))return false;if(el.scrollWidth<=el.clientWidth+1)return false;return dx>0?el.scrollLeft+el.clientWidth<el.scrollWidth-1:el.scrollLeft>0;};
-   window.addEventListener("wheel",e=>{if(wm===1||e.defaultPrevented||e.ctrlKey||e.metaKey)return;const t=e.target;if(t&&t.closest&&t.closest("select,input[type=range],textarea,video,audio"))return;
+   /* V1.1.31 絲滑：每個捲動區自己一條動畫，停著時緩進緩出，連續滾動中途換目標只緩出（不會一頓一頓）；預設開 */
+   let sm=true;try{sm=localStorage.getItem("tlm_pc_wheel_smooth")!=="0";}catch(e){}
+   const shS=()=>{const b=$("#whS");b.textContent=sm?"滾輪 ∿":"滾輪";b.style.opacity=sm?"1":".6";};shS();
+   $("#whS").onclick=()=>{sm=!sm;try{localStorage.setItem("tlm_pc_wheel_smooth",sm?"1":"0");}catch(e){}shS();toast(sm?"滾輪絲滑：開（緩進緩出）":"滾輪絲滑：關",1500);};
+   const AN=new Map(),ioq=t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2,oc=t=>1-Math.pow(1-t,3);
+   const glide=(el,ax,d)=>{const k=ax==="y"?"scrollTop":"scrollLeft",mx=ax==="y"?el.scrollHeight-el.clientHeight:el.scrollWidth-el.clientWidth,key=el;let A=AN.get(key);const now=performance.now();
+     if(A&&A.ax===ax&&now-A.t0<A.dur){A.from=el[k];A.to=Math.max(0,Math.min(mx,A.to+d));A.t0=now;A.dur=260;A.ease=oc;}
+     else{A={ax,from:el[k],to:Math.max(0,Math.min(mx,el[k]+d)),t0:now,dur:340,ease:ioq,raf:0};AN.set(key,A);}
+     if(!A.raf){const tick=()=>{const B=AN.get(key);if(!B){return;}const t=Math.min(1,(performance.now()-B.t0)/B.dur);el[k]=B.from+(B.to-B.from)*B.ease(t);if(t<1)B.raf=requestAnimationFrame(tick);else{B.raf=0;AN.delete(key);}};A.raf=requestAnimationFrame(tick);}};
+   window.addEventListener("wheel",e=>{if((wm===1&&!sm)||e.defaultPrevented||e.ctrlKey||e.metaKey)return;const t=e.target;if(t&&t.closest&&t.closest("select,input[type=range],textarea,video,audio"))return;
      const k=e.deltaMode===1?40:e.deltaMode===2?600:1,horiz=e.shiftKey||Math.abs(e.deltaX)>Math.abs(e.deltaY);let dy=(horiz?0:e.deltaY)*k,dx=(horiz?(e.deltaX||e.deltaY):0)*k;if(!dx&&!dy)return;
-     for(let el=t&&t.nodeType===1?t:t&&t.parentElement;el&&el!==document.documentElement;el=el.parentElement){if(dy?canY(el,dy):canX(el,dx)){e.preventDefault();if(dy)el.scrollTop+=dy*wm;else el.scrollLeft+=dx*wm;return;}}},{passive:false});}
+     for(let el=t&&t.nodeType===1?t:t&&t.parentElement;el&&el!==document.documentElement;el=el.parentElement){if(dy?canY(el,dy):canX(el,dx)){e.preventDefault();if(sm)glide(el,dy?"y":"x",(dy||dx)*wm);else if(dy)el.scrollTop+=dy*wm;else el.scrollLeft+=dx*wm;return;}}},{passive:false});
+   ["pointerdown","keydown"].forEach(ev=>window.addEventListener(ev,()=>{AN.forEach(A=>{if(A.raf)cancelAnimationFrame(A.raf);});AN.clear();},{passive:true}));}
   try{localStorage.setItem("tlm_view","pc");}catch(e){}
   pollState();renderPage();}
 function setZoom(d){const z=Math.max(60,Math.min(150,LS.get("zoom",100)+d));LS.set("zoom",z);applyZoom(z);}
