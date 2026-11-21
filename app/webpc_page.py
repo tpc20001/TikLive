@@ -3966,7 +3966,7 @@ function csSim(D,P,H){H=H||1500;const G={};(D.grades||[]).forEach((g,i)=>{G[i]=g
   const dOf=k=>{const g=G[k];if(!g||g.fixed||g.k==="—")return null;if(g.k==="F")return 0;const v=P.d[g.k];return v==null?null:+v;};
   const Q=[];let qh=0;
   for(const f of D.files||[]){const g=G[f[0]];if(!g)continue;const b=f[1]*1e6,st=f[3];if(st===3)continue;
-    if(st===1&&g.yt){Q.push([b,g.k,f[2]]);continue;}
+    if(st===1&&g.yt){const n=Math.max(1,f[5]||1);for(let i=0;i<n;i++)Q.push([b/n,g.k,f[2]]);continue;}   /* V1.1.43 一個檔算一部 */
     const dd=dOf(g.k);if(dd==null)continue;const ref=st===2?f[4]:f[2];const del=Math.max(1,Math.ceil(dd-ref+(st===2&&dd===0?1:0)));if(del<=H)delta[del]-=b;}
   Q.sort((a,b)=>b[2]-a[2]);
   const infl=Math.max(0,P.infl)/100,pr=Math.max(0,Math.min(100,P.prot))/100,mn=Math.max(0,Math.min(95,P.man||0))/100,acc={};
@@ -3981,9 +3981,10 @@ function csSim(D,P,H){H=H||1500;const G={};(D.grades||[]).forEach((g,i)=>{G[i]=g
   const lim=D.total*0.97;let full=-1,peak=0,pk=0;for(let t=0;t<=H;t++){if(used[t]>peak){peak=used[t];pk=t;}if(full<0&&used[t]>=lim)full=t;}
   const a=used[H-180],z=used[H],slope=(z-a)/180;const tail=Array.from(used.slice(H-60)).reduce((s,v)=>s+v,0)/60;
   let bal=-1;if(Math.abs(slope)<3e9){for(let t=0;t<=H;t++){if(Math.abs(used[t]-tail)<Math.max(0.03*tail,2e11)){let ok=true;for(let u=t;u<=Math.min(H,t+60);u+=5)if(Math.abs(used[u]-tail)>Math.max(0.05*tail,3e11)){ok=false;break;}if(ok){bal=t;break;}}}}
-  let ytIn=0,perm=0;for(const k in (D.inflow||{})){const g=G[k];if(!g||g.k==="F")continue;const b=D.inflow[k][0]*infl;if(g.yt)ytIn+=D.inflow[k][1]*infl;perm+=(b*pr+(dOf(k)==null&&!g.yt?b*(1-pr):0))*(1-mn);}
+  let ytIn=0,ytB=0,perm=0,pP=0,pN=0;for(const k in (D.inflow||{})){const g=G[k];if(!g||g.k==="F")continue;const b=D.inflow[k][0]*infl;if(g.yt){ytIn+=D.inflow[k][1]*infl;ytB+=b*(1-pr);}pP+=b*pr*(1-mn);if(dOf(k)==null&&!g.yt)pN+=b*(1-pr)*(1-mn);}perm=pP+pN;
+  const ytGrow=ytIn>P.cap?(ytIn-P.cap)*(ytB/Math.max(0.01,ytIn)):0;let qClear=-1;for(let t=1;t<=H;t++){if(ql[t]<1){qClear=t;break;}}
   let p365=0,k365=0;for(let t=0;t<=Math.min(H,365);t++)if(used[t]>p365){p365=used[t];k365=t;}
-  return {used,ql,full,peak,pk,slope,tail,bal,ytIn,perm,p365,k365,H};}
+  return {used,ql,full,peak,pk,slope,tail,bal,ytIn,perm,pP,pN,ytGrow,qClear,p365,k365,H};}
 function csOpen(){csCss();let ov=document.getElementById("csOv");if(ov)ov.remove();ov=document.createElement("div");ov.id="csOv";
   ov.innerHTML=`<div class="csP"><div class="csH"><b>💾 容量預測</b><span class="csS">讀取中…</span><button class="csX" title="關閉">✕</button></div><div class="csBody"><div class="csN">讀取每個 MP4 的等級、大小、YouTube 狀態…</div></div></div>`;
   document.body.appendChild(ov);ov.addEventListener("click",e=>{if(e.target===ov||e.target.closest(".csX"))csClose();});
@@ -4002,7 +4003,7 @@ function csCtl(){const D=CS.D,P=CS.P,P0=CS.P0,h=[];
   return h.join("");}
 function csBuild(){const ov=document.getElementById("csOv");if(!ov)return;const D=CS.D;
   ov.querySelector(".csS").innerHTML=`${D.drive} 共 ${csFmt(D.total)} · 現在用 ${csFmt(D.used)}（影片 ${csFmt(D.inv)}＋其他 ${csFmt(D.base)}） · 這裡都是<b style="color:#ffd27a">模擬</b>，不會改設定`;
-  ov.querySelector(".csBody").innerHTML=`<div class="csG">${csCtl()}</div><canvas class="csCv"></canvas><div class="csSum"></div><div class="csN">算法：每個 MP4 照等級——傳 YouTube 的等傳好（照每天上限、舊的先傳）再留 N 天；不傳的下播 N 天後刪；+1/+2、⭐、沒分等級的不照時間刪。每天新增照最近 7 天每個等級的平均（不算 F）。你自己標 −2 刪的、剪輯另外存的沒算進去，實際通常會比預測低一點（用「你自己刪」對準最近幾天的實際變化）。左下角「套用變更」只會改<b>每個等級留幾天</b>和<b>YouTube 每天上限</b>；新增量、+1/+2 留著、你自己刪只是模擬用。</div>`;
+  ov.querySelector(".csBody").innerHTML=`<div class="csG">${csCtl()}</div><canvas class="csCv"></canvas><div class="csSum"></div><div class="csN">算法：每個 MP4 照等級——傳 YouTube 的等傳好（照每天上限、舊的先傳）再留 N 天；不傳的下播 N 天後刪；+1/+2、⭐、沒分等級的不照時間刪。每天新增照最近 14 天每個等級的平均（主播不是每天開，用 14 天比較穩；不算 F）；要傳 YouTube 的部數照排隊檔算（一個檔一部）。你自己標 −2 刪的、剪輯另外存的沒算進去，實際通常會比預測低一點（用「你自己刪」對準最近幾天的實際變化）。左下角「套用變更」只會改<b>每個等級留幾天</b>和<b>YouTube 每天上限</b>；新增量、+1/+2 留著、你自己刪只是模擬用。</div>`;
   if(!ov.querySelector(".csB"))ov.querySelector(".csP").insertAdjacentHTML("beforeend",`<div class="csB"><button class="ap" disabled>套用變更</button><span class="csCh" style="color:#9aa4b2;font-size:12px"></span><span class="sp"></span><button class="bt" data-rs="1">↺ 回到目前設定</button><button class="bt" data-cl="1">關閉</button></div>`);
   const G=ov.querySelector(".csG");
   G.oninput=e=>{const c=e.target.closest(".csC");if(!c||e.target.type!=="range")return;csSet(c.dataset.id,+e.target.value,true);};
@@ -4022,14 +4023,14 @@ function csRedraw(full){const ov=document.getElementById("csOv");if(!ov||!CS.D)r
   const S=ov.querySelector(".csSum"),pct=v=>Math.round(v/D.total*100);const h=[];
   h.push(R.full>=0?`<span class="bad">⛔ 預計 <b>${csDate(R.full)}</b>（約 ${R.full} 天後）滿到 97%</span>`:`<span class="ok">✅ <b>${Math.round(R.H/365*10)/10} 年內不會滿</b></span>`);
   if(R.bal>=0&&Math.abs(R.slope)<3e9)h.push(`<span class="ok">⚖ 約 <b>${R.bal}</b> 天後（${csDate(R.bal)}）平衡在 <b>${csFmt(R.tail)}</b>（${pct(R.tail)}%）上下</span>`);
-  else if(R.slope>0)h.push(`<span class="wn">📈 一直在漲：每天約 <b>＋${csFmt(R.slope)}</b>，沒有平衡點</span>`);
+  else if(R.slope>0)h.push(`<span class="wn">📈 長期一直在漲：每天約 <b>＋${csFmt(R.slope)}</b>，沒有平衡點——來自：${[R.pP>1e9?`+1/+2、⭐ 不照時間刪 ＋${csFmt(R.pP)}`:"",R.pN>1e9?`沒分等級／設成永久 ＋${csFmt(R.pN)}`:"",R.ytGrow>1e9?`YouTube 追不上 ＋${csFmt(R.ytGrow)}`:""].filter(Boolean).join("、")||"—"}</span>`);
   const stable=R.bal>=0&&Math.abs(R.slope)<3e9,need=Math.max(stable?R.peak:R.p365,D.used)*1.05;
   h.push(stable?`<span>🔝 最高會到 <b>${csFmt(R.peak)}</b>（${pct(R.peak)}%${R.pk?`，${csDate(R.pk)}`:"，就是現在"}）</span>`:`<span>🔝 一年後約 <b>${csFmt(R.used[365])}</b>（${pct(R.used[365])}%）</span>`);
   h.push(`<span>🧮 需要的空間：<b>${csFmt(need)}</b>（${stable?"最高":"一年內最高"}＋5% 緩衝；硬碟 ${csFmt(D.total)}${need>D.total?`，<b style="color:#ff6b6b">不夠 ${csFmt(need-D.total)}</b>`:`，多 ${csFmt(D.total-need)}`}）</span>`);
   {const hs=D.hist||[];if(hs.length>2){const L=hs[hs.length-1];let a=null;for(let i=hs.length-1;i>=0;i--){if(L[0]-hs[i][0]>=3*86400){a=hs[i];break;}}
     if(a){const act=(D.used-a[1])/((D.t-a[0])/86400),sim=(R.used[3]-R.used[0])/3;h.push(`<span>🔎 最近 ${Math.round((D.t-a[0])/86400)} 天實際每天 <b>${act>=0?"＋":"−"}${csFmt(Math.abs(act))}</b>，模擬前 3 天每天 <b>${sim>=0?"＋":"−"}${csFmt(Math.abs(sim))}</b>${act<sim-2e10?"（實際比較少：可以把「你自己刪」調高來對準）":""}</span>`);}}}
-  if(R.perm>1e9)h.push(`<span class="wn">📌 不照時間刪的（+1/+2、⭐、沒分等級、設成永久的）每天約 <b>＋${csFmt(R.perm)}</b>：這部分要你剪完標 −2 才會少</span>`);
-  const q90=Math.round(R.ql[90]||0),q0=Math.round(R.ql[1]||0);h.push(R.ytIn>CS.P.cap+0.3?`<span class="bad">▶ YouTube <b>追不上</b>：每天要傳約 ${R.ytIn.toFixed(0)} 部 > 上限 ${CS.P.cap} 部，排隊 3 個月後約 ${q90} 部（原檔都留著等）</span>`:`<span>▶ YouTube 排隊 ${q0} → 3 個月後 <b>${q90}</b> 部</span>`);
+  if(R.perm>1e9)h.push(`<span class="wn">📌 不照時間刪的每天約 <b>＋${csFmt(R.perm)}</b>（+1/+2、⭐ ${csFmt(R.pP)}${R.pN>1e9?`、沒分等級／永久 ${csFmt(R.pN)}`:""}）：照現在的規則這些<b>不會自動刪</b>，要你剪完標 −2 才會少；把「+1/+2 留著」拉到 0% 可以看如果它們也照時間刪會怎樣</span>`);
+  const q90=Math.round(R.ql[90]||0),q0=Math.round(R.ql[1]||0);const yi=D.yt_inf||{};h.push(R.ytIn>CS.P.cap+0.3?`<span class="bad">▶ YouTube <b>追不上</b>：每天要傳約 ${R.ytIn.toFixed(0)} 部 > 上限 ${CS.P.cap} 部，排隊 3 個月後約 ${q90} 部（原檔都留著等）</span>`:`<span>▶ YouTube 每天新增約 <b>${R.ytIn.toFixed(0)}</b> 部（YouTube 頁：7 天 ${yi.a7||"—"}／14 天 ${yi.a14||"—"}）、上限 ${CS.P.cap} 部 → 排隊 ${q0} 部${R.qClear>0?`約 <b>${R.qClear}</b> 天後（${csDate(R.qClear)}）消化完`:`，3 個月後 <b>${q90}</b> 部`}</span>`);
   if(R.full<0&&CS.R0&&CS.R0.full>=0)h.push(`<span class="ok">（目前設定是 ${CS.R0.full} 天後滿）</span>`);else if(R.full>=0&&CS.R0&&CS.R0.full>=0&&R.full!==CS.R0.full)h.push(`<span>（目前設定 ${CS.R0.full} 天後滿 → ${R.full>CS.R0.full?"延後":"提早"} ${Math.abs(R.full-CS.R0.full)} 天）</span>`);
   S.innerHTML=h.join("");}
 function csDraw(cv,D,R,R0){if(!cv)return;const r=cv.getBoundingClientRect(),dpr=window.devicePixelRatio||1,W=r.width,H=r.height;if(!W||!H)return;cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);const g=cv.getContext("2d");g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);
