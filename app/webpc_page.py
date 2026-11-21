@@ -3927,6 +3927,148 @@ function bgsDraw(){const R=BGS.root;if(!R)return;const S=BGS.d.sections||[];let 
     return `<div class="bgsC${it.length?"":" idle"}"><div class="bgsCH"><b>${bgE(sec.title)}</b><span>${info?`${r} 項在動`:it.length?`${r?`▶ ${r} 個在跑`:""}${r&&w?" · ":""}${w?`⏳ ${w} 個排隊`:""}`:"沒有"}</span></div>${sec.note&&it.length?`<div class="bgsCN">${bgE(sec.note)}</div>`:""}
       <div class="bgsLst" data-k="${bgE(sec.key)}">${it.slice(0,300).map(x=>`<div class="bgsI ${x.state}"><i>${x.state==="run"?"▶":"⏳"}</i><div class="bgsT"><b>${bgE(x.text)}${x.dup?'<em class="bgsDup">重複</em>':""}</b><small>${bgE(x.sub||"")}</small>${x.pct!=null&&x.state==="run"?`<u><s style="width:${Math.max(2,Math.min(100,+x.pct||0))}%"></s></u>`:""}</div>${x.cancel?`<button data-bgc="${bgE(sec.key)}" data-id="${bgE(x.id)}" data-t="${bgE(x.text)}">✕ 取消</button>`:""}</div>`).join("")}</div>${it.length>5?`<div class="bgsMore">共 ${it.length} 個 · 上下捲看其他的</div>`:""}</div>`;}).join("");   /* V0.7.06 每一項最多顯示 5 筆，其他的在框裡捲 */
   const sv={};R.querySelectorAll(".bgsLst").forEach(x=>{sv[x.dataset.k]=x.scrollTop;});R.querySelector("#bgsL").innerHTML=h;R.querySelectorAll(".bgsLst").forEach(x=>{if(sv[x.dataset.k])x.scrollTop=sv[x.dataset.k];});R.querySelector("#bgsSum").textContent=(BGS.d.guard?"⏸ "+BGS.d.guard+" · ":"")+(run||wait?`▶ ${run} 個在跑 · ⏳ ${wait} 個排隊`:"現在沒有背景工作 ✔");R.querySelector("#bgsSum").classList.toggle("bgsGuard",!!BGS.d.guard);}   /* V0.7.42.041 效能保護 */
+/* ---------- V1.1.42 💾 容量預測（長按容量變化圖表；只是模擬，按左下角「套用變更」確認 3 次才會改設定） ---------- */
+const CS={D:null,P:null,P0:null,busy:false,raf:0};
+function csCss(){if(document.getElementById("csCss"))return;const st=document.createElement("style");st.id="csCss";st.textContent=`
+#csOv{position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,.62);display:flex;align-items:center;justify-content:center;padding:10px}
+#csOv .csP{position:relative;width:min(1180px,98vw);max-height:95vh;overflow:auto;background:#12161d;border:1px solid #2c3442;border-radius:14px;box-shadow:0 18px 60px rgba(0,0,0,.6);color:#e6ebf3;font-size:13px}
+#csOv .csH{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #232a36;position:sticky;top:0;background:#12161d;z-index:2}
+#csOv .csH b{font-size:15px}#csOv .csH .csS{color:#9aa4b2;font-size:12px;flex:1;min-width:0}
+#csOv .csX{background:none;border:1px solid #39424f;color:#cfd6e0;border-radius:8px;width:32px;height:30px;font-size:16px;cursor:pointer}
+#csOv .csG{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px 8px;padding:10px 14px}
+#csOv .csC{display:flex;flex-direction:column;gap:3px;background:#181e27;border:1px solid #252d39;border-radius:9px;padding:6px 8px;min-width:0}
+#csOv .csC.ch{border-color:#f0ad4e}#csOv .csC .r1,#csOv .csC .r2{display:flex;align-items:center;gap:6px;min-width:0}#csOv .csC .r1{justify-content:space-between}
+#csOv .csC .sb{text-align:left;color:#7f8a99;font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#csOv .csC .v em{font-style:normal;color:#8b95a4;font-size:10.5px;margin-left:5px}
+#csOv .csC .nm{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+#csOv .csC .nm i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:0}
+#csOv .csC input[type=range]{flex:1;min-width:60px;accent-color:#5b8cff}
+#csOv .csC button{flex:0 0 auto;width:24px;height:24px;border-radius:6px;border:1px solid #3a4352;background:#1f2631;color:#dfe5ee;cursor:pointer;padding:0;font-size:14px}
+#csOv .csC .v{flex:0 0 auto;text-align:right;font-variant-numeric:tabular-nums;color:#ffd27a;font-size:12.5px;white-space:nowrap}
+#csOv .csCv{display:block;width:calc(100% - 28px);height:250px;margin:4px 14px 0}
+#csOv .csSum{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 14px 4px;font-size:13px}
+#csOv .csSum span{white-space:normal;overflow:visible;max-width:none;text-overflow:clip}#csOv .csSum span b{color:#fff}#csOv .csSum .bad b{color:#ff6b6b}#csOv .csSum .ok b{color:#45d483}#csOv .csSum .wn b{color:#f0ad4e}
+#csOv .csN{padding:2px 14px 6px;color:#8b95a4;font-size:11.5px;line-height:1.5}
+#csOv .csB{display:flex;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid #232a36;position:sticky;bottom:0;background:#12161d}
+#csOv .csB .ap{background:#c0392b;border:none;color:#fff;font-weight:800;border-radius:9px;padding:9px 16px;cursor:pointer;font-size:14px}
+#csOv .csB .ap:disabled{background:#3a3f48;color:#8a909a;cursor:default}
+#csOv .csB .sp{flex:1}#csOv .csB .bt{background:#1f2631;border:1px solid #3a4352;color:#dfe5ee;border-radius:9px;padding:8px 12px;cursor:pointer}
+#csOv .csQ{position:absolute;z-index:5;width:min(360px,86%);background:#1b2029;border:2px solid #f0ad4e;border-radius:12px;padding:12px 14px;box-shadow:0 12px 40px rgba(0,0,0,.7)}
+#csOv .csQ h4{margin:0 0 6px;font-size:14px;color:#ffd27a}#csOv .csQ ul{margin:4px 0 8px 18px;padding:0;font-size:12.5px;line-height:1.55}
+#csOv .csQ .rw{display:flex;gap:8px;justify-content:flex-end}#csOv .csQ .rw button{border-radius:8px;padding:7px 14px;cursor:pointer;font-weight:700}
+#csOv .csQ .y{background:#c0392b;border:none;color:#fff}#csOv .csQ .n{background:#252c38;border:1px solid #3a4352;color:#dfe5ee}
+#csOv .csQ.q1{top:64px;right:16px}#csOv .csQ.q2{top:42%;left:16px}#csOv .csQ.q3{bottom:64px;left:50%;transform:translateX(-50%)}
+@media (max-width:600px){#csOv{padding:4px}#csOv .csG{grid-template-columns:1fr}#csOv .csCv{height:200px}}`;document.head.appendChild(st);}
+function csFmt(b){b=+b||0;return Math.abs(b)>=1e12?(b/1e12).toFixed(2)+" TB":(b/1e9).toFixed(0)+" GB";}
+function csDate(d){const t=new Date(Date.now()+d*86400000),y=new Date().getFullYear();return (t.getFullYear()!==y?t.getFullYear()+"/":"")+(t.getMonth()+1)+"/"+t.getDate();}
+function csP0(D){const P={d:{},cap:D.cap,infl:100,prot:Math.round((D.prot||0)*100),man:0};(D.grades||[]).forEach(g=>{P.d[g.k]=g.days==null?null:+g.days;});return P;}
+function csSim(D,P,H){H=H||1500;const G={};(D.grades||[]).forEach((g,i)=>{G[i]=g;G[g.k]=g;});const delta=new Float64Array(H+3),ql=new Float64Array(H+1);
+  const dOf=k=>{const g=G[k];if(!g||g.fixed||g.k==="—")return null;if(g.k==="F")return 0;const v=P.d[g.k];return v==null?null:+v;};
+  const Q=[];let qh=0;
+  for(const f of D.files||[]){const g=G[f[0]];if(!g)continue;const b=f[1]*1e6,st=f[3];if(st===3)continue;
+    if(st===1&&g.yt){Q.push([b,g.k,f[2]]);continue;}
+    const dd=dOf(g.k);if(dd==null)continue;const ref=st===2?f[4]:f[2];const del=Math.max(1,Math.ceil(dd-ref+(st===2&&dd===0?1:0)));if(del<=H)delta[del]-=b;}
+  Q.sort((a,b)=>b[2]-a[2]);
+  const infl=Math.max(0,P.infl)/100,pr=Math.max(0,Math.min(100,P.prot))/100,mn=Math.max(0,Math.min(95,P.man||0))/100,acc={};
+  for(let t=1;t<=H;t++){
+    for(const k in (D.inflow||{})){const g=G[k];if(!g||g.k==="F")continue;const [bpd,fpd]=D.inflow[k];const b=bpd*infl;if(b<=0)continue;
+      delta[t]+=b;const keep=b*(1-pr);if(mn&&b*pr>0&&t+30<=H)delta[t+30]-=b*pr*mn;if(keep<=0)continue;
+      if(g.yt){const n=Math.max(0.05,fpd*infl);acc[k]=(acc[k]||0)+n;const per=keep/n;while(acc[k]>=1){acc[k]-=1;Q.push([per,k,0]);}}
+      else{const dd=dOf(k),m_=(dd==null||dd>3)?keep*mn:0;if(m_&&t+3<=H)delta[t+3]-=m_;if(dd!=null){const del=t+Math.max(1,Math.ceil(dd));if(del<=H)delta[del]-=keep-m_;}}}
+    let n=Math.max(1,P.cap);while(n-->0&&qh<Q.length){const it=Q[qh++];const dd=dOf(it[1]);const del=t+(dd==null?100000:Math.max(1,Math.ceil(dd)+ (dd===0?1:0)));if(del<=H)delta[del]-=it[0];}
+    ql[t]=Q.length-qh;}
+  const used=new Float64Array(H+1);used[0]=D.used;for(let t=1;t<=H;t++)used[t]=used[t-1]+delta[t];
+  const lim=D.total*0.97;let full=-1,peak=0,pk=0;for(let t=0;t<=H;t++){if(used[t]>peak){peak=used[t];pk=t;}if(full<0&&used[t]>=lim)full=t;}
+  const a=used[H-180],z=used[H],slope=(z-a)/180;const tail=Array.from(used.slice(H-60)).reduce((s,v)=>s+v,0)/60;
+  let bal=-1;if(Math.abs(slope)<3e9){for(let t=0;t<=H;t++){if(Math.abs(used[t]-tail)<Math.max(0.03*tail,2e11)){let ok=true;for(let u=t;u<=Math.min(H,t+60);u+=5)if(Math.abs(used[u]-tail)>Math.max(0.05*tail,3e11)){ok=false;break;}if(ok){bal=t;break;}}}}
+  let ytIn=0,perm=0;for(const k in (D.inflow||{})){const g=G[k];if(!g||g.k==="F")continue;const b=D.inflow[k][0]*infl;if(g.yt)ytIn+=D.inflow[k][1]*infl;perm+=(b*pr+(dOf(k)==null&&!g.yt?b*(1-pr):0))*(1-mn);}
+  let p365=0,k365=0;for(let t=0;t<=Math.min(H,365);t++)if(used[t]>p365){p365=used[t];k365=t;}
+  return {used,ql,full,peak,pk,slope,tail,bal,ytIn,perm,p365,k365,H};}
+function csOpen(){csCss();let ov=document.getElementById("csOv");if(ov)ov.remove();ov=document.createElement("div");ov.id="csOv";
+  ov.innerHTML=`<div class="csP"><div class="csH"><b>💾 容量預測</b><span class="csS">讀取中…</span><button class="csX" title="關閉">✕</button></div><div class="csBody"><div class="csN">讀取每個 MP4 的等級、大小、YouTube 狀態…</div></div></div>`;
+  document.body.appendChild(ov);ov.addEventListener("click",e=>{if(e.target===ov||e.target.closest(".csX"))csClose();});
+  CS.busy=true;fetch(`${typeof B==="string"?B:""}/api/pc/capsim`,{cache:"no-store"}).then(r=>r.json()).then(j=>{CS.busy=false;if(!j||!j.ok){ov.querySelector(".csN").textContent="讀不到："+((j&&j.message)||"");return;}
+    CS.D=j;CS.P0=csP0(j);CS.P=JSON.parse(JSON.stringify(CS.P0));csBuild();}).catch(e=>{CS.busy=false;const n=ov.querySelector(".csN");if(n)n.textContent="讀不到（"+e+"）";});}
+function csClose(){const ov=document.getElementById("csOv");if(ov)ov.remove();}
+function csCtl(){const D=CS.D,P=CS.P,P0=CS.P0,h=[];
+  const row=(id,nm,col,min,max,v,v0,fmt,sub)=>`<div class="csC${v!==v0?" ch":""}" data-id="${id}"><div class="r1"><span class="nm">${col?`<i style="background:${col}"></i>`:""}${nm}</span><span class="v">${fmt(v)}${v!==v0?`<em>原本 ${fmt(v0)}</em>`:""}</span></div><div class="r2"><button data-st="-1">−</button><input type="range" min="${min}" max="${max}" step="1" value="${v}"><button data-st="1">＋</button></div><div class="sb">${sub||""}</div></div>`;
+  for(const g of D.grades||[]){if(g.fixed||g.k==="F")continue;const inf=(D.inflow||{})[g.k];const sub=inf?`每天約 ${csFmt(inf[0])}`:"";
+    if(g.yt){const v=P.d[g.k]==null?0:Math.round(P.d[g.k]),v0=P0.d[g.k]==null?0:Math.round(P0.d[g.k]);h.push(row("g:"+g.k,g.k+" "+g.n,g.c,0,60,v,v0,x=>x?`傳好後 ${x} 天`:"傳好就刪",sub+" · ▶YT"));}
+    else{const v=P.d[g.k]==null?181:Math.round(P.d[g.k]),v0=P0.d[g.k]==null?181:Math.round(P0.d[g.k]);h.push(row("g:"+g.k,g.k+" "+g.n,g.c,1,181,v,v0,x=>x>=181?"永久":`下播 ${x} 天`,sub));}}
+  h.push(row("cap","▶ YouTube","#ff4d4d",1,100,P.cap,P0.cap,x=>`一天 ${x} 部`,`每天要傳約 ${(CS.R?CS.R.ytIn:0).toFixed(0)} 部`));
+  h.push(row("infl","新增量","#5b8cff",30,250,P.infl,P0.infl,x=>`${x}%`,"100%＝主播不增加"));
+  h.push(row("prot","+1/+2 留著","#b48cff",0,100,P.prot,P0.prot,x=>`${x}%`,"不照時間刪的比例"));
+  h.push(row("man","你自己刪","#ff8c42",0,95,P.man,P0.man,x=>`${x}%`,"−2、剪完清掉的比例（不傳 YT 的、+1/+2）"));
+  return h.join("");}
+function csBuild(){const ov=document.getElementById("csOv");if(!ov)return;const D=CS.D;
+  ov.querySelector(".csS").innerHTML=`${D.drive} 共 ${csFmt(D.total)} · 現在用 ${csFmt(D.used)}（影片 ${csFmt(D.inv)}＋其他 ${csFmt(D.base)}） · 這裡都是<b style="color:#ffd27a">模擬</b>，不會改設定`;
+  ov.querySelector(".csBody").innerHTML=`<div class="csG">${csCtl()}</div><canvas class="csCv"></canvas><div class="csSum"></div><div class="csN">算法：每個 MP4 照等級——傳 YouTube 的等傳好（照每天上限、舊的先傳）再留 N 天；不傳的下播 N 天後刪；+1/+2、⭐、沒分等級的不照時間刪。每天新增照最近 7 天每個等級的平均（不算 F）。你自己標 −2 刪的、剪輯另外存的沒算進去，實際通常會比預測低一點（用「你自己刪」對準最近幾天的實際變化）。左下角「套用變更」只會改<b>每個等級留幾天</b>和<b>YouTube 每天上限</b>；新增量、+1/+2 留著、你自己刪只是模擬用。</div>`;
+  if(!ov.querySelector(".csB"))ov.querySelector(".csP").insertAdjacentHTML("beforeend",`<div class="csB"><button class="ap" disabled>套用變更</button><span class="csCh" style="color:#9aa4b2;font-size:12px"></span><span class="sp"></span><button class="bt" data-rs="1">↺ 回到目前設定</button><button class="bt" data-cl="1">關閉</button></div>`);
+  const G=ov.querySelector(".csG");
+  G.oninput=e=>{const c=e.target.closest(".csC");if(!c||e.target.type!=="range")return;csSet(c.dataset.id,+e.target.value,true);};
+  G.onclick=e=>{const b=e.target.closest("[data-st]");if(!b)return;const c=b.closest(".csC"),r=c.querySelector("input");r.value=Math.max(+r.min,Math.min(+r.max,+r.value+ +b.dataset.st));csSet(c.dataset.id,+r.value,false);};
+  G.onchange=()=>csRedraw(true);
+  const Bb=ov.querySelector(".csB");Bb.onclick=e=>{if(e.target.closest("[data-cl]"))csClose();else if(e.target.closest("[data-rs]")){CS.P=JSON.parse(JSON.stringify(CS.P0));csBuild();}else if(e.target.closest(".ap"))csAsk(1);};
+  CS.R0=csSim(D,CS.P0);csRedraw(true);}
+function csSet(id,v,live){const P=CS.P;if(id.startsWith("g:")){const k=id.slice(2),g=(CS.D.grades||[]).find(x=>x.k===k);P.d[k]=g&&!g.yt&&v>=181?null:v;}else P[id]=v;
+  if(CS.raf)cancelAnimationFrame(CS.raf);CS.raf=requestAnimationFrame(()=>{CS.raf=0;csRedraw(!live);});}
+function csChanges(){const P=CS.P,P0=CS.P0,L=[];for(const g of CS.D.grades||[]){if(g.fixed||g.k==="F")continue;const a=P.d[g.k],b=P0.d[g.k];if(a!==b)L.push(`${g.n}：${b==null?"永久":g.yt&&!b?"傳好就刪":b+" 天"} → ${a==null?"永久":g.yt&&!a?"傳好就刪":a+" 天"}`);}
+  if(P.cap!==P0.cap)L.push(`YouTube 每 24 小時最多：${P0.cap} → ${P.cap} 部`);return L;}   /* 新增量、+1/+2、你自己刪只是模擬用，不會套用 */
+function csRedraw(full){const ov=document.getElementById("csOv");if(!ov||!CS.D)return;const D=CS.D,R=CS.R=csSim(D,CS.P);
+  if(full){ov.querySelectorAll(".csC").forEach(c=>{const id=c.dataset.id,inp=c.querySelector("input");const tmp=document.createElement("div");tmp.innerHTML=csCtl();const nc=tmp.querySelector(`[data-id="${id}"]`);if(nc){c.className=nc.className;c.querySelector(".v").innerHTML=nc.querySelector(".v").innerHTML;c.querySelector(".sb").innerHTML=nc.querySelector(".sb").innerHTML;}});}
+  else{ov.querySelectorAll(".csC").forEach(c=>{const tmp=document.createElement("div");tmp.innerHTML=csCtl();const nc=tmp.querySelector(`[data-id="${c.dataset.id}"]`);if(nc){c.className=nc.className;c.querySelector(".v").innerHTML=nc.querySelector(".v").innerHTML;}});}
+  const ch=csChanges(),ap=ov.querySelector(".csB .ap"),cc=ov.querySelector(".csCh");if(ap)ap.disabled=!ch.length;if(cc)cc.textContent=ch.length?`改了 ${ch.length} 項（還沒套用）`:"";
+  csDraw(ov.querySelector(".csCv"),D,R,CS.R0);
+  const S=ov.querySelector(".csSum"),pct=v=>Math.round(v/D.total*100);const h=[];
+  h.push(R.full>=0?`<span class="bad">⛔ 預計 <b>${csDate(R.full)}</b>（約 ${R.full} 天後）滿到 97%</span>`:`<span class="ok">✅ <b>${Math.round(R.H/365*10)/10} 年內不會滿</b></span>`);
+  if(R.bal>=0&&Math.abs(R.slope)<3e9)h.push(`<span class="ok">⚖ 約 <b>${R.bal}</b> 天後（${csDate(R.bal)}）平衡在 <b>${csFmt(R.tail)}</b>（${pct(R.tail)}%）上下</span>`);
+  else if(R.slope>0)h.push(`<span class="wn">📈 一直在漲：每天約 <b>＋${csFmt(R.slope)}</b>，沒有平衡點</span>`);
+  const stable=R.bal>=0&&Math.abs(R.slope)<3e9,need=Math.max(stable?R.peak:R.p365,D.used)*1.05;
+  h.push(stable?`<span>🔝 最高會到 <b>${csFmt(R.peak)}</b>（${pct(R.peak)}%${R.pk?`，${csDate(R.pk)}`:"，就是現在"}）</span>`:`<span>🔝 一年後約 <b>${csFmt(R.used[365])}</b>（${pct(R.used[365])}%）</span>`);
+  h.push(`<span>🧮 需要的空間：<b>${csFmt(need)}</b>（${stable?"最高":"一年內最高"}＋5% 緩衝；硬碟 ${csFmt(D.total)}${need>D.total?`，<b style="color:#ff6b6b">不夠 ${csFmt(need-D.total)}</b>`:`，多 ${csFmt(D.total-need)}`}）</span>`);
+  {const hs=D.hist||[];if(hs.length>2){const L=hs[hs.length-1];let a=null;for(let i=hs.length-1;i>=0;i--){if(L[0]-hs[i][0]>=3*86400){a=hs[i];break;}}
+    if(a){const act=(D.used-a[1])/((D.t-a[0])/86400),sim=(R.used[3]-R.used[0])/3;h.push(`<span>🔎 最近 ${Math.round((D.t-a[0])/86400)} 天實際每天 <b>${act>=0?"＋":"−"}${csFmt(Math.abs(act))}</b>，模擬前 3 天每天 <b>${sim>=0?"＋":"−"}${csFmt(Math.abs(sim))}</b>${act<sim-2e10?"（實際比較少：可以把「你自己刪」調高來對準）":""}</span>`);}}}
+  if(R.perm>1e9)h.push(`<span class="wn">📌 不照時間刪的（+1/+2、⭐、沒分等級、設成永久的）每天約 <b>＋${csFmt(R.perm)}</b>：這部分要你剪完標 −2 才會少</span>`);
+  const q90=Math.round(R.ql[90]||0),q0=Math.round(R.ql[1]||0);h.push(R.ytIn>CS.P.cap+0.3?`<span class="bad">▶ YouTube <b>追不上</b>：每天要傳約 ${R.ytIn.toFixed(0)} 部 > 上限 ${CS.P.cap} 部，排隊 3 個月後約 ${q90} 部（原檔都留著等）</span>`:`<span>▶ YouTube 排隊 ${q0} → 3 個月後 <b>${q90}</b> 部</span>`);
+  if(R.full<0&&CS.R0&&CS.R0.full>=0)h.push(`<span class="ok">（目前設定是 ${CS.R0.full} 天後滿）</span>`);else if(R.full>=0&&CS.R0&&CS.R0.full>=0&&R.full!==CS.R0.full)h.push(`<span>（目前設定 ${CS.R0.full} 天後滿 → ${R.full>CS.R0.full?"延後":"提早"} ${Math.abs(R.full-CS.R0.full)} 天）</span>`);
+  S.innerHTML=h.join("");}
+function csDraw(cv,D,R,R0){if(!cv)return;const r=cv.getBoundingClientRect(),dpr=window.devicePixelRatio||1,W=r.width,H=r.height;if(!W||!H)return;cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);const g=cv.getContext("2d");g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);
+  const F="system-ui,-apple-system,'Segoe UI',sans-serif",x0=-30,x1=90,Lm=48,Rm=14,T=12,Bm=22,tot=D.total||1;
+  let hi=tot;for(let t=0;t<=x1;t++)hi=Math.max(hi,R.used[t],R0?R0.used[t]:0);hi*=1.04;
+  const X=d=>Lm+(d-x0)/(x1-x0)*(W-Lm-Rm),Y=v=>T+(1-v/hi)*(H-T-Bm);
+  g.font=`10px ${F}`;g.fillStyle="rgba(150,160,175,.85)";
+  for(let i=0;i<=4;i++){const v=hi*i/4,y=Math.round(Y(v))+.5;g.strokeStyle="rgba(150,160,175,.13)";g.beginPath();g.moveTo(Lm,y);g.lineTo(W-Rm,y);g.stroke();g.textAlign="right";g.fillText(i?(v/1e12).toFixed(1)+" TB":"0",Lm-5,y+3);}
+  g.textAlign="center";for(let d=-30;d<=90;d+=15){const x=X(d);g.fillText(d===0?"今天":csDate(d),x,H-6);g.strokeStyle="rgba(150,160,175,.10)";g.beginPath();g.moveTo(x,T);g.lineTo(x,H-Bm);g.stroke();}
+  /* 硬碟容量（紅）、97% */
+  {const y=Y(tot);g.strokeStyle="rgba(255,90,90,.9)";g.lineWidth=1.5;g.beginPath();g.moveTo(Lm,y);g.lineTo(W-Rm,y);g.stroke();g.fillStyle="#ff7b7b";g.textAlign="left";g.fillText(`硬碟 ${csFmt(tot)}`,Lm+4,y-4);}
+  /* 今天 */
+  {const x=X(0);g.strokeStyle="rgba(255,201,77,.7)";g.setLineDash([4,4]);g.beginPath();g.moveTo(x,T);g.lineTo(x,H-Bm);g.stroke();g.setLineDash([]);}
+  /* 過去（實際） */
+  const now=D.t,hs=(D.hist||[]).map(p=>[(p[0]-now)/86400,p[1]]).filter(p=>p[0]>=x0);
+  if(hs.length>1){const gr=g.createLinearGradient(0,T,0,H-Bm);gr.addColorStop(0,"rgba(69,212,131,.35)");gr.addColorStop(1,"rgba(69,212,131,.04)");g.beginPath();g.moveTo(X(hs[0][0]),Y(hs[0][1]));hs.forEach(p=>g.lineTo(X(p[0]),Y(p[1])));g.lineTo(X(0),Y(D.used));g.lineTo(X(0),H-Bm);g.lineTo(X(hs[0][0]),H-Bm);g.closePath();g.fillStyle=gr;g.fill();
+    g.beginPath();g.moveTo(X(hs[0][0]),Y(hs[0][1]));hs.forEach(p=>g.lineTo(X(p[0]),Y(p[1])));g.lineTo(X(0),Y(D.used));g.strokeStyle="#45d483";g.lineWidth=2.2;g.stroke();}
+  /* 目前設定（灰虛線） */
+  if(R0){g.beginPath();for(let t=0;t<=x1;t++){const x=X(t),y=Y(R0.used[t]);t?g.lineTo(x,y):g.moveTo(x,y);}g.strokeStyle="rgba(170,178,190,.6)";g.setLineDash([3,4]);g.lineWidth=1.4;g.stroke();g.setLineDash([]);}
+  /* 模擬（橘） */
+  {const gr=g.createLinearGradient(0,T,0,H-Bm);gr.addColorStop(0,"rgba(255,160,60,.30)");gr.addColorStop(1,"rgba(255,160,60,.03)");g.beginPath();g.moveTo(X(0),H-Bm);for(let t=0;t<=x1;t++)g.lineTo(X(t),Y(R.used[t]));g.lineTo(X(x1),H-Bm);g.closePath();g.fillStyle=gr;g.fill();
+    g.beginPath();for(let t=0;t<=x1;t++){const x=X(t),y=Y(R.used[t]);t?g.lineTo(x,y):g.moveTo(x,y);}g.strokeStyle="#ffa03c";g.lineWidth=2.4;g.stroke();}
+  const tag=(t,x,y,c)=>{g.font=`bold 11px ${F}`;const w=g.measureText(t).width+10;const bx=Math.max(Lm+2,Math.min(W-Rm-w-2,x-w/2)),by=Math.max(T,Math.min(H-Bm-18,y-9));g.fillStyle="rgba(12,15,20,.85)";g.strokeStyle=c;g.beginPath();g.rect(bx,by,w,17);g.fill();g.stroke();g.fillStyle=c;g.textAlign="left";g.fillText(t,bx+5,by+12.5);};
+  tag(`現在 ${csFmt(D.used)}`,X(0),Y(D.used)-14,"#ffc94d");
+  tag(`3 個月後 ${csFmt(R.used[x1])}（${Math.round(R.used[x1]/tot*100)}%）`,X(x1)-60,Y(R.used[x1])-14,"#ffa03c");
+  if(R.full>=0&&R.full<=x1){const x=X(R.full);g.strokeStyle="#ff5a5a";g.beginPath();g.moveTo(x,T);g.lineTo(x,H-Bm);g.stroke();tag(`滿 ${csDate(R.full)}`,x,Y(tot)+14,"#ff7b7b");}
+  g.font=`10.5px ${F}`;g.textAlign="left";g.fillStyle="#8b95a4";g.fillText("綠＝實際　橘＝模擬　灰虛線＝目前設定",Lm+6,H-Bm-6);}
+function csAsk(n){const ov=document.getElementById("csOv");if(!ov)return;ov.querySelectorAll(".csQ").forEach(x=>x.remove());const L=csChanges();if(!L.length)return;
+  const T=["確認 1／3：要套用這些變更嗎？","確認 2／3：以後整個系統都照這個刪原檔，真的要嗎？","確認 3／3：最後一次，按下去馬上生效"];
+  const q=document.createElement("div");q.className="csQ q"+n;q.innerHTML=`<h4>${T[n-1]}</h4><ul>${L.map(x=>`<li>${x}</li>`).join("")}</ul>${n===3?`<div style="font-size:11.5px;color:#9aa4b2;margin-bottom:8px">傳 YouTube 的等級一定等 YouTube 處理好才刪原檔；排隊中的不照時間刪。</div>`:""}<div class="rw"><button class="n">取消</button><button class="y">確認</button></div>`;
+  ov.querySelector(".csP").appendChild(q);q.querySelector(".n").onclick=()=>q.remove();q.querySelector(".y").onclick=()=>{q.remove();if(n<3)csAsk(n+1);else csApply();};}
+async function csApply(){const P=CS.P,P0=CS.P0,days={};for(const g of CS.D.grades||[]){if(g.fixed||g.k==="F")continue;if(P.d[g.k]!==P0.d[g.k])days[g.k]=P.d[g.k]==null?"inf":P.d[g.k];}
+  const body={days};if(P.cap!==P0.cap)body.cap=P.cap;const f=(typeof kPost==="function"?kPost:rvPost);let r=null;try{r=await f("/api/pc/capsim/apply",body);}catch(e){}
+  const msg=(r&&r.message)||"沒有回應";try{(typeof toast==="function"?toast:alert)((r&&r.ok?"✔ ":"✖ ")+msg);}catch(e){}
+  if(r&&r.ok){(CS.D.grades||[]).forEach(g=>{if(g.k in days)g.days=days[g.k]==="inf"?null:days[g.k];});if(body.cap)CS.D.cap=body.cap;CS.P0=JSON.parse(JSON.stringify(CS.P));csBuild();}}
+function csWire(cv){if(!cv||cv._cs)return;cv._cs=1;let tm=0,sx=0,sy=0;const clr=()=>{clearTimeout(tm);tm=0;};
+  cv.addEventListener("pointerdown",e=>{sx=e.clientX;sy=e.clientY;clr();tm=setTimeout(()=>{tm=0;try{navigator.vibrate&&navigator.vibrate(20);}catch(_){ }csOpen();},600);});
+  cv.addEventListener("pointermove",e=>{if(tm&&Math.hypot(e.clientX-sx,e.clientY-sy)>10)clr();});["pointerup","pointercancel","pointerleave"].forEach(k=>cv.addEventListener(k,clr));
+  cv.addEventListener("contextmenu",e=>{e.preventDefault();clr();csOpen();});}
 /* ---------- V0.7.27 各槽容量變化曲線（手機／網頁版共用；電腦效能 → 容量） ---------- */
 const DH={days:30,d:"",data:null,t:0,busy:false};
 const dhB=b=>{b=+b||0;return b>=1e12?(b/1e12).toFixed(2)+" TB":(b/1e9).toFixed(1)+" GB";};
@@ -3936,7 +4078,8 @@ function dhMount(box,fresh){if(!box)return;if(!fresh&&(!DH.data||Date.now()-DH.t
   if(!box._on){box._on=1;box.onclick=e=>{const b=e.target.closest("[data-dd]");if(!b)return;e.stopPropagation();DH.days=+b.dataset.dd;box.querySelectorAll("[data-dd]").forEach(x=>x.classList.toggle("on",x===b));DH.data=null;dhLoad();};
     const sel=box.querySelector(".dhD");if(sel)sel.onchange=e=>{DH.d=e.target.value;DH.data=null;dhLoad();};}
   const D=DH.data,sel=box.querySelector(".dhD");if(sel&&D&&D.drives&&sel.options.length!==D.drives.length){sel.innerHTML=D.drives.map(x=>`<option${x===D.drive?" selected":""}>${x}</option>`).join("");}
-  const cv=box.querySelector(".dhC"),ft=box.querySelector(".dhF");if(!cv)return;const r=cv.getBoundingClientRect(),dpr=window.devicePixelRatio||1,W=r.width,H=r.height;if(!W||!H)return;
+  const cv=box.querySelector(".dhC"),ft=box.querySelector(".dhF");if(!cv)return;try{csWire(cv);}catch(e){}   /* V1.1.42 長按＝容量預測 */
+const r=cv.getBoundingClientRect(),dpr=window.devicePixelRatio||1,W=r.width,H=r.height;if(!W||!H)return;
   cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);const g=cv.getContext("2d");g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);
   const P=(D&&D.pts)||[];if(P.length<2){ft.textContent=D?"從現在開始記錄（每 10 分鐘一筆），過一陣子就看得到曲線":"讀取中…";return;}
   /* TK_V0.9.62 美化：平滑曲線、漸層、標籤不互相蓋住（自動錯開）、高低點跟「現在」重疊就省略；圖例改成色塊 */
@@ -3990,7 +4133,7 @@ function dhMount(box,fresh){if(!box)return;if(!fresh&&(!DH.data||Date.now()-DH.t
   const chip=(c,t,v)=>`<span class="dhK"><i style="background:${c}"></i>${t}<b>${v}</b></span>`;
   ft.innerHTML=`<div class="dhLg">${chip("#45d483","已用",`${TB(uN)}（${pc(uN)}%）`)}<span class="dhK dhKb" data-sysf="${D.drive}" title="點一下看系統檔案是哪些檔"><i style="background:#b48cff"></i>系統檔案<b>${GB(bN)}（${pc1(bN)}%）</b><u>📋 清單</u></span>${chip("#ff5c8a","冗餘 14 天+",`${GB(oN)}（${pc1(oN)}%）`)}${chip("#5b8cff","暫存",`${GB(tN)}（${pc1(tN)}%）${B_.tn?` · ${B_.tn} 場`:""}`)}${chip("rgba(150,160,175,.35)","剩",`${TB(fN)}（${pc(fN)}%）`)}<span class="dhK dhKt">${D.drive} 共 ${dhB(tot)}</span></div>`+
     (D.yt&&(D.yt.wn||D.yt.dn||D.yt.hn)?`<div class="dhLg dhYt"><span class="dhYtT">▶ YouTube</span>${D.yt.wn?chip("#f0ad4e","還沒傳",`${GB(D.yt.wait)} · ${D.yt.wn} 個`):""}${D.yt.dn?chip("#45d483","傳好了（還在原位）",`${GB(D.yt.done)} · ${D.yt.dn} 個`):""}${D.yt.hn?chip("#4dc9ff","傳好了（在暫放，可刪）",`${GB(D.yt.hold)} · ${D.yt.hn} 個`):""}</div>`:"")+   /* TK_V1.0.92 */
-    `<div class="dhNt">這段 ${dv>=0?"＋":"−"}${dhB(Math.abs(dv))}`+(dd>=0.9?`（每天約 ${dv>=0?"＋":"−"}${dhB(Math.abs(dv)/dd)}）`:"")+(dv>0&&dd>=0.9?` · 照這速度約 ${Math.max(0,Math.round((tot*0.95-Lp[3])/(dv/dd)))} 天到 95%`:"")+(B_.approx?` · 系統檔案曲線前面 ${B_.approx} 點還沒記錄，先用現在的量`:"")+`</div>`+
+    `<div class="dhNt">💾 <b>長按圖表＝容量預測</b>（模擬各等級留幾天、YouTube 上限，看幾天會滿）· 這段 ${dv>=0?"＋":"−"}${dhB(Math.abs(dv))}`+(dd>=0.9?`（每天約 ${dv>=0?"＋":"−"}${dhB(Math.abs(dv)/dd)}）`:"")+(dv>0&&dd>=0.9?` · 照這速度約 ${Math.max(0,Math.round((tot*0.95-Lp[3])/(dv/dd)))} 天到 95%`:"")+(B_.approx?` · 系統檔案曲線前面 ${B_.approx} 點還沒記錄，先用現在的量`:"")+`</div>`+
     `<div class="dhNt dhNs">系統檔案＝已用空間裡「有場次紀錄的 MP4」以外的全部（M4A、還沒轉的 FLV、零散檔、截圖…）；冗餘 14 天+＝放超過 14 天、沒有場次紀錄的 MP4（檔案總管「冗餘」那些）；暫存＝只錄聲音的場次留著的 MP4，${B_.tdays||5} 天後沒按「📌 留下」就自動刪</div>`;ft.style.whiteSpace="normal";}
 /* TK_V0.9.77 系統檔案清單：分類／資料夾／最大的檔案，大到小排序，每個檔說明為什麼在這裡、哪一場、時間 */
 const SYSF={d:"",r:null,cat:{},tab:"cat",o:"big",path:"",k:""};
@@ -7925,7 +8068,7 @@ const RULES=[
   {t:"−2 的場次要刪 MP4 時（重要）",d:'<div class="ruWarn">⚠ <b>只要這場有安排要傳 YouTube，就算你在檔案總管標了 −2、按了刪除，原檔也一定等 YouTube 傳完、處理好才會刪。</b></div>'+RU_F([["標 −2、按刪除","#ff4d6d"],["這場有安排傳 YouTube？","#f0ad4e"],["有 → 先不刪，等傳完","#4dc9ff"],["YouTube 處理好","#b48cff"],["隔離區 → 再確認 → 刪","#45d483"]])+
    "<ul><li><b>「有安排傳 YouTube」</b>包括：① 主播等級設定要傳（S、A、A-Dance、A-Sing、G…），還沒傳完；② 已經在 YouTube 排隊中；③ 正在上傳（傳到一半的也算）；④ 已經傳上去、YouTube 還在處理。四種都一樣：<b>先不刪</b>。</li><li>還沒排進 YouTube 的會自動排進去；傳完、YouTube 處理好之後，才移到「YouTube 已上傳-刪除隔離區」，再問 YouTube 一次確認影片還在，才刪原檔。</li><li>不管從哪裡刪都一樣：檔案總管 −2、整理 MP4、剪輯完刪、刪主播、回放頁、手機、網頁。</li><li>沒有安排傳 YouTube 的場次：直接照你按的刪。</li><li>查不到 YouTube 狀態時<b>寧可先不刪</b>。</li><li>還在直播／錄影中的場次<b>不能刪影片</b>；正在剪輯的那場剪完才刪。</li></ul>"},
   {t:"刪 MP4 之前一定先截圖",d:"<ul><li>不管從哪裡刪 MP4（歷史紀錄、檔案總管、整理 MP4、手機、網頁），刪之前先在影片 10%、20%…100% 各截圖，共 <b>60 張</b>（原檔不完整的 20 張），每張約 100 KB。</li><li>剪輯成品、留言、禮物、錄音全部留著；剪輯成品<b>永久保留</b>。</li><li>有 ⭐ 收藏片段的場次：刪 MP4／轉出時會跳過那些片段。</li></ul>"},
-  {t:"🗓 原檔保留期限（自動）",d:RU_F([["B／E：下播 "+RU_V('ret.be_days','天',14)+"","#2ec4b6"],["刪 MP4（先截 60 張）","#ff4d6d"]])+RU_F([["S／AD：YouTube 傳好","#ffc94d"],["再留 "+RU_V('ret.yt_keep_days','天',7)+"","#f0ad4e"],["隔離區 → 確認 YouTube → 馬上刪","#ff4d6d"]])+RU_F([["A／AS／G：YouTube 傳好","#45d483"],["隔離區 → 確認 YouTube → 馬上刪","#ff4d6d"]])+"<ul><li>每 30 分鐘檢查一次（開程式 10 分鐘後開始）；B／E 一次最多刪 10 場，慢慢來。</li><li><b>不動</b>：還在 YouTube 排隊／上傳中／處理中的、直播／錄影中、有 ⭐ 收藏片段、標 <b>+1 待剪輯</b>或 <b>+2 保存</b>的場次。</li><li>刪的只有 MP4：截圖、預覽圖、字幕、留言、禮物、M4A 錄音、剪輯成品都留著。設定「🗓 原檔保留期限」可以整個關掉。</li></ul>"},
+  {t:"🗓 原檔保留期限（自動）",d:RU_F([["B／E：下播 "+RU_V('ret.be_days','天',14)+"","#2ec4b6"],["刪 MP4（先截 60 張）","#ff4d6d"]])+RU_F([["S／AD：YouTube 傳好","#ffc94d"],["再留 "+RU_V('ret.yt_keep_days','天',7)+"","#f0ad4e"],["隔離區 → 確認 YouTube → 馬上刪","#ff4d6d"]])+RU_F([["A／AS／G：YouTube 傳好","#45d483"],["隔離區 → 確認 YouTube → 馬上刪","#ff4d6d"]])+"<ul><li>每 30 分鐘檢查一次（開程式 10 分鐘後開始）；B／E 一次最多刪 10 場，慢慢來。</li><li><b>不動</b>：還在 YouTube 排隊／上傳中／處理中的、直播／錄影中、有 ⭐ 收藏片段、標 <b>+1 待剪輯</b>或 <b>+2 保存</b>的場次。</li><li>刪的只有 MP4：截圖、預覽圖、字幕、留言、禮物、M4A 錄音、剪輯成品都留著。設定「🗓 原檔保留期限」可以整個關掉。</li><li><b>💾 容量預測</b>（設定 → 電腦效能 → 容量變化，<b>長按圖表</b>）：可以模擬每個等級留幾天、YouTube 每天上限，看幾天會滿、平衡在多少 TB；按左下角「套用變更」確認 3 次後，每個等級改成各自的天數（傳 YouTube 的＝傳好後幾天，0＝傳好就刪；不傳的＝下播後幾天或永久），上面的 B／E、留原檔天數就以那邊為準。</li></ul>"},
   {t:"程式自己會清的",d:"<ul><li><b>冗餘 14 天+</b>：放超過 14 天、沒有場次紀錄的 MP4（檔案總管「冗餘」那些）。</li><li><b>暫存</b>：只錄聲音的場次留著的 MP4，<b>5 天後</b>沒按「📌 留下」就自動刪。</li><li>每 30 秒一張的預覽圖：C 槽最多 "+RU_V('vg.cache_gb','GB',40)+"，超過從最久沒看的刪；要看時再做。精選用的每 2 秒圖保留 15 天、最多 "+RU_V('hl.keep2s_gb','GB',60)+"。</li></ul>"}]},
  {k:"yt",i:"▶",c:"#ff4d4d",t:"YouTube 上傳",s:[
   {t:"上傳規則",d:"<ul><li>照「主播等級」自動上傳（見主播等級），也可以在 YouTube 上傳頁手動加。隱私預設<b>不公開</b>（搜尋不到，只有拿到網址的人看得到；回放頁可以內嵌 YouTube 跟留言同步播）。</li><li>每 <b>24 小時最多 "+RU_V('yt.daily','個',100)+"</b>，照<b>上傳完成時間滾動</b>算；頁面會顯示第 101 個什麼時候可以開始。額度用完自動等 6 小時。</li><li>速度上限 "+RU_V('yt.mbps','Mbps',20)+"，不搶錄影的網路；可以設只在某個時段開始傳新的。<b>正在傳的那部一定照傳完</b>，不會中途斷。</li><li>「幾天後全部傳完」會<b>扣掉每天新增的</b>（最近 7 天平均）：每天真正消化＝每天上限 − 每天新增。新增的比上限多就會寫「追不上」，並告訴你上限至少要調到多少。</li></ul>"},
