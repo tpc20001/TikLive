@@ -16,6 +16,7 @@ import re
 import random
 import math
 import zipfile
+import contextlib
 from collections import defaultdict, deque, Counter
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -34,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.43"
+APP_VERSION = "1.1.44"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -5496,24 +5497,36 @@ class MainWindow(QMainWindow):
         import hashlib as _hh
         out = d0 / f'{int(sid)}_sheets' / f'{int(ri)}_{int(si)}_{len(ok)}of{len(part)}_{_hh.md5("|".join(str(p) for p in part).encode()).hexdigest()[:6]}.jpg'
         if out.exists() and out.stat().st_size > 0: return out
-        lk = self.__dict__.setdefault('_vsheet_lk', threading.Lock())   # TK_V0.8.90 一次只拼一張（不搶 CPU）；同一張同時被要兩次 → 第二個等第一個做完直接拿
+        # V1.1.44 使用者 11/22：審核滑很快、電腦資源還剩很多 → 同時拼 3 張（電腦忙時 1 張）；同一張同時被要兩次 → 第二個等第一個做完直接拿
+        olk = self.__dict__.setdefault('_vsheet_olk', {}); glk = self.__dict__.setdefault('_vsheet_glk', threading.Lock())
+        with glk:
+            lk = olk.get(str(out))
+            if lk is None:
+                lk = olk[str(out)] = threading.Lock()
+                if len(olk) > 600:
+                    for k_ in [k_ for k_, v_ in list(olk.items()) if not v_.locked()][:300]: olk.pop(k_, None)
+        sem = self.__dict__.setdefault('_vsheet_sem', threading.BoundedSemaphore(3)); one_ = self.__dict__.setdefault('_vsheet_lk', threading.Lock())
         with lk:
             if out.exists() and out.stat().st_size > 0: return out
             if _app_closing(): return None
-            out.parent.mkdir(parents=True, exist_ok=True)
-            for old in out.parent.glob(f'{int(ri)}_{int(si)}_*of*.jpg'):        # 舊的（格子比較少的那版）丟掉；不碰做到一半的
-                if old.name == out.name or '.tmp' in old.name: continue
-                try: old.unlink()
-                except Exception: pass
-            return self._vg_sheet_paint(have, out)
+            try: busy_ = bool(self._busy_guard()[0])
+            except Exception: busy_ = False
+            with sem, (one_ if busy_ else contextlib.nullcontext()):
+                if out.exists() and out.stat().st_size > 0: return out
+                out.parent.mkdir(parents=True, exist_ok=True)
+                for old in out.parent.glob(f'{int(ri)}_{int(si)}_*of*.jpg'):        # 舊的（格子比較少的那版）丟掉；不碰做到一半的
+                    if old.name == out.name or '.tmp' in old.name: continue
+                    try: old.unlink()
+                    except Exception: pass
+                return self._vg_sheet_paint(have, out)
 
     def _vg_sheet_pre(self, sids):
         """TK_V0.8.93 連續分級：你接下來要看的幾場，大圖先在背景拼好（只讀 SSD、單一執行緒、一次一張；換清單就換做新的）."""
         st = self.__dict__.setdefault('_vsp', {'q': [], 'run': False, 'lock': threading.Lock(), 'done': 0})
         with st['lock']:
-            st['q'] = [int(x) for x in sids][:60]; st['t'] = time.time(); st['first'] = list(st['q'][:12])   # V1.1.33 先做每場前 3 張
-            if st['run']: return {'ok': True}
-            st['run'] = True
+            st['q'] = [int(x) for x in sids][:60]; st['t'] = time.time(); st['first'] = list(st['q'][:20])   # V1.1.33 先做每場前 3 張；V1.1.44 20 場
+            if st.get('run', 0) >= 2: return {'ok': True}
+            nw = 2 - int(st.get('run') or 0); st['run'] = int(st.get('run') or 0) + nw   # V1.1.44 兩條一起拼（電腦忙時 _vg_sheet 自己會變一次一張）
         def work():
             try:
                 while True:                                                     # V1.1.33 第一輪：接下來每場的前 3 張（第一個畫面），近的先
@@ -5525,6 +5538,9 @@ class MainWindow(QMainWindow):
                     for m in M:
                         if not m[4]: continue
                         for si in range(min(3, (len(m[5]) + self.SHEET_N * self.SHEET_N - 1) // (self.SHEET_N * self.SHEET_N))):
+                            try:
+                                if self._busy_guard()[0]: time.sleep(2)
+                            except Exception: pass
                             try: self._vg_sheet(sid, m[0], si)
                             except Exception: pass
                             st['done'] += 1
@@ -5548,8 +5564,8 @@ class MainWindow(QMainWindow):
                             with st['lock']:
                                 if st['q'] != q0 and st['q'] and st['q'][0] != (q0[0] if q0 else None): break   # 你換到別的地方了：先做新的
             finally:
-                with st['lock']: st['run'] = False
-        threading.Thread(target=work, name='TikLiveSheetPre', daemon=True).start()
+                with st['lock']: st['run'] = max(0, int(st.get('run') or 0) - 1)
+        for _i in range(nw): threading.Thread(target=work, name='TikLiveSheetPre', daemon=True).start()
         return {'ok': True}
 
     def _vg_sheet_auto(self):
@@ -49962,16 +49978,16 @@ function lvsAhead(ci){if(!LVS.L.length)return;const now=Date.now();if(LVS.ahI===
   lvsGet("/api/pc/vg/ping?q="+LVS.L.slice(ci,ci+200).map(r=>r.sid).join(",")).catch(()=>{});
   lvsPre(ci);}
 /* V1.1.33 照左邊清單的順序，接下來 10 場先載好：每場資訊＋第一個畫面要用的大圖（每段前 3 張）；一次 2 個，近的先；資訊留 3 分鐘給打開時直接用 */
-function lvsPre(ci){LVS.pf=LVS.pf||{};LVS.pfI=LVS.pfI||{};LVS.pfImg=LVS.pfImg||new Map();const want=LVS.L.slice(ci+1,ci+11).map(r=>r.sid);LVS.pfQ=[];
+function lvsPre(ci){LVS.pf=LVS.pf||{};LVS.pfI=LVS.pfI||{};LVS.pfImg=LVS.pfImg||new Map();const want=LVS.L.slice(ci+1,ci+21).map(r=>r.sid);LVS.pfQ=[];LVS.pfN=LVS.pfN||{};want.forEach((sid,k)=>{LVS.pfN[sid]=k;});   /* V1.1.44 20 場、一次 4 個、最近 5 場整段先載 */
   want.forEach(sid=>{if(!LVS.pf[sid])LVS.pfQ.push({k:"i",sid});});
-  const run=async()=>{if(LVS.pfRun>=2)return;const it=LVS.pfQ.shift();if(!it)return;LVS.pfRun=(LVS.pfRun||0)+1;
+  const run=async()=>{if(LVS.pfRun>=4)return;const it=LVS.pfQ.shift();if(!it)return;LVS.pfRun=(LVS.pfRun||0)+1;
     try{if(it.k==="i"){if(!LVS.pf[it.sid]){LVS.pf[it.sid]=1;const [I,Inf]=await Promise.all([lvsGet("/api/pc/vg/sheetinfo?sid="+it.sid).catch(()=>null),lvsGet("/api/pc/vg/info?sid="+it.sid).catch(()=>null)]);
-        if(I){LVS.pfI[it.sid]={I,Inf,t:Date.now()};const ims=[];((I.parts)||[]).forEach(p=>{if(!p.ok)return;const nm=p.n-(p.m||[]).length;for(let si=0;si<Math.min(3,p.sheets||1);si++)ims.push({k:"s",sid:it.sid,u:`${lvsB()}/api/pc/vg/sheet?sid=${it.sid}&ri=${p.ri}&i=${si}&n=${nm}`});});
-          const at=LVS.pfQ.findIndex(x=>x.k==="i");LVS.pfQ.splice(at<0?LVS.pfQ.length:at,0,...ims.slice(0,3));LVS.pfQ.push(...ims.slice(3));}else LVS.pf[it.sid]=0;}}
+        if(I){LVS.pfI[it.sid]={I,Inf,t:Date.now()};const ims=[];((I.parts)||[]).forEach(p=>{if(!p.ok)return;const nm=p.n-(p.m||[]).length;for(let si=0;si<((LVS.pfN[it.sid]??9)<5?(p.sheets||1):Math.min(3,p.sheets||1));si++)ims.push({k:"s",sid:it.sid,u:`${lvsB()}/api/pc/vg/sheet?sid=${it.sid}&ri=${p.ri}&i=${si}&n=${nm}`});});
+          const at=LVS.pfQ.findIndex(x=>x.k==="i");LVS.pfQ.splice(at<0?LVS.pfQ.length:at,0,...ims.slice(0,3));const r_=ims.slice(3);if((LVS.pfN[it.sid]??9)<5){const at2=LVS.pfQ.findIndex(x=>x.k==="s"&&(LVS.pfN[x.sid]??9)>=5);LVS.pfQ.splice(at2<0?LVS.pfQ.length:at2,0,...r_);}else LVS.pfQ.push(...r_);}else LVS.pf[it.sid]=0;}}
       else if(!LVS.pfImg.has(it.u)){await new Promise(res=>{const im=new Image();im.onload=im.onerror=()=>res();im.src=it.u;LVS.pfImg.set(it.u,im);});
-        if(LVS.pfImg.size>160){const k=LVS.pfImg.keys().next().value;LVS.pfImg.delete(k);}}}catch(e){}
+        if(LVS.pfImg.size>400){const k=LVS.pfImg.keys().next().value;LVS.pfImg.delete(k);}}}catch(e){}
     LVS.pfRun--;run();};
-  run();run();}
+  run();run();run();run();}
 function lvsRefreshMiss(){if(!LVS.box||!LVS.box.isConnected){clearInterval(LVS.rt);return;}if(document.hidden)return;
   LVS.box.querySelectorAll(".lvsS").forEach(s=>{const i=+s.dataset.i;if(s._miss&&s._built&&i>=LVS.cur-1&&i<=LVS.cur+2)lvsBuild(s,true);});}
 /* 上面那排：等級顏色、現在這場框起來、放正中間 */

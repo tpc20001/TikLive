@@ -5778,16 +5778,16 @@ function lvsAhead(ci){if(!LVS.L.length)return;const now=Date.now();if(LVS.ahI===
   lvsGet("/api/pc/vg/ping?q="+LVS.L.slice(ci,ci+200).map(r=>r.sid).join(",")).catch(()=>{});
   lvsPre(ci);}
 /* V1.1.33 照左邊清單的順序，接下來 10 場先載好：每場資訊＋第一個畫面要用的大圖（每段前 3 張）；一次 2 個，近的先；資訊留 3 分鐘給打開時直接用 */
-function lvsPre(ci){LVS.pf=LVS.pf||{};LVS.pfI=LVS.pfI||{};LVS.pfImg=LVS.pfImg||new Map();const want=LVS.L.slice(ci+1,ci+11).map(r=>r.sid);LVS.pfQ=[];
+function lvsPre(ci){LVS.pf=LVS.pf||{};LVS.pfI=LVS.pfI||{};LVS.pfImg=LVS.pfImg||new Map();const want=LVS.L.slice(ci+1,ci+21).map(r=>r.sid);LVS.pfQ=[];LVS.pfN=LVS.pfN||{};want.forEach((sid,k)=>{LVS.pfN[sid]=k;});   /* V1.1.44 20 場、一次 4 個、最近 5 場整段先載 */
   want.forEach(sid=>{if(!LVS.pf[sid])LVS.pfQ.push({k:"i",sid});});
-  const run=async()=>{if(LVS.pfRun>=2)return;const it=LVS.pfQ.shift();if(!it)return;LVS.pfRun=(LVS.pfRun||0)+1;
+  const run=async()=>{if(LVS.pfRun>=4)return;const it=LVS.pfQ.shift();if(!it)return;LVS.pfRun=(LVS.pfRun||0)+1;
     try{if(it.k==="i"){if(!LVS.pf[it.sid]){LVS.pf[it.sid]=1;const [I,Inf]=await Promise.all([lvsGet("/api/pc/vg/sheetinfo?sid="+it.sid).catch(()=>null),lvsGet("/api/pc/vg/info?sid="+it.sid).catch(()=>null)]);
-        if(I){LVS.pfI[it.sid]={I,Inf,t:Date.now()};const ims=[];((I.parts)||[]).forEach(p=>{if(!p.ok)return;const nm=p.n-(p.m||[]).length;for(let si=0;si<Math.min(3,p.sheets||1);si++)ims.push({k:"s",sid:it.sid,u:`${lvsB()}/api/pc/vg/sheet?sid=${it.sid}&ri=${p.ri}&i=${si}&n=${nm}`});});
-          const at=LVS.pfQ.findIndex(x=>x.k==="i");LVS.pfQ.splice(at<0?LVS.pfQ.length:at,0,...ims.slice(0,3));LVS.pfQ.push(...ims.slice(3));}else LVS.pf[it.sid]=0;}}
+        if(I){LVS.pfI[it.sid]={I,Inf,t:Date.now()};const ims=[];((I.parts)||[]).forEach(p=>{if(!p.ok)return;const nm=p.n-(p.m||[]).length;for(let si=0;si<((LVS.pfN[it.sid]??9)<5?(p.sheets||1):Math.min(3,p.sheets||1));si++)ims.push({k:"s",sid:it.sid,u:`${lvsB()}/api/pc/vg/sheet?sid=${it.sid}&ri=${p.ri}&i=${si}&n=${nm}`});});
+          const at=LVS.pfQ.findIndex(x=>x.k==="i");LVS.pfQ.splice(at<0?LVS.pfQ.length:at,0,...ims.slice(0,3));const r_=ims.slice(3);if((LVS.pfN[it.sid]??9)<5){const at2=LVS.pfQ.findIndex(x=>x.k==="s"&&(LVS.pfN[x.sid]??9)>=5);LVS.pfQ.splice(at2<0?LVS.pfQ.length:at2,0,...r_);}else LVS.pfQ.push(...r_);}else LVS.pf[it.sid]=0;}}
       else if(!LVS.pfImg.has(it.u)){await new Promise(res=>{const im=new Image();im.onload=im.onerror=()=>res();im.src=it.u;LVS.pfImg.set(it.u,im);});
-        if(LVS.pfImg.size>160){const k=LVS.pfImg.keys().next().value;LVS.pfImg.delete(k);}}}catch(e){}
+        if(LVS.pfImg.size>400){const k=LVS.pfImg.keys().next().value;LVS.pfImg.delete(k);}}}catch(e){}
     LVS.pfRun--;run();};
-  run();run();}
+  run();run();run();run();}
 function lvsRefreshMiss(){if(!LVS.box||!LVS.box.isConnected){clearInterval(LVS.rt);return;}if(document.hidden)return;
   LVS.box.querySelectorAll(".lvsS").forEach(s=>{const i=+s.dataset.i;if(s._miss&&s._built&&i>=LVS.cur-1&&i<=LVS.cur+2)lvsBuild(s,true);});}
 /* 上面那排：等級顏色、現在這場框起來、放正中間 */

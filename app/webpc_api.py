@@ -632,7 +632,7 @@ def route(win, sock, method, rest, q, body):
         sid_ = int(q.get('sid', '0') or 0); _bg(win, sock, lambda: win._vg_sheet_info(sid_)); return True
     if name == 'feat' and method == 'GET': _bg(win, sock, win._feat); return True     # TK_V0.8.93 精選／審核開關（只讀）
     if name == 'vg/sheetpre' and method == 'GET':                          # TK_V0.8.93 連續分級：接下來的幾場大圖先拼好（只寫 SSD 快取）
-        try: qs_ = [int(x) for x in str(q.get('q', '') or '').split(',') if x.strip().isdigit()][:12]
+        try: qs_ = [int(x) for x in str(q.get('q', '') or '').split(',') if x.strip().isdigit()][:30]   # V1.1.44 12 → 30 場
         except Exception: qs_ = []
         _bg(win, sock, lambda: win._vg_sheet_pre(qs_)); return True
     if name == 'vg/cover' and method == 'GET':                            # TK_V0.8.89 連續分級的小圖（只讀）；TK_V0.9.12 直接從預覽圖資料夾挑一張
