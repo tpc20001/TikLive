@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.47"
+APP_VERSION = "1.1.48"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -46211,7 +46211,20 @@ async function rpNav(d){const u=d.u;if(!u)return;const C=S.rpNvC;let L=C&&C.u===
   const nw=i>0?L[i-1]:null,od=i>=0&&i<L.length-1?L[i+1]:null,lab=r=>`${sidS(r.id)} · ${r.start}${r.dur?" · "+r.dur:""}`;
   nb.disabled=!nw;ob.disabled=!od;nb.title=nw?"比較新的一場："+lab(nw):"這是最新的一場";ob.title=od?"比較舊的一場："+lab(od):"這是最舊的一場";if(ni)ni.textContent=i>=0?`${i+1}/${L.length}`:"";
   const goTo=r=>{if(!r)return;try{location.replace("#rp/"+r.id);}catch(e){location.hash="rp/"+r.id;}};nb.onclick=e=>{e.stopPropagation();goTo(nw);};ob.onclick=e=>{e.stopPropagation();goTo(od);};
+  setTimeout(()=>{try{rpPre(L,i);}catch(e){}},600);   /* V1.1.48 前後幾場先載好 */
   rpNvFit();setTimeout(rpNvFit,400);setTimeout(rpNvFit,1500);if(!S.rpNvR){S.rpNvR=1;window.addEventListener("resize",()=>{clearTimeout(S.rpNvT);S.rpNvT=setTimeout(rpNvFit,150);});}}
+/* V1.1.48 回放資料快取＋預載：翻到下一場直接用（只快取已經下播的場次，5 分鐘） */
+const RPC=new Map(),RPI=[];
+async function rpGet(id){id=+id;const c=RPC.get(id);if(c&&c.d&&Date.now()-c.t<300000){try{return structuredClone(c.d);}catch(e){return JSON.parse(JSON.stringify(c.d));}}
+  if(c&&c.p)return c.p.then(d=>{try{return structuredClone(d);}catch(e){return JSON.parse(JSON.stringify(d));}});
+  const d=await J("/api/replay?id="+id);if(d&&d.id&&d.ended){RPC.set(id,{d,t:Date.now()});while(RPC.size>12)RPC.delete(RPC.keys().next().value);}return d;}
+async function rpPre(L,i){if(i<0||!L)return;const me_=RP&&RP.d.id,ord=[i+1,i-1,i+2,i-2,i+3].filter(k=>k>=0&&k<L.length).map(k=>+L[k].id);
+  for(const id of ord){if(!RP||RP.d.id!==me_||document.hidden)return;let d=null;const c=RPC.get(id);
+    if(c&&c.d&&Date.now()-c.t<300000)d=c.d;else if(c&&c.p){try{d=await c.p;}catch(e){continue;}}else{try{const p=J("/api/replay?id="+id);RPC.set(id,{p,t:0});d=await p;}catch(e){RPC.delete(id);continue;}
+      if(d&&d.id&&d.ended){RPC.set(id,{d,t:Date.now()});while(RPC.size>12)RPC.delete(RPC.keys().next().value);}else{RPC.delete(id);continue;}}
+    /* 這場的截圖（回放打開先看的那一頁）也先抓 */
+    const sn=(d.snaps||[]).slice(0,60);for(let k=0;k<sn.length;k+=6){if(!RP||RP.d.id!==me_)return;await Promise.all(sn.slice(k,k+6).map(x=>new Promise(res=>{const im=new Image();im.onload=im.onerror=()=>res();im.src=`${snB()}/snap/${id}/${x[1]}`;RPI.push(im);})));}
+    while(RPI.length>400)RPI.shift();}}
 /* V1.1.46b 上面的浮動列（🔍 效能 背景…）擋到 ‹ › 時，改放到標題下面一行 */
 function rpNvFit(){const nv=$("#rpnv"),h=nv&&nv.closest(".rph");if(!h)return;h.classList.remove("nvw");
   const a=nv.getBoundingClientRect(),hit=el=>{if(!el||!el.offsetParent&&getComputedStyle(el).position!=="fixed")return false;const b=el.getBoundingClientRect();return b.width>0&&a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top;};
@@ -46219,7 +46232,7 @@ function rpNvFit(){const nv=$("#rpnv"),h=nv&&nv.closest(".rph");if(!h)return;h.c
 function stopRP(){try{ytStop();}catch(x){}try{sxSubStop();}catch(x){}try{rlvStop();}catch(x){}if(!RP)return;try{clearInterval(RP.bgIv);if(RP.ro)RP.ro.disconnect();}catch(x){}try{exitFs();}catch(x){}clearInterval(RP.iv);try{const e=me();e.pause();e.removeAttribute("src");e.load();}catch(x){}RP=null;document.body.classList.remove("rp");window.onresize=null;}
 async function viewRP(id,at,how){
   document.body.classList.add("rp");V().innerHTML='<div class="empty">載入中…</div>';$("#clk").textContent="";
-  let d;try{d=await J("/api/replay?id="+id);}catch(e){V().innerHTML=offline;return;}
+  let d;try{d=await rpGet(id);}catch(e){V().innerHTML=offline;return;}   /* V1.1.48 先載好的直接用 */
   if(!d.id){V().innerHTML='<div class="empty">找不到這場紀錄 <a href="#hist" style="color:var(--vline)">回歷史</a></div>';return;}
   const avail=[];if(d.files.some(f=>f.kind==="video"))avail.push("video");if(d.files.some(f=>f.kind==="audio"))avail.push("afile");if(d.stream)avail.push("stream");if(!avail.length)avail.push("text");
   if(d.yt&&d.yt.length){if(avail.includes("video"))avail.push("yt");else avail.unshift("yt");}
