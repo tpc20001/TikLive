@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.58"
+APP_VERSION = "1.1.59"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -17886,7 +17886,8 @@ try { NLConnect | Out-Null; Unset
         if rest=='api/replay':                                     # V0.6.23b 背景執行
             sid_=int(q.get('id','0') or 0); gz_='gzip' in str((getattr(sock,'_hdr',{}) or {}).get('accept-encoding',''))
             def w(sock=sock,sid_=sid_,gz_=gz_):
-                data=self._replay_bytes(sid_,gz_)                       # V1.1.49 組 JSON＋壓縮都在背景（原本壓縮在畫面執行緒）；下播的場次 3 分鐘內直接用
+                data=self._replay_bytes(sid_,gz_); self._replay_warm_nb(sid_)   # V1.1.59 前後場先算好
+                # V1.1.49 組 JSON＋壓縮都在背景（原本壓縮在畫面執行緒）；下播的場次 3 分鐘內直接用
                 self._ui_call.emit(lambda d=data,s=sock: self._phone_raw(s,d))
             threading.Thread(target=w,daemon=True).start(); return
         if rest=='api/update/status': J(self._web_update_status()); return                       # V0.5.52
@@ -30300,7 +30301,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
                         self._stream(Path(p_)); return
                     jf = None; sid_ = int(q.get('sid', q.get('id', '0')) or 0)          # V1.1.50 唯讀的資料也走這條（回放、檔案總管打開一場要的那幾個）
                     if rest == 'api/replay':
-                        raw, gzb = win._replay_body(sid_); acc = 'gzip' in str(self.headers.get('Accept-Encoding', ''))
+                        raw, gzb = win._replay_body(sid_); win._replay_warm_nb(sid_); acc = 'gzip' in str(self.headers.get('Accept-Encoding', ''))
                         self.send_response(200); self.send_header('Content-Type', 'application/json; charset=utf-8'); self.send_header('Access-Control-Allow-Origin', '*'); self.send_header('Cache-Control', 'no-store')
                         b_ = gzb if (acc and gzb) else raw
                         if acc and gzb: self.send_header('Content-Encoding', 'gzip')
@@ -30456,17 +30457,46 @@ $r | ConvertTo-Json -Depth 4 -Compress
         body, ex = (gzb, 'Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n') if (gz and gzb) else (raw, '')
         return (f'HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {len(body)}\r\nCache-Control: no-store\r\n{ex}Connection: close\r\n\r\n').encode('ascii') + body
 
+    def _replay_warm_nb(self, sid):
+        """V1.1.59 有人打開某一場回放：電腦這邊先把同一位主播前後各 2 場的資料算好（手機的預載一到就直接拿），一場只做一次（3 分鐘內）."""
+        c = self.__dict__.setdefault('_rpnb_t', {}); now = time.time()
+        if now - c.get(int(sid), 0) < 180: return
+        c[int(sid)] = now
+        if len(c) > 500:
+            for k in [k for k, v in list(c.items()) if now - v > 600]: c.pop(k, None)
+        def work():
+            try:
+                r = self._web_db(f"SELECT username,{self._WEB_E.replace('s.', '')} FROM sessions WHERE id=?", (int(sid),))
+                if not r: return
+                u, ep = r[0]
+                L = self._web_db(f"SELECT id FROM sessions s WHERE s.username=? AND s.ended_at IS NOT NULL AND {self._WEB_E} < ? ORDER BY {self._WEB_E} DESC LIMIT 2", (u, ep)) or []
+                L += self._web_db(f"SELECT id FROM sessions s WHERE s.username=? AND s.ended_at IS NOT NULL AND {self._WEB_E} > ? ORDER BY {self._WEB_E} ASC LIMIT 2", (u, ep)) or []
+                for (x,) in L:
+                    try: self._replay_body(int(x))
+                    except Exception: pass
+                    time.sleep(0.05)
+            except Exception: pass
+        threading.Thread(target=work, name='TikLiveRpWarm', daemon=True).start()
+
     def _replay_body(self, sid):
         """V1.1.49 回放資料：JSON＋gzip 在背景做好；已下播的場次留 3 分鐘（前後幾場預載時，真的打開就不用再算一次）."""
         c = self.__dict__.setdefault('_rpb_c', {}); now = time.time(); x = c.get(int(sid))
-        if x and now - x[0] < 180: raw, gzb = x[1], x[2]
-        else:
+        if x and now - x[0] < 180: return (x[1] if x[1] is not None else __import__('gzip').decompress(x[2])), x[2]
+        lks = self.__dict__.setdefault('_rpb_lk', {}); g_ = self.__dict__.setdefault('_rpb_glk', threading.Lock())   # V1.1.59 同一場同時被要兩次：第二個等第一個算完直接拿
+        with g_:
+            lk = lks.setdefault(int(sid), threading.Lock())
+            if len(lks) > 300:
+                for k_ in [k_ for k_, v_ in list(lks.items()) if not v_.locked()][:150]: lks.pop(k_, None)
+        with lk:
+          x = c.get(int(sid)); now = time.time()
+          if x and now - x[0] < 180: return (x[1] if x[1] is not None else __import__('gzip').decompress(x[2])), x[2]
+          else:
             try: d = self._web_replay(sid); raw = json.dumps(_json_safe(d), ensure_ascii=False).encode('utf-8')
             except Exception as ex: d = {}; raw = json.dumps({'error': str(ex)}, ensure_ascii=False).encode('utf-8')
             import gzip as _gz
             gzb = _gz.compress(raw, 5) if len(raw) > 2048 else None
             if d.get('ended') and d.get('id'):
-                c[int(sid)] = (now, raw, gzb)
+                c[int(sid)] = (now, raw if gzb is None else None, gzb)          # 只留壓縮過的（省記憶體）
                 if len(c) > 24:
                     for k in sorted(c, key=lambda k: c[k][0])[:len(c) - 24]: c.pop(k, None)
         return raw, gzb
