@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.59"
+APP_VERSION = "1.1.60"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -30290,6 +30290,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 try:
                     from urllib.parse import urlsplit, parse_qs, unquote
                     sp = urlsplit(self.path); P = [unquote(x) for x in sp.path.split('/') if x]; q = {k: v[-1] for k, v in parse_qs(sp.query).items()}
+                    if (getattr(app_, '_tlm_fastsrv', None) or {}).get('srv') is not self.server:   # V1.1.60 熱更新後舊的連線：關掉，讓瀏覽器重連到新的
+                        self.close_connection = True; self._send(503, b'restart', 'text/plain'); return
                     if not P or P[0] != key: self._send(404, b'not found', 'text/plain'); return
                     P = P[1:]; rest = '/'.join(P); cache = 86400; get = None
                     if rest == 'ping': self._send(200, b'ok', 'text/plain'); return
@@ -44455,6 +44457,11 @@ nav button,nav button.tbg,nav button.tset{flex:1 0 auto;white-space:nowrap;overf
 const B="__BASE__";
 /* V1.1.49 🚀 圖片快速通道：同一個區網、http 時，截圖／預覽大圖／縮圖改從「網頁的埠 +1」那個多執行緒小伺服器拿（不排主程式的隊）；連不到就照原本 */
 window.FASTB=window.FASTB||"";function imgB(b){return window.FASTB||b;}
+/* V1.1.60 主程式重開後快速通道換了鑰匙：圖片 404 → 重新拿一次鑰匙（10 秒最多一次），這張改用新的（拿不到就走原本的） */
+let FASTFIX=null,FASTFT=0;function fastFix(){if(FASTFIX)return FASTFIX;if(Date.now()-FASTFT<10000)return Promise.resolve();FASTFT=Date.now();
+  FASTFIX=(async()=>{try{const b=typeof B==="string"?B:"";const j=await fetch(b+"/api/pc/fastimg",{cache:"no-store"}).then(r=>r.json());let nb="";if(j&&j.ok&&j.on&&j.port&&j.key){const fb=`http://${location.hostname}:${j.port}/${j.key}`;for(let i=0;i<7&&!nb;i++){try{const p=await fetch(fb+"/ping",{cache:"no-store"});if(p.ok)nb=fb;}catch(e){}}}window.FASTB=nb;}catch(e){window.FASTB="";}})().finally(()=>{FASTFIX=null;});return FASTFIX;}   /* 舊連線會回 503 並關掉：多試幾次就連到新的 */
+window.addEventListener("error",e=>{const t=e.target;try{if(!t||t.tagName!=="IMG"||(t._fr||0)>=2)return;const src=t.getAttribute("src")||"",m=/^https?:\/\/[^/]+:\d+\/[A-Za-z0-9_-]{16,}(\/(?:snap|avatar|media|api)\/.*)$/.exec(src);if(!m||!window.FASTP)return;
+  t._fr=(t._fr||0)+1;const rest=m[1],n=t._fr;fastFix().then(()=>{t.src=(n<2&&window.FASTB?window.FASTB:(typeof B==="string"?B:""))+rest;});}catch(x){}},true);   /* 第二次還不行就走原本的 */
 function mB(u){return (window.FASTB&&/^\/media\//.test(u)?window.FASTB:(typeof B==="string"?B:""))+u;}   /* V1.1.54 回放影片也走快速通道 */
 window.FASTP=(async function fastInit(){try{if(location.protocol!=="http:")return;const b=typeof B==="string"?B:"";const r=await fetch(b+"/api/pc/fastimg",{cache:"no-store"});if(!r.ok)return;const j=await r.json();if(!j||!j.ok||!j.on||!j.port||!j.key)return;
   const fb=`http://${location.hostname}:${j.port}/${j.key}`;const ac=new AbortController();const tm=setTimeout(()=>ac.abort(),1500);let ok=false;try{const p=await fetch(fb+"/ping",{cache:"no-store",signal:ac.signal});clearTimeout(tm);ok=p.ok&&(await p.text())==="ok";}catch(e){}

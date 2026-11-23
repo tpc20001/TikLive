@@ -2005,6 +2005,11 @@ body.oldLock{overflow:hidden}
 const B="__BASE__";
 /* V1.1.49 🚀 圖片快速通道：同一個區網、http 時，截圖／預覽大圖／縮圖改從「網頁的埠 +1」那個多執行緒小伺服器拿（不排主程式的隊）；連不到就照原本 */
 window.FASTB=window.FASTB||"";function imgB(b){return window.FASTB||b;}
+/* V1.1.60 主程式重開後快速通道換了鑰匙：圖片 404 → 重新拿一次鑰匙（10 秒最多一次），這張改用新的（拿不到就走原本的） */
+let FASTFIX=null,FASTFT=0;function fastFix(){if(FASTFIX)return FASTFIX;if(Date.now()-FASTFT<10000)return Promise.resolve();FASTFT=Date.now();
+  FASTFIX=(async()=>{try{const b=typeof B==="string"?B:"";const j=await fetch(b+"/api/pc/fastimg",{cache:"no-store"}).then(r=>r.json());let nb="";if(j&&j.ok&&j.on&&j.port&&j.key){const fb=`http://${location.hostname}:${j.port}/${j.key}`;for(let i=0;i<7&&!nb;i++){try{const p=await fetch(fb+"/ping",{cache:"no-store"});if(p.ok)nb=fb;}catch(e){}}}window.FASTB=nb;}catch(e){window.FASTB="";}})().finally(()=>{FASTFIX=null;});return FASTFIX;}   /* 舊連線會回 503 並關掉：多試幾次就連到新的 */
+window.addEventListener("error",e=>{const t=e.target;try{if(!t||t.tagName!=="IMG"||(t._fr||0)>=2)return;const src=t.getAttribute("src")||"",m=/^https?:\/\/[^/]+:\d+\/[A-Za-z0-9_-]{16,}(\/(?:snap|avatar|media|api)\/.*)$/.exec(src);if(!m||!window.FASTP)return;
+  t._fr=(t._fr||0)+1;const rest=m[1],n=t._fr;fastFix().then(()=>{t.src=(n<2&&window.FASTB?window.FASTB:(typeof B==="string"?B:""))+rest;});}catch(x){}},true);   /* 第二次還不行就走原本的 */
 (function(){if(window._fjw)return;window._fjw=1;const of0=window.fetch.bind(window),FJ=/\/api\/(replay\?id=|sessions\?|pc\/vg\/sheetinfo\?|pc\/vg\/info\?|pc\/hist\/strip\?|pc\/edit\/list\?|pc\/vb\/note\?|pc\/stt\/sub\?id=\d+$)/;   /* V1.1.50 唯讀資料走快速通道 */
   window.fetch=function(u,o){try{const url=typeof u==="string"?u:"",m=String((o&&o.method)||"GET").toUpperCase(),b=typeof B==="string"?B:"";
     if(m==="GET"&&!window.FASTB&&window.FASTP&&!window.FASTD&&url&&FJ.test(url))return Promise.race([window.FASTP,new Promise(r=>setTimeout(r,700))]).then(()=>{window.FASTD=1;return window.fetch(u,o);});
