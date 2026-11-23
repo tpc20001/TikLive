@@ -2010,7 +2010,10 @@ window.FASTB=window.FASTB||"";function imgB(b){return window.FASTB||b;}
     if(m==="GET"&&!window.FASTB&&window.FASTP&&!window.FASTD&&url&&FJ.test(url))return Promise.race([window.FASTP,new Promise(r=>setTimeout(r,700))]).then(()=>{window.FASTD=1;return window.fetch(u,o);});
     if(m==="GET"&&window.FASTB&&url&&FJ.test(url)&&(url.startsWith(b+"/api/")||url.startsWith("/api/"))){const p=url.slice(url.indexOf("/api/"));return of0(window.FASTB+p,{cache:"no-store"}).then(r=>r.ok?r:of0(u,o)).catch(()=>of0(u,o));}}catch(e){}return of0(u,o);};})();
 window.FASTP=(async function fastInit(){try{if(location.protocol!=="http:")return;const b=typeof B==="string"?B:"";const r=await fetch(b+"/api/pc/fastimg",{cache:"no-store"});if(!r.ok)return;const j=await r.json();if(!j||!j.ok||!j.on||!j.port||!j.key)return;
-  const fb=`http://${location.hostname}:${j.port}/${j.key}`;const ac=new AbortController();const tm=setTimeout(()=>ac.abort(),1500);const p=await fetch(fb+"/ping",{cache:"no-store",signal:ac.signal});clearTimeout(tm);if(p.ok&&(await p.text())==="ok")window.FASTB=fb;}catch(e){}})();
+  const fb=`http://${location.hostname}:${j.port}/${j.key}`;const ac=new AbortController();const tm=setTimeout(()=>ac.abort(),1500);let ok=false;try{const p=await fetch(fb+"/ping",{cache:"no-store",signal:ac.signal});clearTimeout(tm);ok=p.ok&&(await p.text())==="ok";}catch(e){}
+  if(ok)window.FASTB=fb;document.documentElement.dataset.fast=ok?"1":"0";
+  try{const dk="tlm_fastmsg_"+new Date().toDateString();if(!localStorage.getItem(dk)){localStorage.setItem(dk,"1");const T=typeof toast==="function"?toast:(typeof rvToast==="function"?rvToast:null);
+    if(T)setTimeout(()=>T(ok?"🚀 圖片快速通道已開（埠 "+j.port+"）":"⚠ 圖片快速通道連不到（埠 "+j.port+"，可能被 Windows 防火牆擋，請在電腦上按「允許」），先走原本的",ok?2500:7000),1500);}}catch(e){}}catch(e){}})();
 
 /* QSK-BEGIN TK_V1.0.35 快速找：電腦按 Ctrl+K 或 /，手機按上面的 🔍；找頁面、工具、主播、場次 */
 const QSK={i:0,R:[],sq:0};

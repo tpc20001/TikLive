@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.52"
+APP_VERSION = "1.1.53"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -44344,7 +44344,10 @@ const B="__BASE__";
 /* V1.1.49 🚀 圖片快速通道：同一個區網、http 時，截圖／預覽大圖／縮圖改從「網頁的埠 +1」那個多執行緒小伺服器拿（不排主程式的隊）；連不到就照原本 */
 window.FASTB=window.FASTB||"";function imgB(b){return window.FASTB||b;}
 window.FASTP=(async function fastInit(){try{if(location.protocol!=="http:")return;const b=typeof B==="string"?B:"";const r=await fetch(b+"/api/pc/fastimg",{cache:"no-store"});if(!r.ok)return;const j=await r.json();if(!j||!j.ok||!j.on||!j.port||!j.key)return;
-  const fb=`http://${location.hostname}:${j.port}/${j.key}`;const ac=new AbortController();const tm=setTimeout(()=>ac.abort(),1500);const p=await fetch(fb+"/ping",{cache:"no-store",signal:ac.signal});clearTimeout(tm);if(p.ok&&(await p.text())==="ok")window.FASTB=fb;}catch(e){}})();
+  const fb=`http://${location.hostname}:${j.port}/${j.key}`;const ac=new AbortController();const tm=setTimeout(()=>ac.abort(),1500);let ok=false;try{const p=await fetch(fb+"/ping",{cache:"no-store",signal:ac.signal});clearTimeout(tm);ok=p.ok&&(await p.text())==="ok";}catch(e){}
+  if(ok)window.FASTB=fb;document.documentElement.dataset.fast=ok?"1":"0";
+  try{const dk="tlm_fastmsg_"+new Date().toDateString();if(!localStorage.getItem(dk)){localStorage.setItem(dk,"1");const T=typeof toast==="function"?toast:(typeof rvToast==="function"?rvToast:null);
+    if(T)setTimeout(()=>T(ok?"🚀 圖片快速通道已開（埠 "+j.port+"）":"⚠ 圖片快速通道連不到（埠 "+j.port+"，可能被 Windows 防火牆擋，請在電腦上按「允許」），先走原本的",ok?2500:7000),1500);}}catch(e){}}catch(e){}})();
 
 /* QSK-BEGIN TK_V1.0.35 快速找：電腦按 Ctrl+K 或 /，手機按上面的 🔍；找頁面、工具、主播、場次 */
 const QSK={i:0,R:[],sq:0};
@@ -46415,8 +46418,8 @@ async function rpNav(d){const u=d.u;if(!u)return;const C=S.rpNvC;let L=C&&C.u===
   rpNvFit();setTimeout(rpNvFit,400);setTimeout(rpNvFit,1500);if(!S.rpNvR){S.rpNvR=1;window.addEventListener("resize",()=>{clearTimeout(S.rpNvT);S.rpNvT=setTimeout(rpNvFit,150);});}}
 /* V1.1.48 回放資料快取＋預載：翻到下一場直接用（只快取已經下播的場次，5 分鐘） */
 const RPC=new Map(),RPI=[];
-async function rpGet(id){id=+id;const c=RPC.get(id);if(c&&c.d&&Date.now()-c.t<300000){try{return structuredClone(c.d);}catch(e){return JSON.parse(JSON.stringify(c.d));}}
-  if(c&&c.p)return c.p.then(d=>{try{return structuredClone(d);}catch(e){return JSON.parse(JSON.stringify(d));}});
+async function rpGet(id){id=+id;const c=RPC.get(id);if(c&&c.d&&Date.now()-c.t<300000){RPC.delete(id);return c.d;}   /* V1.1.53 直接拿走（不再複製一份，大場次省 20～70 ms）；離開這場時放回去 */
+  if(c&&c.p){RPC.delete(id);return c.p;}
   const d=await J("/api/replay?id="+id);if(d&&d.id&&d.ended){RPC.set(id,{d,t:Date.now()});while(RPC.size>12)RPC.delete(RPC.keys().next().value);}return d;}
 async function rpWarm(id,ok){id=+id;ok=ok||(()=>true);let d=null;const c=RPC.get(id);   /* V1.1.50 一場先載好：資料＋小請求＋截圖（ok() 變 false 就停） */
   if(c&&c.d&&Date.now()-c.t<300000)d=c.d;else if(c&&c.p){try{d=await c.p;}catch(e){return;}}else{try{const p=J("/api/replay?id="+id);RPC.set(id,{p,t:0});d=await p;}catch(e){RPC.delete(id);return;}
@@ -46431,7 +46434,8 @@ async function rpPre(L,i){if(i<0||!L)return;const me_=RP&&RP.d.id,ok=()=>!!(RP&&
 function rpNvFit(){const nv=$("#rpnv"),h=nv&&nv.closest(".rph");if(!h)return;h.classList.remove("nvw");
   const a=nv.getBoundingClientRect(),hit=el=>{if(!el||!el.offsetParent&&getComputedStyle(el).position!=="fixed")return false;const b=el.getBoundingClientRect();return b.width>0&&a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top;};
   if(hit(document.getElementById("sysFab"))||hit(document.getElementById("miniS"))||a.right>window.innerWidth-4)h.classList.add("nvw");}
-function stopRP(){try{ytStop();}catch(x){}try{sxSubStop();}catch(x){}try{rlvStop();}catch(x){}if(!RP)return;try{clearInterval(RP.bgIv);if(RP.ro)RP.ro.disconnect();}catch(x){}try{exitFs();}catch(x){}clearInterval(RP.iv);try{const e=me();e.pause();e.removeAttribute("src");e.load();}catch(x){}RP=null;document.body.classList.remove("rp");window.onresize=null;}
+function stopRP(){try{if(RP&&RP.d&&RP.d.id&&RP.d.ended){RPC.set(+RP.d.id,{d:RP.d,t:Date.now()});while(RPC.size>16)RPC.delete(RPC.keys().next().value);}}catch(x){}   /* V1.1.53 剛看過的放回快取（按 ‹ 回去不用再載） */
+  try{ytStop();}catch(x){}try{sxSubStop();}catch(x){}try{rlvStop();}catch(x){}if(!RP)return;try{clearInterval(RP.bgIv);if(RP.ro)RP.ro.disconnect();}catch(x){}try{exitFs();}catch(x){}clearInterval(RP.iv);try{const e=me();e.pause();e.removeAttribute("src");e.load();}catch(x){}RP=null;document.body.classList.remove("rp");window.onresize=null;}
 async function viewRP(id,at,how){
   document.body.classList.add("rp");V().innerHTML='<div class="empty">載入中…</div>';$("#clk").textContent="";
   let d;try{d=await rpGet(id);}catch(e){V().innerHTML=offline;return;}   /* V1.1.48 先載好的直接用 */
