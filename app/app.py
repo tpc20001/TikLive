@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.48"
+APP_VERSION = "1.1.49"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -3010,6 +3010,7 @@ class MainWindow(QMainWindow):
         except Exception: pass
         try:                                                                  # V1.1.41 轉檔排隊先看哪些可以直接合併（背景一條）；熱更新後舊版排的交給這一版重新排
             QTimer.singleShot(8000, self._mqc_start)
+            QTimer.singleShot(3000, lambda: threading.Thread(target=self._fast_srv_start, name='TikLiveFastStart', daemon=True).start())                    # V1.1.49 圖片快速通道
             app_ = QApplication.instance()
             if not getattr(app_, '_tlm_mq_take141', False):
                 setattr(app_, '_tlm_mq_take141', True)
@@ -17878,12 +17879,12 @@ try { NLConnect | Out-Null; Unset
                 self._ui_call.emit(lambda s=sock,b=b: self._phone_send(s,'200 OK',b,'application/json; charset=utf-8'))
             threading.Thread(target=worker,daemon=True).start(); return
         if rest=='api/session': J(self._web_session(int(q.get('id','0') or 0))); return
+        if rest=='api/pc/fastimg': J(self._fast_info()); return       # V1.1.49 圖片快速通道（埠＋鑰匙；要登入才拿得到）
         if rest=='api/replay':                                     # V0.6.23b 背景執行
-            sid_=int(q.get('id','0') or 0)
-            def w(sock=sock,sid_=sid_):
-                try: b=json.dumps(_json_safe(self._web_replay(sid_)),ensure_ascii=False)
-                except Exception as ex: b=json.dumps({'error':str(ex)},ensure_ascii=False)
-                self._ui_call.emit(lambda b=b,s=sock: self._phone_send(s,'200 OK',b,'application/json; charset=utf-8'))
+            sid_=int(q.get('id','0') or 0); gz_='gzip' in str((getattr(sock,'_hdr',{}) or {}).get('accept-encoding',''))
+            def w(sock=sock,sid_=sid_,gz_=gz_):
+                data=self._replay_bytes(sid_,gz_)                       # V1.1.49 組 JSON＋壓縮都在背景（原本壓縮在畫面執行緒）；下播的場次 3 分鐘內直接用
+                self._ui_call.emit(lambda d=data,s=sock: self._phone_raw(s,d))
             threading.Thread(target=w,daemon=True).start(); return
         if rest=='api/update/status': J(self._web_update_status()); return                       # V0.5.52
         if rest=='api/update/rollback' and method=='GET': J({'items':self._web_rollback_list(),'current':APP_VERSION,'pw':self._web_pw_set()}); return   # V0.5.66
@@ -17946,10 +17947,8 @@ try { NLConnect | Out-Null; Unset
                     ext_=Path(str(a_)).suffix.lower(); self._web_send_file(s_,Path(str(a_)),{'.m4a':'audio/mp4','.mp3':'audio/mpeg'}.get(ext_,'audio/mp4'),touch=False)   # 聽好幾個小時：不要讓轉檔一直放慢
                 self._ui_call.emit(send_)
             threading.Thread(target=w_,name='TikLiveRadio',daemon=True).start(); return
-        if parts[:1]==['snap'] and len(parts)==3 and parts[1].isdigit():         # V0.6.62 只錄聲音的快照
-            f=self._snap_file(int(parts[1]),parts[2])
-            try: self._phone_send(sock,'200 OK',f.read_bytes(),'image/jpeg',cache=86400); return
-            except Exception: self._phone_send(sock,'404 Not Found','not found'); return
+        if parts[:1]==['snap'] and len(parts)==3 and parts[1].isdigit():         # V0.6.62 只錄聲音的快照；V1.1.49 找檔＋讀檔改背景（原本在畫面執行緒）
+            sid_=int(parts[1]); nm_=parts[2]; self._img_bg_send(sock,lambda: self._snap_file(sid_,nm_),86400*7); return
         if parts[:1]==['aud'] and len(parts)==2 and parts[1].isdigit():
             try: t=float(q.get('t','0') or 0)
             except Exception: t=0.0
@@ -17959,10 +17958,8 @@ try { NLConnect | Out-Null; Unset
             try: self._phone_send(sock,'200 OK',f.read_bytes(),'image/jpeg',cache=86400); return
             except Exception: _gav_want(u)
             self._phone_send(sock,'404 Not Found','not found'); return
-        if parts[:1]==['avatar'] and len(parts)>=2:
-            f=avatar_path(parts[1])
-            try: self._phone_send(sock,'200 OK',f.read_bytes(),'image/jpeg',cache=86400); return
-            except Exception: pass
+        if parts[:1]==['avatar'] and len(parts)>=2:                # V1.1.49 背景讀
+            u_=parts[1]; self._img_bg_send(sock,lambda: avatar_path(u_),86400); return
         self._phone_send(sock,'404 Not Found','not found')
 
     # ================= V0.5.52 手機網頁上傳更新包 → 看更新內容 → 按確定才熱更新（監控與錄音不中斷） =================
@@ -30228,6 +30225,113 @@ $r | ConvertTo-Json -Depth 4 -Compress
             sock=srv.nextPendingConnection(); sock._buf=b''
             sock.readyRead.connect(lambda s=sock: self._phone_read(s))
             sock.disconnected.connect(sock.deleteLater)
+
+    # ---------------- V1.1.49 🚀 圖片快速通道：截圖、預覽大圖、縮圖不經過主程式的畫面執行緒 ----------------
+    def _fast_srv_start(self):
+        """另一個埠（網頁的埠 +1）開一個多執行緒的小伺服器，只給圖片（唯讀）：回放截圖、檔案總管預覽大圖、縮圖、頭像.
+        網址裡要有一把隨機的鑰匙（每次開程式換一把，只有登入的網頁拿得到）. 熱更新：關掉舊的、用新程式碼開在同一個埠."""
+        if not bool(self.cfg('phone.enabled')): return
+        import http.server, socketserver, secrets
+        app_ = QApplication.instance(); fs = getattr(app_, '_tlm_fastsrv', None) or {}
+        key = fs.get('key') or secrets.token_urlsafe(18); old = fs.get('srv')
+        if old is not None:
+            try: old.shutdown(); old.server_close()
+            except Exception: pass
+        win = self; sem = threading.BoundedSemaphore(12)
+        class H(http.server.BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+            def log_message(self, *a): pass
+            def _send(self, code, body=b'', ctype='image/jpeg', et='', cache=0):
+                self.send_response(code); self.send_header('Content-Type', ctype); self.send_header('Content-Length', str(len(body)))
+                self.send_header('Access-Control-Allow-Origin', '*')
+                if et: self.send_header('ETag', et)
+                self.send_header('Cache-Control', f'private, max-age={int(cache)}' if cache else 'no-store'); self.end_headers()
+                if body: self.wfile.write(body)
+            def do_GET(self):
+                try:
+                    from urllib.parse import urlsplit, parse_qs, unquote
+                    sp = urlsplit(self.path); P = [unquote(x) for x in sp.path.split('/') if x]; q = {k: v[-1] for k, v in parse_qs(sp.query).items()}
+                    if not P or P[0] != key: self._send(404, b'not found', 'text/plain'); return
+                    P = P[1:]; rest = '/'.join(P); cache = 86400; get = None
+                    if rest == 'ping': self._send(200, b'ok', 'text/plain'); return
+                    if len(P) == 3 and P[0] == 'snap' and P[1].isdigit(): sid_, nm_ = int(P[1]), P[2]; get = lambda: win._snap_file(sid_, nm_); cache = 86400 * 7
+                    elif len(P) == 2 and P[0] == 'avatar': u_ = P[1]; get = lambda: avatar_path(u_)
+                    elif rest == 'api/pc/vg/sheet':
+                        sid_ = int(q.get('sid', '0') or 0); ri_ = int(q.get('ri', '0') or 0); si_ = int(q.get('i', '0') or 0); get = lambda: win._vg_sheet(sid_, ri_, si_)
+                    elif rest == 'api/pc/vg/cover': sid_ = int(q.get('sid', '0') or 0); get = lambda: win._vg_cover_fast(sid_)
+                    elif rest == 'api/pc/vg/thumb':
+                        sid_ = int(q.get('sid', '0') or 0); t_ = float(q.get('t', '0') or 0); h_ = int(q.get('h', '360') or 360); p_ = int(q.get('p', '0') or 0); s_ = int(q.get('s', '0') or 0)
+                        nr_ = max(0, min(60, int(q.get('near', '0') or 0))); hh = 720 if h_ >= 720 else 360 if h_ >= 360 else 240
+                        get = lambda: win._vg_thumb(sid_, t_, hh, p_, s_, nr_); cache = 60 * 86400
+                    if get is None: self._send(404, b'not found', 'text/plain'); return
+                    with sem: p = get()
+                    if p is None or not Path(p).exists(): self._send(404, b'not found', 'text/plain'); return
+                    st = Path(p).stat(); et = f'"{int(st.st_mtime)}-{st.st_size}"'
+                    if rest == 'api/pc/vg/sheet':
+                        m_ = re.search(r'_(\d+)of(\d+)_', Path(p).name); cache = 30 * 86400 if m_ and m_.group(1) == m_.group(2) else 120
+                    if self.headers.get('If-None-Match') == et: self._send(304, b'', 'image/jpeg', et, cache); return
+                    self._send(200, Path(p).read_bytes(), 'image/jpeg', et, cache)
+                except (BrokenPipeError, ConnectionResetError): pass
+                except Exception:
+                    try: self._send(500, b'err', 'text/plain')
+                    except Exception: pass
+        class S(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True; allow_reuse_address = True; request_queue_size = 64
+        base = int(self.cfg('phone.port')) + 1; srv = None; port = 0
+        for k in range(6):
+            try: srv = S(('0.0.0.0', base + k), H); port = base + k; break
+            except Exception: srv = None
+        if srv is None:
+            setattr(app_, '_tlm_fastsrv', {'key': key, 'srv': None, 'port': 0}); return
+        threading.Thread(target=srv.serve_forever, kwargs={'poll_interval': 0.5}, name='TikLiveFastImg', daemon=True).start()
+        setattr(app_, '_tlm_fastsrv', {'key': key, 'srv': srv, 'port': port})
+        try: self._wd_log(f'🚀 圖片快速通道：埠 {port}')
+        except Exception: pass
+
+    def _fast_info(self):
+        fs = getattr(QApplication.instance(), '_tlm_fastsrv', None) or {}
+        return {'ok': bool(fs.get('srv')), 'port': int(fs.get('port') or 0), 'key': fs.get('key') or '', 'on': bool(self.cfg('phone.fastimg'))}
+
+    def _phone_raw(self, sock, data):
+        """V1.1.49 背景已經做好的整包回應（標頭＋內容），畫面執行緒只負責寫出去."""
+        try: sock.write(data); sock.flush(); sock.disconnectFromHost()
+        except Exception: pass
+
+    def _replay_bytes(self, sid, gz):
+        """V1.1.49 回放資料：JSON＋gzip 在背景做好；已下播的場次留 3 分鐘（前後幾場預載時，真的打開就不用再算一次）."""
+        c = self.__dict__.setdefault('_rpb_c', {}); now = time.time(); x = c.get(int(sid))
+        if x and now - x[0] < 180: raw, gzb = x[1], x[2]
+        else:
+            try: d = self._web_replay(sid); raw = json.dumps(_json_safe(d), ensure_ascii=False).encode('utf-8')
+            except Exception as ex: d = {}; raw = json.dumps({'error': str(ex)}, ensure_ascii=False).encode('utf-8')
+            import gzip as _gz
+            gzb = _gz.compress(raw, 5) if len(raw) > 2048 else None
+            if d.get('ended') and d.get('id'):
+                c[int(sid)] = (now, raw, gzb)
+                if len(c) > 24:
+                    for k in sorted(c, key=lambda k: c[k][0])[:len(c) - 24]: c.pop(k, None)
+        body, ex = (gzb, 'Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n') if (gz and gzb) else (raw, '')
+        return (f'HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {len(body)}\r\nCache-Control: no-store\r\n{ex}Connection: close\r\n\r\n').encode('ascii') + body
+
+    def _img_bg_send(self, sock, getter, cache=86400, ctype='image/jpeg'):
+        """V1.1.49 圖片：背景找檔＋讀檔（最多同時 8 個），有 ETag（瀏覽器問有沒有變 → 304），畫面執行緒只寫出去."""
+        hdr = getattr(sock, '_hdr', {}) or {}; sem = self.__dict__.setdefault('_imgbg_sem', threading.BoundedSemaphore(8))
+        def work():
+            data = None
+            with sem:
+                try:
+                    p = getter()
+                    if p is not None and Path(p).exists():
+                        st = Path(p).stat(); et = f'"{int(st.st_mtime)}-{st.st_size}"'
+                        if hdr.get('if-none-match') == et:
+                            data = f'HTTP/1.1 304 Not Modified\r\nETag: {et}\r\nCache-Control: private, max-age={int(cache)}\r\nConnection: close\r\n\r\n'.encode('ascii')
+                        else:
+                            body = Path(p).read_bytes()
+                            data = (f'HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nContent-Length: {len(body)}\r\nCache-Control: private, max-age={int(cache)}\r\nETag: {et}\r\nConnection: close\r\n\r\n').encode('ascii') + body
+                except Exception: data = None
+            if data is None: self._ui_call.emit(lambda s=sock: self._phone_send(s, '404 Not Found', 'not found'))
+            else: self._ui_call.emit(lambda d=data, s=sock: self._phone_raw(s, d))
+        threading.Thread(target=work, name='TikLiveImg2', daemon=True).start()
 
     def _phone_send(self, sock, code, body, ctype='text/html; charset=utf-8', extra='', cache=0):
         if isinstance(body,str): body=body.encode('utf-8')
@@ -44161,6 +44265,11 @@ nav button,nav button.tbg,nav button.tset{flex:1 0 auto;white-space:nowrap;overf
 <script>
 "use strict";
 const B="__BASE__";
+/* V1.1.49 🚀 圖片快速通道：同一個區網、http 時，截圖／預覽大圖／縮圖改從「網頁的埠 +1」那個多執行緒小伺服器拿（不排主程式的隊）；連不到就照原本 */
+window.FASTB=window.FASTB||"";function imgB(b){return window.FASTB||b;}
+(async function fastInit(){try{if(location.protocol!=="http:")return;const b=typeof B==="string"?B:"";const r=await fetch(b+"/api/pc/fastimg",{cache:"no-store"});if(!r.ok)return;const j=await r.json();if(!j||!j.ok||!j.on||!j.port||!j.key)return;
+  const fb=`http://${location.hostname}:${j.port}/${j.key}`;const ac=new AbortController();const tm=setTimeout(()=>ac.abort(),1500);const p=await fetch(fb+"/ping",{cache:"no-store",signal:ac.signal});clearTimeout(tm);if(p.ok&&(await p.text())==="ok")window.FASTB=fb;}catch(e){}})();
+
 /* QSK-BEGIN TK_V1.0.35 快速找：電腦按 Ctrl+K 或 /，手機按上面的 🔍；找頁面、工具、主播、場次 */
 const QSK={i:0,R:[],sq:0};
 function qsLocal(){const R=[];
@@ -44295,6 +44404,13 @@ try{const c=localStorage.getItem("tlm_cols");if(/^(auto|[1-5])$/.test(c||""))S.c
 function onLiveView(){const a=(location.hash||"#live").slice(1).split("/")[0]||"live";return a==="live";}      // V0.6.06 resizing on 歷史紀錄 no longer jumps to 直播中
 window.addEventListener("resize",()=>{if(onLiveView()&&$("#list")&&S.live&&!document.body.classList.contains("rp"))drawLiveList();});
 async function J(p){const r=await fetch(B+p,{cache:"no-store"});if(r.status===401){location.reload();throw 0;}if(!r.ok)throw 0;return r.json();}
+/* V1.1.49 回放打開時那幾個小請求（縮圖列、筆記、剪輯清單、字幕、截圖資訊…）：預載過的 90 秒內直接用，不再跟電腦要；有任何寫入（POST）就全部清掉 */
+(function(){if(window.PFM)return;const of=window.fetch.bind(window),M=new Map(),pat=/\/api\/pc\/(hist\/strip\?|vb\/note\?|edit\/list\?|stt\/sub\?id=\d+$|snap\/info\?|gfx$|novideo$)/;window.PFM=M;
+  const key=u=>{const i=u.indexOf("/api/pc/");return i<0?u:u.slice(i);},mk=r=>new Response(r.b,{status:r.s,headers:r.h});
+  window.fetch=function(u,o){let url="";try{url=typeof u==="string"?u:(u&&u.url)||"";}catch(e){}const m=String((o&&o.method)||(u&&u.method)||"GET").toUpperCase();
+    if(m!=="GET"){M.clear();return of(u,o);}if(!pat.test(url))return of(u,o);const k=key(url),x=M.get(k);if(x&&Date.now()-x.t<90000)return x.p.then(mk);
+    const p=of(u,o).then(async r=>({b:await r.arrayBuffer(),s:r.status,h:[...r.headers]}));M.set(k,{t:Date.now(),p});p.then(r=>{if(r.s!==200)M.delete(k);},()=>M.delete(k));while(M.size>400)M.delete(M.keys().next().value);return p.then(mk);};
+  window.pfmWarm=function(sid){const b=typeof B==="string"?B:"";["/api/pc/hist/strip?sid=","/api/pc/vb/note?sid=","/api/pc/edit/list?sid=","/api/pc/stt/sub?id=","/api/pc/snap/info?sid="].forEach(p=>{window.fetch(b+p+sid,{cache:"no-store"}).catch(()=>{});});};})();
 function toast(t,ms){const e=$("#toast");e.textContent=t;e.style.display="block";clearTimeout(e._t);e._t=setTimeout(()=>e.style.display="none",ms||2600);}
 function later(fn,ms){clearTimeout(S.timer);S.timer=setTimeout(()=>{if(document.hidden){S.pending=fn;return;}fn();},ms);}
 document.addEventListener("visibilitychange",()=>{if(document.hidden)return;S.visT=performance.now();
@@ -44584,6 +44700,9 @@ async function viewHist(onlyU){S.honly=onlyU;
   $("#list").onclick=e=>{const d=e.target.closest(".cdot[data-cu]");
     if(d){e.stopPropagation();const r=d.closest(".hr,.ghd");const nm=r?(r.querySelector(".nm,b")||{}).textContent:"";catPick(d.dataset.cu,nm,()=>drawHist(onlyU));return;}
     const r=e.target.closest(".hr");if(r)location.hash="rp/"+r.dataset.id;};
+  /* V1.1.50 手指一碰到某一場就先開始載（點下去時多半已經好了）；清單畫好 1 秒後先載最上面兩場 */
+  $("#list").addEventListener("pointerdown",e=>{const r=e.target.closest(".hr");if(r&&r.dataset.id)try{rpWarm(+r.dataset.id,()=>true);}catch(x){}},{passive:true});
+  setTimeout(()=>{if(!$("#list"))return;[...document.querySelectorAll("#list .hr[data-id]")].slice(0,2).forEach(r=>{try{rpWarm(+r.dataset.id,()=>!!$("#list"));}catch(x){}});},1000);
   const bindCat=()=>{const cs=$("#catSel");if(cs)cs.onchange=e=>{S.hcat=e.target.value;drawHist(onlyU);histReload(onlyU);};};bindCat();
   catsLoad().then(()=>{const sl=$("#catSlot");if(sl){sl.innerHTML=catFilterHtml();bindCat();}if($("#list")&&S.hist)drawHist(onlyU);});      // V0.5.73 category dots + filter
   if(S.hist&&(S.histU||"")===(onlyU||""))drawHist(onlyU);else $("#list").innerHTML='<div class="empty">載入中…</div>';
@@ -46218,13 +46337,15 @@ const RPC=new Map(),RPI=[];
 async function rpGet(id){id=+id;const c=RPC.get(id);if(c&&c.d&&Date.now()-c.t<300000){try{return structuredClone(c.d);}catch(e){return JSON.parse(JSON.stringify(c.d));}}
   if(c&&c.p)return c.p.then(d=>{try{return structuredClone(d);}catch(e){return JSON.parse(JSON.stringify(d));}});
   const d=await J("/api/replay?id="+id);if(d&&d.id&&d.ended){RPC.set(id,{d,t:Date.now()});while(RPC.size>12)RPC.delete(RPC.keys().next().value);}return d;}
-async function rpPre(L,i){if(i<0||!L)return;const me_=RP&&RP.d.id,ord=[i+1,i-1,i+2,i-2,i+3].filter(k=>k>=0&&k<L.length).map(k=>+L[k].id);
-  for(const id of ord){if(!RP||RP.d.id!==me_||document.hidden)return;let d=null;const c=RPC.get(id);
-    if(c&&c.d&&Date.now()-c.t<300000)d=c.d;else if(c&&c.p){try{d=await c.p;}catch(e){continue;}}else{try{const p=J("/api/replay?id="+id);RPC.set(id,{p,t:0});d=await p;}catch(e){RPC.delete(id);continue;}
-      if(d&&d.id&&d.ended){RPC.set(id,{d,t:Date.now()});while(RPC.size>12)RPC.delete(RPC.keys().next().value);}else{RPC.delete(id);continue;}}
-    /* 這場的截圖（回放打開先看的那一頁）也先抓 */
-    const sn=(d.snaps||[]).slice(0,60);for(let k=0;k<sn.length;k+=6){if(!RP||RP.d.id!==me_)return;await Promise.all(sn.slice(k,k+6).map(x=>new Promise(res=>{const im=new Image();im.onload=im.onerror=()=>res();im.src=`${snB()}/snap/${id}/${x[1]}`;RPI.push(im);})));}
-    while(RPI.length>400)RPI.shift();}}
+async function rpWarm(id,ok){id=+id;ok=ok||(()=>true);let d=null;const c=RPC.get(id);   /* V1.1.50 一場先載好：資料＋小請求＋截圖（ok() 變 false 就停） */
+  if(c&&c.d&&Date.now()-c.t<300000)d=c.d;else if(c&&c.p){try{d=await c.p;}catch(e){return;}}else{try{const p=J("/api/replay?id="+id);RPC.set(id,{p,t:0});d=await p;}catch(e){RPC.delete(id);return;}
+    if(d&&d.id&&d.ended){RPC.set(id,{d,t:Date.now()});while(RPC.size>16)RPC.delete(RPC.keys().next().value);}else{RPC.delete(id);return;}}
+  try{pfmWarm(id);}catch(e){}
+  const sn=(d.snaps||[]).slice(0,60);for(let k=0;k<sn.length;k+=12){if(!ok()||document.hidden)return;await Promise.all(sn.slice(k,k+12).map(x=>new Promise(res=>{const im=new Image();im.onload=im.onerror=()=>res();im.src=`${imgB(snB())}/snap/${id}/${x[1]}`;RPI.push(im);})));}
+  while(RPI.length>600)RPI.shift();}
+async function rpPre(L,i){if(i<0||!L)return;const me_=RP&&RP.d.id,ok=()=>!!(RP&&RP.d.id===me_),ord=[i+1,i-1,i+2,i-2,i+3,i+4].filter(k=>k>=0&&k<L.length).map(k=>+L[k].id);
+  /* V1.1.50 兩場一起載（圖片走快速通道時不排主程式的隊） */
+  const q=ord.slice();const run=async()=>{while(q.length&&ok()&&!document.hidden){await rpWarm(q.shift(),ok);}};await Promise.all([run(),run()]);}
 /* V1.1.46b 上面的浮動列（🔍 效能 背景…）擋到 ‹ › 時，改放到標題下面一行 */
 function rpNvFit(){const nv=$("#rpnv"),h=nv&&nv.closest(".rph");if(!h)return;h.classList.remove("nvw");
   const a=nv.getBoundingClientRect(),hit=el=>{if(!el||!el.offsetParent&&getComputedStyle(el).position!=="fixed")return false;const b=el.getBoundingClientRect();return b.width>0&&a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top;};
@@ -47176,7 +47297,7 @@ function vbOpen(){let ov=document.getElementById("vbOv");if(ov)ov.remove();ov=do
 const SN={L:[],sid:0,box:null,seek:null,clk:null,cur:-1,t:0,view:0,lay:[4,5],mp4:false,time:true,fy:0,u:""};
 const snB=()=>(typeof B==="string"?B:"");
 const snHms=s=>{s=Math.max(0,Math.floor(+s||0));const p=n=>String(n).padStart(2,"0");return `${Math.floor(s/3600)}:${p(Math.floor(s%3600/60))}:${p(s%60)}`;};
-function snUrl(i){const x=SN.L[i];return x?`${snB()}/snap/${SN.sid}/${x[1]}`:"";}
+function snUrl(i){const x=SN.L[i];return x?`${imgB(snB())}/snap/${SN.sid}/${x[1]}`:"";}
 function snIdx(t){const L=SN.L;let lo=0,hi=L.length;while(lo<hi){const m=(lo+hi)>>1;if(L[m][0]<=t+1)lo=m+1;else hi=m;}return Math.max(0,lo-1);}
 function snMount(box,sid,L,seek,clk,lay){SN.L=(L||[]).slice();SN.sid=sid;SN.seek=seek;SN.clk=clk;SN.cur=-1;SN.t=0;SN.box=box;SN.view=0;SN.lay=(lay&&lay.length===2)?lay:[4,5];SN.mp4=false;if(!box)return false;
   try{const t=localStorage.getItem("tlm_sntime");SN.lab=t==="0"||t==="n"?"n":t==="x"?"x":"t";SN.gap=+(localStorage.getItem("tlm_sngap")??2);if(!isFinite(SN.gap))SN.gap=2;SN.zh=localStorage.getItem("tlm_snzh")||"r";SN.zv=localStorage.getItem("tlm_snzv")||"d";}catch(e){SN.lab="t";SN.gap=2;SN.zh="r";SN.zv="d";}
@@ -47466,7 +47587,7 @@ function gaPv(){const I=gaUsed();if(!I.length)return;let pv=document.getElementB
   const draw=()=>{const L=gaLay(),N=I.length,LY=gaLayouts(N);if(!LY.some(x=>x.C===GA.C))GA.C=LY[0].C;const C=GA.C,R=Math.ceil(N/C);
     const W=Math.min(innerWidth-44,900),cw=W/(C+(C-1)*L.gap),ch=cw*L.ratio,gp=L.gap*cw,TW=C*cw+(C-1)*gp,TH=R*ch+(R-1)*gp;
     pv.innerHTML=`<div class="gaPvB"><div class="gaPvH"><b>👁 ${C}×${R}</b><span style="flex:1"></span><button class="gaPvGo" data-pgo="1">▶ 就這樣輸出</button><button class="pill" data-px="1">✕</button></div>
-<div class="gaPvC" style="width:${TW}px;height:${TH}px">${I.map((it,i)=>{const c=i%C,r=Math.floor(i/C);return `<div class="gaPvT" style="left:${c*(cw+gp)}px;top:${r*(ch+gp)}px;width:${cw}px;height:${ch}px;z-index:${gaZ(c,r,L)}"><img loading="lazy" alt="" style="object-position:50% ${50-L.fy}%" src="${gaB()}/api/pc/vg/thumb?sid=${GA.sid}&t=${gaHit(it).toFixed(1)}&h=360&p=1"></div>`;}).join("")}</div><div class="gaPvDr" data-pdrag="1">⇕ 按住上下拉調高矮（${gaRt(L.ratio)}）</div>
+<div class="gaPvC" style="width:${TW}px;height:${TH}px">${I.map((it,i)=>{const c=i%C,r=Math.floor(i/C);return `<div class="gaPvT" style="left:${c*(cw+gp)}px;top:${r*(ch+gp)}px;width:${cw}px;height:${ch}px;z-index:${gaZ(c,r,L)}"><img loading="lazy" alt="" style="object-position:50% ${50-L.fy}%" src="${imgB(gaB())}/api/pc/vg/thumb?sid=${GA.sid}&t=${gaHit(it).toFixed(1)}&h=360&p=1"></div>`;}).join("")}</div><div class="gaPvDr" data-pdrag="1">⇕ 按住上下拉調高矮（${gaRt(L.ratio)}）</div>
 <div class="gaPvK"><div class="snMosR"><span>排版</span>${LY.map(x=>`<button data-pc="${x.C}" class="${x.C===C?"on":""}">${x.C}×${x.R}${x.fill?`（空 ${x.fill}）`:""}</button>`).join("")}</div>
 <div class="snMosR"><span>形狀</span>${[[16/9,"直 9:16"],[4/3,"3:4"],[1,"1:1"],[3/4,"4:3"],[9/16,"橫 16:9"]].map(([v,t])=>`<button data-prt="${v}" class="${Math.abs(L.ratio-v)<0.02?"on":""}">${t}</button>`).join("")}</div>
 <div class="snMosR"><span>間距</span><input type="range" min="-40" max="20" step="1" value="${Math.round(L.gap*100)}" data-pg="1"><b>${Math.round(L.gap*100)}%</b><small>負的＝交疊</small></div>
@@ -47503,7 +47624,7 @@ function snSelOpen(sid,R){const L=R.pickL,need=R.need||Math.round(L.length/2),co
   const draw=()=>{const k=sel.size,rows=Math.max(1,Math.ceil(k/cols));
     ov.innerHTML=`<div class="snSelW"><div class="snSelH"><b>挑截圖：要 ${need} 張</b><span class="${k===need?"ok":"warn"}">已選 ${k} / ${need}</span><button data-ss="x">✕</button></div>
 <div class="snSelN">已經先平均選好 ${need} 張（亮的）。點一下取消有擋住、拍糊的，再點旁邊的補上。${k!==need?`<br>選 ${k} 張也可以：版面會變成 ${snFitLay(k,cols).join(" 列 × ")} 欄${snFitLay(k,cols)[0]*snFitLay(k,cols)[1]>k?"（排不滿，最後一列會空）":"（剛好排滿）"}，之後還能換。`:""}</div>
-<div class="snSelG">${L.map((x,i)=>`<div class="snSelC${sel.has(i)?" on":""}" data-si="${i}"><img loading="lazy" alt="" src="${snB()}/snap/${sid}/${x[1]}"><b>${tm(x)}</b>${sel.has(i)?"<i>✔</i>":""}</div>`).join("")}</div>
+<div class="snSelG">${L.map((x,i)=>`<div class="snSelC${sel.has(i)?" on":""}" data-si="${i}"><img loading="lazy" alt="" src="${imgB(snB())}/snap/${sid}/${x[1]}"><b>${tm(x)}</b>${sel.has(i)?"<i>✔</i>":""}</div>`).join("")}</div>
 <div class="snSelB"><button data-ss="all">全選</button><button data-ss="none">全不選</button><button data-ss="even">平均選 ${need} 張</button><span style="flex:1"></span><button data-ss="cancel">不挑了</button><button class="snPkGo" data-ss="go"${k?"":" disabled"}>✔ 用這 ${k} 張</button></div></div>`;};
   draw();
   ov.onclick=async e=>{const c=e.target.closest("[data-si]");if(c){const i=+c.dataset.si;if(sel.has(i))sel.delete(i);else sel.add(i);   /* TK_V1.0.74 只改這一格（不整片重畫：手機上 200 多張不會閃、不會重新載圖） */
@@ -48682,7 +48803,7 @@ async function vgPre(){if(VG.preBusy||!VG.root||!VG.root.isConnected||!VG.info||
     for(const pass of [0,1])for(const [sid,T0] of L){const key=`${sid}|${vgStepFor(sid)}|${H}`,n=pass?T0.length:Math.min(n1,T0.length);   /* 先把兩場的第一個畫面做好，再把整場做完 */
       for(let k=VG.preDone[key]||0;k<n;k+=2){if(!alive())return;
         const ac=VG.preAC=new AbortController();
-        const ok=await Promise.all(T0.slice(k,Math.min(n,k+2)).map(x=>fetch(`${vgB()}/api/pc/vg/thumb?sid=${sid}&t=${x.t}&h=${H}&s=${vgStepFor(sid)}&p=2`,{signal:ac.signal}).then(r=>r.ok?r.blob().then(()=>1):(r.status===404?2:0)).catch(()=>0)));
+        const ok=await Promise.all(T0.slice(k,Math.min(n,k+2)).map(x=>fetch(`${imgB(vgB())}/api/pc/vg/thumb?sid=${sid}&t=${x.t}&h=${H}&s=${vgStepFor(sid)}&p=2`,{signal:ac.signal}).then(r=>r.ok?r.blob().then(()=>1):(r.status===404?2:0)).catch(()=>0)));
         if(ok.some(v=>v===0))return;   /* 被這場搶先、或取消了：之後再接著做（V0.7.30 只是那張沒有畫面＝404，就跳過繼續，不會整個停住） */
         VG.preDone[key]=Math.min(n,k+2);}
       if(pass)vgDoneRep(sid);}}   /* 這場預載完：問電腦 30 秒預覽圖夠不夠，夠就在清單打勾 */
@@ -48723,7 +48844,7 @@ function vgPump(){const G=VG.root&&VG.root.querySelector("#vgGrid");if(!G||!VG.i
     const done=ok=>{VG.flyIm.delete(im);for(const y of grp)if(y.st===5)y.st=0;if(g!==VG.gen)return;VG.fly=Math.max(0,VG.fly-1);if(ok){x.st=2;x.h=H;if(el){const m=el.querySelector("img");m.src=im.src;el.classList.add("ok");}
         if(!VG.arSet&&im.naturalHeight){VG.arSet=true;const a=im.naturalWidth/im.naturalHeight;if(Math.abs(a-VG.ar)>0.02){VG.ar=a;G.style.setProperty("--vgar",a);}}}
       else{x.st=3;if(el)el.classList.add("bad");setTimeout(()=>{if(x.st===3&&g===VG.gen){x.st=0;vgPump();}},15000);}vgPump();};
-    im.onload=()=>done(true);im.onerror=()=>done(false);im.src=`${vgB()}/api/pc/vg/thumb?sid=${sid}&t=${x.t}&h=${H}&s=${vgStepFor(sid)}${pr?"&p=1":""}`;}}   /* p＝優先順序：0 畫面上的、1 這場其他的、2 預載下兩場（電腦那邊照順序做） */
+    im.onload=()=>done(true);im.onerror=()=>done(false);im.src=`${imgB(vgB())}/api/pc/vg/thumb?sid=${sid}&t=${x.t}&h=${H}&s=${vgStepFor(sid)}${pr?"&p=1":""}`;}}   /* p＝優先順序：0 畫面上的、1 這場其他的、2 預載下兩場（電腦那邊照順序做） */
 function vgSetCols(n){n=Math.max(2,Math.min(30,n|0));if(n===VG.cols)return;const R=VG.root,top=vgTopTile();VG.cols=n;vgLS.set("cols",n);const s=R.querySelector("#vgCols");if(s)s.value=String(VG_COLS.includes(n)?n:6);
   R.querySelector("#vgGrid").style.setProperty("--vgc",n);if(top>=0){const el=R.querySelector(`.vgT[data-i="${top}"]`);if(el)R.scrollTop=el.offsetTop-R.querySelector("#vgBar").offsetHeight;}vgPump();}
 function vgZoom(d){const i=VG_COLS.indexOf(VG.cols);vgSetCols(VG_COLS[Math.max(0,Math.min(VG_COLS.length-1,(i<0?4:i)+d))]);}
@@ -49065,7 +49186,7 @@ function hlDraw(){const R=HL.root;if(!R)return;const D=HL.d||{segs:[]},P=D.prog|
   let lastU=null;
   el.innerHTML=S.map(([x,i])=>{const mid=Math.round((x.a+x.b)/2),cl=new Date(x.at*1000),dur=x.b-x.a;
     let gh="";if(HL.ord==="u"&&x.u!==lastU){lastU=x.u;const n=S.filter(([y])=>y.u===x.u).length;gh=`<div class="hlGH" data-gu="${hlE(x.u)}" title="只看這位"><b>${hlE(x.name)}</b><small>${n} 段</small></div>`;}
-    return gh+`<div class="hlC${x.seen?" hlSeenC":""}" data-i="${i}"><div class="hlIm"><img loading="lazy" alt="" src="${hlB()}/api/pc/vg/thumb?sid=${x.sid}&t=${mid}&h=240&p=1&near=20" onerror="this.style.visibility='hidden'"><i>▶</i><em>${hlT(dur).replace(/^0:/,"")}</em></div>
+    return gh+`<div class="hlC${x.seen?" hlSeenC":""}" data-i="${i}"><div class="hlIm"><img loading="lazy" alt="" src="${imgB(hlB())}/api/pc/vg/thumb?sid=${x.sid}&t=${mid}&h=240&p=1&near=20" onerror="this.style.visibility='hidden'"><i>▶</i><em>${hlT(dur).replace(/^0:/,"")}</em></div>
 <div class="hlTx"><b class="hlCode">${hlE(x.code||"")}</b> <b>${hlE(x.name)}</b><small>${cl.getMonth()+1}/${cl.getDate()} ${hlP(cl.getHours())}:${hlP(cl.getMinutes())} · 開播後 ${hlT(x.a)}～${hlT(x.b)} · 共 ${Math.round(dur/60)} 分鐘</small><div class="hlTg"><span>🕺 跳舞</span>${x.yt&&!x.mp4?'<span class="hlYt">▶ YouTube</span>':""}${x.seen?'<span class="hlSeenB">✓ 已看</span>':""}</div></div>${x.mp4?`<button class="hlShB2 hlFxB" data-hfx="${i}" title="在檔案總管打開這場（細節、剪輯）">🎞</button>`:""}<button class="hlShB2" data-sh="${i}" title="分享這段">📤</button><button class="hlFv${x.fav?" on":""}" data-fv="${i}" title="${x.fav?"從我的最愛移除":"加到我的最愛"}">${x.fav?"★":"☆"}</button><button class="hlBk" data-bk="${i}" title="不要看這位">🚫</button></div>`;}).join("");}
 /* V0.7.42.006 回放頁：這場有 YouTube（上傳好的）就在右下角放一顆「▶ YouTube」，從現在播到的秒數打開 */
 function rpYtCur(){try{if(typeof RP!=="undefined"&&RP&&RP.d&&(location.hash||"").startsWith("#rp/"))return {d:RP.d,t:+RP.t||0};}catch(e){}
@@ -49832,7 +49953,7 @@ const htbToast=(m,ms)=>{if(typeof toast==="function")toast(m,ms);};
 async function htbGet(p){const r=await fetch(htbB()+p,{cache:"no-store"});return r.json();}
 async function htbPost(p,d){try{if(typeof kPost==="function")return await kPost(p,d);if(typeof post==="function")return await post(p,d);if(typeof deepPost==="function")return await deepPost(p,d);}catch(e){}return null;}
 function htbGrid(n){n=Math.max(1,n|0);let best=null;for(let r=1;r<=n;r++){for(let c=r;c<=n;c++){if(r*c<n)continue;if(c/r>1.6)break;const k=[r*c-n,c-r];if(!best||k[0]<best[0][0]||(k[0]===best[0][0]&&k[1]<best[0][1]))best=[k,c,r];break;}}return [best[1],best[2]];}
-const htbIm=(sid,L,h)=>`${htbB()}/api/pc/vg/thumb?sid=${sid}&t=${L}&h=${h||360}&near=20&p=1`;
+const htbIm=(sid,L,h)=>`${imgB(htbB())}/api/pc/vg/thumb?sid=${sid}&t=${L}&h=${h||360}&near=20&p=1`;
 function htbMount(root,u){HTB.root=root;HTB.u=String(u||"").replace(/^@/,"");HTB.d=null;root.classList.add("htbPage");root.innerHTML='<div class="htbEmpty">讀取中…</div>';htbLoad();}
 async function htbLoad(){if(!HTB.root||!HTB.root.isConnected)return;let d=null;try{d=await htbGet("/api/pc/htb?u="+encodeURIComponent(HTB.u));}catch(e){}
   if(!d||!d.ok){HTB.root.innerHTML=`<div class="htbEmpty">${htbE((d&&d.message)||"讀取失敗")}</div>`;return;}HTB.d=d;htbDraw();
@@ -50075,7 +50196,7 @@ function lvsApply(keepSid){setTimeout(lvsNvAllPaint,0);const F=LVS.F,sk=(typeof 
     &&(F.cat==="*"||(r.cat||"")===F.cat)&&(!F.g.length||LVS.kind==="nv"||F.g.includes(r.g||"-"))&&(!F.pv||LVS.kind==="nv"||(r.prx!=null?r.prx>=80:r.pr!=null?r.pr>=80:(r.pv===1||r.s2===1))));   /* TK_V0.9.41 打開過的場次用實際拿到的預覽圖（prx）判斷 */   /* TK_V0.8.96 預覽圖實際有八成以上（照真的拿得到的圖算） */
   LVS.Lb=L;const L2=F.lvf?L.filter(r=>lvsLvKey(r)===F.lvf):L;   /* TK_V0.8.97 網頁版：左邊等級格子（全部／未分級／−2…+2）再篩一次 */
   if(LVS.sel&&LVS.sel.set.size)lvsSelClear();LVS.L=L2;const c=LVS.root.querySelector("#lvsCnt");if(c)c.textContent=LVS.pc?`${L.length} 場${L.length!==(LVS.all||[]).length?`（共 ${(LVS.all||[]).length}）`:""} · 按等級＝存好跳下一場；沒按就滑到下一場＝上一場自動 −2`:`${L.length}/${(LVS.all||[]).length} 場`;
-  LVS.strip.innerHTML=LVS.L.map((r,i)=>LVS.pc&&typeof lvpCard==="function"?lvpCard(r,i):`<div class="lvsSI" data-i="${i}"><img loading="lazy" alt="" src="${lvsB()}/api/pc/vg/cover?sid=${r.sid}" onerror="this.style.visibility='hidden'"><em class="lvsSG"></em><span>${lvsE(r.name)}</span></div>`).join("");LVS.L.forEach((r,i)=>lvsStripPaint(i));
+  LVS.strip.innerHTML=LVS.L.map((r,i)=>LVS.pc&&typeof lvpCard==="function"?lvpCard(r,i):`<div class="lvsSI" data-i="${i}"><img loading="lazy" alt="" src="${imgB(lvsB())}/api/pc/vg/cover?sid=${r.sid}" onerror="this.style.visibility='hidden'"><em class="lvsSG"></em><span>${lvsE(r.name)}</span></div>`).join("");LVS.L.forEach((r,i)=>lvsStripPaint(i));
   if(LVS.pc&&typeof lvpSum==="function"){lvpSum();if((LVS.all||[]).some(r=>r.nep>0)&&typeof lvpPoll==="function")lvpPoll();}else lvsSumPaint();
   if(!LVS.L.length){LVS.box.innerHTML='<div class="lvsEmpty">沒有符合的場次</div>';return;}
   const st=keepSid?LVS.L.findIndex(r=>r.sid===keepSid):-1;lvsJump(Math.max(0,st));}
@@ -50089,7 +50210,7 @@ function lvsPre(ci){LVS.pf=LVS.pf||{};LVS.pfI=LVS.pfI||{};LVS.pfImg=LVS.pfImg||n
   want.forEach(sid=>{if(!LVS.pf[sid])LVS.pfQ.push({k:"i",sid});});
   const run=async()=>{if(LVS.pfRun>=4)return;const it=LVS.pfQ.shift();if(!it)return;LVS.pfRun=(LVS.pfRun||0)+1;
     try{if(it.k==="i"){if(!LVS.pf[it.sid]){LVS.pf[it.sid]=1;const [I,Inf]=await Promise.all([lvsGet("/api/pc/vg/sheetinfo?sid="+it.sid).catch(()=>null),lvsGet("/api/pc/vg/info?sid="+it.sid).catch(()=>null)]);
-        if(I){LVS.pfI[it.sid]={I,Inf,t:Date.now()};const ims=[];((I.parts)||[]).forEach(p=>{if(!p.ok)return;const nm=p.n-(p.m||[]).length;for(let si=0;si<((LVS.pfN[it.sid]??9)<5?(p.sheets||1):Math.min(3,p.sheets||1));si++)ims.push({k:"s",sid:it.sid,u:`${lvsB()}/api/pc/vg/sheet?sid=${it.sid}&ri=${p.ri}&i=${si}&n=${nm}`});});
+        if(I){LVS.pfI[it.sid]={I,Inf,t:Date.now()};const ims=[];((I.parts)||[]).forEach(p=>{if(!p.ok)return;const nm=p.n-(p.m||[]).length;for(let si=0;si<((LVS.pfN[it.sid]??9)<5?(p.sheets||1):Math.min(3,p.sheets||1));si++)ims.push({k:"s",sid:it.sid,u:`${imgB(lvsB())}/api/pc/vg/sheet?sid=${it.sid}&ri=${p.ri}&i=${si}&n=${nm}`});});
           const at=LVS.pfQ.findIndex(x=>x.k==="i");LVS.pfQ.splice(at<0?LVS.pfQ.length:at,0,...ims.slice(0,3));const r_=ims.slice(3);if((LVS.pfN[it.sid]??9)<5){const at2=LVS.pfQ.findIndex(x=>x.k==="s"&&(LVS.pfN[x.sid]??9)>=5);LVS.pfQ.splice(at2<0?LVS.pfQ.length:at2,0,...r_);}else LVS.pfQ.push(...r_);}else LVS.pf[it.sid]=0;}}
       else if(!LVS.pfImg.has(it.u)){await new Promise(res=>{const im=new Image();im.onload=im.onerror=()=>res();im.src=it.u;LVS.pfImg.set(it.u,im);});
         if(LVS.pfImg.size>400){const k=LVS.pfImg.keys().next().value;LVS.pfImg.delete(k);}}}catch(e){}
@@ -50134,8 +50255,8 @@ async function lvsBuild(s,refresh){s._built=true;const sid=+s.dataset.sid;let I=
   P.forEach(p=>{const k=kp(p)*cap,ps=p.step||I.step||30,M=new Set(p.m||[]),many=M.size>p.n*0.3,nm=p.n-M.size;s._step=ps*k;
     for(let q=0;q<p.n;q+=k){const si=Math.floor(q/per),r=q%per,cx=r%C,cy=Math.floor(r/C),L=p.L[q],ix=s._tiles.length;s._tiles.push({ri:p.ri,t:L,f:p.f[q],st:ps*k});
     const miss=M.has(q),ok=p.ok&&!miss;if(miss)nmiss++;   /* 這格還沒有預覽圖：少的話單張去要；很多就等背景做（照你清單的順序先做） */
-    const bg=ok?`background-size:${C*100}% ${Rw*100}%;background-position:${cx*100/(C-1)}% ${cy*100/(Rw-1)}%`:"",u=ok?`${lvsB()}/api/pc/vg/sheet?sid=${sid}&ri=${p.ri}&i=${si}&n=${nm}`:"";
-    H.push(`<div class="lvsT${LVS.sel&&LVS.sel.sid===sid&&LVS.sel.set.has(ix)?" on":""}${miss&&many?" wait":""}" data-q="${ix}" data-l="${L}"${u?` data-u="${u}"`:""} style="${bg}">${ok||many?"":`<img loading="lazy" alt="" src="${lvsB()}/api/pc/vg/thumb?sid=${sid}&t=${L}&h=240&s=30&near=20">`}<span>${lvsT(p.f[q])}</span></div>`);}});
+    const bg=ok?`background-size:${C*100}% ${Rw*100}%;background-position:${cx*100/(C-1)}% ${cy*100/(Rw-1)}%`:"",u=ok?`${imgB(lvsB())}/api/pc/vg/sheet?sid=${sid}&ri=${p.ri}&i=${si}&n=${nm}`:"";
+    H.push(`<div class="lvsT${LVS.sel&&LVS.sel.sid===sid&&LVS.sel.set.has(ix)?" on":""}${miss&&many?" wait":""}" data-q="${ix}" data-l="${L}"${u?` data-u="${u}"`:""} style="${bg}">${ok||many?"":`<img loading="lazy" alt="" src="${imgB(lvsB())}/api/pc/vg/thumb?sid=${sid}&t=${L}&h=240&s=30&near=20">`}<span>${lvsT(p.f[q])}</span></div>`);}});
   s._miss=nmiss>0;const nt=s.querySelector(".lvsWait");if(nt)nt.remove();
   {const real=s._tiles.length?Math.round((s._tiles.length-nmiss)/s._tiles.length*100):0;const row=(LVS.all||[]).find(r=>r.sid===sid);if(row){row.prx=real;if(LVS.F&&LVS.F.pv&&real<80)lvsSkipBad(sid);}}   /* TK_V0.9.41 勾了「跳過沒好的」：實際預覽圖不到八成 → 跳過 */
   if(nmiss>0&&nmiss>s._tiles.length*0.3)s.querySelector(".lvsH").insertAdjacentHTML("afterend",`<div class="lvsWait">⏳ 這場預覽圖還沒做完（${s._tiles.length-nmiss}/${s._tiles.length}），已排到背景最前面，做好會自動補上</div>`);
@@ -50385,7 +50506,7 @@ function clpDraw(){const F=CLP.F,d=CLP.d;if(!d||!CLP.root)return;const q=F.q.toL
   const g=CLP.root.querySelector("#clpG");g.innerHTML="";clpMore();}
 function clpMore(){const g=CLP.root&&CLP.root.querySelector("#clpG");if(!g)return;const old=g.querySelector(".clpMore");if(old)old.remove();const to=Math.min(CLP.L.length,CLP.n+120),H=[];
   for(;CLP.n<to;CLP.n++){const x=CLP.L[CLP.n],dt=new Date((x.t||0)*1000),p=n=>String(n).padStart(2,"0");
-    H.push(`<div class="clpC" data-i="${CLP.n}"><div class="clpIm"><img loading="lazy" alt="" src="${clpB()}/api/pc/vg/cover?sid=${x.sid}" onerror="this.style.visibility='hidden'"><i>${x.kind==="all"?`合併 ${x.n||""} 段`:`第 ${x.i||"?"} 段`}</i><b>${x.dur?clpT(x.dur):""}</b></div><div class="clpNm">${clpE(x.name||x.u)}</div><small>#${String(x.sid).padStart(5,"0")} · ${p(dt.getMonth()+1)}-${p(dt.getDate())} · ${clpGB(x.sz||0)}${x.g?` · <u>${clpE(x.g)}</u>`:""}</small></div>`);}
+    H.push(`<div class="clpC" data-i="${CLP.n}"><div class="clpIm"><img loading="lazy" alt="" src="${imgB(clpB())}/api/pc/vg/cover?sid=${x.sid}" onerror="this.style.visibility='hidden'"><i>${x.kind==="all"?`合併 ${x.n||""} 段`:`第 ${x.i||"?"} 段`}</i><b>${x.dur?clpT(x.dur):""}</b></div><div class="clpNm">${clpE(x.name||x.u)}</div><small>#${String(x.sid).padStart(5,"0")} · ${p(dt.getMonth()+1)}-${p(dt.getDate())} · ${clpGB(x.sz||0)}${x.g?` · <u>${clpE(x.g)}</u>`:""}</small></div>`);}
   g.insertAdjacentHTML("beforeend",H.join("")+(CLP.n<CLP.L.length?'<div class="clpMore">…</div>':(CLP.L.length?"":'<div class="lvsEmpty">沒有符合的片段</div>')));
   const m=g.querySelector(".clpMore");if(m&&"IntersectionObserver" in window){const io=new IntersectionObserver(es=>{if(es.some(e=>e.isIntersecting)){io.disconnect();clpMore();}},{rootMargin:"800px"});io.observe(m);}}
 function clpPlay(x){if(!x)return;let ov=document.getElementById("vgPv");if(ov&&ov._close)ov._close();else if(ov)ov.remove();ov=document.createElement("div");ov.id="vgPv";
@@ -52293,6 +52414,8 @@ SETTINGS_SPEC = [
          help='V0.7.42.048：C→I 分流、背景語音轉字幕的執行緒、補截 20 張圖，降到這個百分比，讓錄影和 FLV 轉 MP4 先跑。10%＝最慢最省；100%＝照原本各自的設定。FLV 轉 MP4 本身不降速。（清倉模式開著時，搬到 E 的速度由清倉模式決定）'),
     dict(key='rec.catchup', cat='record', label='🚚 清倉模式（盡快把 C 和 I 上待處理的都搬到 E）', kind='bool', default=True,
          help='V0.7.42.049：搬到 E 的速度提高到「SSD → HDD 傳輸速度」和 70% 取大的；先清 C（前面搬 E、後面搬 I），C 清完接著把 I 上的一場一場搬到 E；暫停把 E 上的舊 FLV 拿回 C 轉檔（那些不急）。全部搬完就跟平常一樣。狀態列會顯示還剩多少、預估多久。'),
+    dict(key='phone.fastimg', cat='tools', label='🚀 圖片快速通道（手機／網頁看截圖、預覽大圖更快）', kind='bool', default=True,
+         help='V1.1.49：在網頁的埠 +1 另外開一個只給圖片的小伺服器（多執行緒，不經過主程式畫面），回放截圖、檔案總管大圖、縮圖、頭像都走這條；在外面（https、連不到那個埠）會自動走原本的。'),
     dict(key='rec.conv_split', cat='record', label='🚀 快的先轉：直接合併的兩條同時轉，要重新壓縮的另外一條慢慢轉', kind='bool', default=True,
          help='V1.1.41：排隊時先看每部是「直接合併」（幾十秒）還是「畫面大小變了要重新壓縮」（一小時左右）。直接合併的兩條同時轉；要重新壓縮的自己一條、一次一部（顯示卡壓縮、CPU 最多 2 核），不會擋住後面一大串。轉到一半才發現要重新壓縮的，讓出來排到慢的那條下一部。關掉＝跟以前一樣全部排一條。'),
     dict(key='rec.conv_parallel', cat='record', label='⚡ C 和 I 同時各轉一部 MP4（不同硬碟）', kind='bool', default=True,

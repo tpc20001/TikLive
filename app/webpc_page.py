@@ -2003,6 +2003,11 @@ body.oldLock{overflow:hidden}
 "use strict";
 /* ================= V0.6.01 TikLive Monitor 網頁版（電腦版介面） ================= */
 const B="__BASE__";
+/* V1.1.49 🚀 圖片快速通道：同一個區網、http 時，截圖／預覽大圖／縮圖改從「網頁的埠 +1」那個多執行緒小伺服器拿（不排主程式的隊）；連不到就照原本 */
+window.FASTB=window.FASTB||"";function imgB(b){return window.FASTB||b;}
+(async function fastInit(){try{if(location.protocol!=="http:")return;const b=typeof B==="string"?B:"";const r=await fetch(b+"/api/pc/fastimg",{cache:"no-store"});if(!r.ok)return;const j=await r.json();if(!j||!j.ok||!j.on||!j.port||!j.key)return;
+  const fb=`http://${location.hostname}:${j.port}/${j.key}`;const ac=new AbortController();const tm=setTimeout(()=>ac.abort(),1500);const p=await fetch(fb+"/ping",{cache:"no-store",signal:ac.signal});clearTimeout(tm);if(p.ok&&(await p.text())==="ok")window.FASTB=fb;}catch(e){}})();
+
 /* QSK-BEGIN TK_V1.0.35 快速找：電腦按 Ctrl+K 或 /，手機按上面的 🔍；找頁面、工具、主播、場次 */
 const QSK={i:0,R:[],sq:0};
 function qsLocal(){const R=[];
@@ -4372,7 +4377,7 @@ async function vgPre(){if(VG.preBusy||!VG.root||!VG.root.isConnected||!VG.info||
     for(const pass of [0,1])for(const [sid,T0] of L){const key=`${sid}|${vgStepFor(sid)}|${H}`,n=pass?T0.length:Math.min(n1,T0.length);   /* 先把兩場的第一個畫面做好，再把整場做完 */
       for(let k=VG.preDone[key]||0;k<n;k+=2){if(!alive())return;
         const ac=VG.preAC=new AbortController();
-        const ok=await Promise.all(T0.slice(k,Math.min(n,k+2)).map(x=>fetch(`${vgB()}/api/pc/vg/thumb?sid=${sid}&t=${x.t}&h=${H}&s=${vgStepFor(sid)}&p=2`,{signal:ac.signal}).then(r=>r.ok?r.blob().then(()=>1):(r.status===404?2:0)).catch(()=>0)));
+        const ok=await Promise.all(T0.slice(k,Math.min(n,k+2)).map(x=>fetch(`${imgB(vgB())}/api/pc/vg/thumb?sid=${sid}&t=${x.t}&h=${H}&s=${vgStepFor(sid)}&p=2`,{signal:ac.signal}).then(r=>r.ok?r.blob().then(()=>1):(r.status===404?2:0)).catch(()=>0)));
         if(ok.some(v=>v===0))return;   /* 被這場搶先、或取消了：之後再接著做（V0.7.30 只是那張沒有畫面＝404，就跳過繼續，不會整個停住） */
         VG.preDone[key]=Math.min(n,k+2);}
       if(pass)vgDoneRep(sid);}}   /* 這場預載完：問電腦 30 秒預覽圖夠不夠，夠就在清單打勾 */
@@ -4413,7 +4418,7 @@ function vgPump(){const G=VG.root&&VG.root.querySelector("#vgGrid");if(!G||!VG.i
     const done=ok=>{VG.flyIm.delete(im);for(const y of grp)if(y.st===5)y.st=0;if(g!==VG.gen)return;VG.fly=Math.max(0,VG.fly-1);if(ok){x.st=2;x.h=H;if(el){const m=el.querySelector("img");m.src=im.src;el.classList.add("ok");}
         if(!VG.arSet&&im.naturalHeight){VG.arSet=true;const a=im.naturalWidth/im.naturalHeight;if(Math.abs(a-VG.ar)>0.02){VG.ar=a;G.style.setProperty("--vgar",a);}}}
       else{x.st=3;if(el)el.classList.add("bad");setTimeout(()=>{if(x.st===3&&g===VG.gen){x.st=0;vgPump();}},15000);}vgPump();};
-    im.onload=()=>done(true);im.onerror=()=>done(false);im.src=`${vgB()}/api/pc/vg/thumb?sid=${sid}&t=${x.t}&h=${H}&s=${vgStepFor(sid)}${pr?"&p=1":""}`;}}   /* p＝優先順序：0 畫面上的、1 這場其他的、2 預載下兩場（電腦那邊照順序做） */
+    im.onload=()=>done(true);im.onerror=()=>done(false);im.src=`${imgB(vgB())}/api/pc/vg/thumb?sid=${sid}&t=${x.t}&h=${H}&s=${vgStepFor(sid)}${pr?"&p=1":""}`;}}   /* p＝優先順序：0 畫面上的、1 這場其他的、2 預載下兩場（電腦那邊照順序做） */
 function vgSetCols(n){n=Math.max(2,Math.min(30,n|0));if(n===VG.cols)return;const R=VG.root,top=vgTopTile();VG.cols=n;vgLS.set("cols",n);const s=R.querySelector("#vgCols");if(s)s.value=String(VG_COLS.includes(n)?n:6);
   R.querySelector("#vgGrid").style.setProperty("--vgc",n);if(top>=0){const el=R.querySelector(`.vgT[data-i="${top}"]`);if(el)R.scrollTop=el.offsetTop-R.querySelector("#vgBar").offsetHeight;}vgPump();}
 function vgZoom(d){const i=VG_COLS.indexOf(VG.cols);vgSetCols(VG_COLS[Math.max(0,Math.min(VG_COLS.length-1,(i<0?4:i)+d))]);}
@@ -4757,7 +4762,7 @@ function hlDraw(){const R=HL.root;if(!R)return;const D=HL.d||{segs:[]},P=D.prog|
   let lastU=null;
   el.innerHTML=S.map(([x,i])=>{const mid=Math.round((x.a+x.b)/2),cl=new Date(x.at*1000),dur=x.b-x.a;
     let gh="";if(HL.ord==="u"&&x.u!==lastU){lastU=x.u;const n=S.filter(([y])=>y.u===x.u).length;gh=`<div class="hlGH" data-gu="${hlE(x.u)}" title="只看這位"><b>${hlE(x.name)}</b><small>${n} 段</small></div>`;}
-    return gh+`<div class="hlC${x.seen?" hlSeenC":""}" data-i="${i}"><div class="hlIm"><img loading="lazy" alt="" src="${hlB()}/api/pc/vg/thumb?sid=${x.sid}&t=${mid}&h=240&p=1&near=20" onerror="this.style.visibility='hidden'"><i>▶</i><em>${hlT(dur).replace(/^0:/,"")}</em></div>
+    return gh+`<div class="hlC${x.seen?" hlSeenC":""}" data-i="${i}"><div class="hlIm"><img loading="lazy" alt="" src="${imgB(hlB())}/api/pc/vg/thumb?sid=${x.sid}&t=${mid}&h=240&p=1&near=20" onerror="this.style.visibility='hidden'"><i>▶</i><em>${hlT(dur).replace(/^0:/,"")}</em></div>
 <div class="hlTx"><b class="hlCode">${hlE(x.code||"")}</b> <b>${hlE(x.name)}</b><small>${cl.getMonth()+1}/${cl.getDate()} ${hlP(cl.getHours())}:${hlP(cl.getMinutes())} · 開播後 ${hlT(x.a)}～${hlT(x.b)} · 共 ${Math.round(dur/60)} 分鐘</small><div class="hlTg"><span>🕺 跳舞</span>${x.yt&&!x.mp4?'<span class="hlYt">▶ YouTube</span>':""}${x.seen?'<span class="hlSeenB">✓ 已看</span>':""}</div></div>${x.mp4?`<button class="hlShB2 hlFxB" data-hfx="${i}" title="在檔案總管打開這場（細節、剪輯）">🎞</button>`:""}<button class="hlShB2" data-sh="${i}" title="分享這段">📤</button><button class="hlFv${x.fav?" on":""}" data-fv="${i}" title="${x.fav?"從我的最愛移除":"加到我的最愛"}">${x.fav?"★":"☆"}</button><button class="hlBk" data-bk="${i}" title="不要看這位">🚫</button></div>`;}).join("");}
 /* V0.7.42.006 回放頁：這場有 YouTube（上傳好的）就在右下角放一顆「▶ YouTube」，從現在播到的秒數打開 */
 function rpYtCur(){try{if(typeof RP!=="undefined"&&RP&&RP.d&&(location.hash||"").startsWith("#rp/"))return {d:RP.d,t:+RP.t||0};}catch(e){}
@@ -5536,7 +5541,7 @@ const htbToast=(m,ms)=>{if(typeof toast==="function")toast(m,ms);};
 async function htbGet(p){const r=await fetch(htbB()+p,{cache:"no-store"});return r.json();}
 async function htbPost(p,d){try{if(typeof kPost==="function")return await kPost(p,d);if(typeof post==="function")return await post(p,d);if(typeof deepPost==="function")return await deepPost(p,d);}catch(e){}return null;}
 function htbGrid(n){n=Math.max(1,n|0);let best=null;for(let r=1;r<=n;r++){for(let c=r;c<=n;c++){if(r*c<n)continue;if(c/r>1.6)break;const k=[r*c-n,c-r];if(!best||k[0]<best[0][0]||(k[0]===best[0][0]&&k[1]<best[0][1]))best=[k,c,r];break;}}return [best[1],best[2]];}
-const htbIm=(sid,L,h)=>`${htbB()}/api/pc/vg/thumb?sid=${sid}&t=${L}&h=${h||360}&near=20&p=1`;
+const htbIm=(sid,L,h)=>`${imgB(htbB())}/api/pc/vg/thumb?sid=${sid}&t=${L}&h=${h||360}&near=20&p=1`;
 function htbMount(root,u){HTB.root=root;HTB.u=String(u||"").replace(/^@/,"");HTB.d=null;root.classList.add("htbPage");root.innerHTML='<div class="htbEmpty">讀取中…</div>';htbLoad();}
 async function htbLoad(){if(!HTB.root||!HTB.root.isConnected)return;let d=null;try{d=await htbGet("/api/pc/htb?u="+encodeURIComponent(HTB.u));}catch(e){}
   if(!d||!d.ok){HTB.root.innerHTML=`<div class="htbEmpty">${htbE((d&&d.message)||"讀取失敗")}</div>`;return;}HTB.d=d;htbDraw();
@@ -5779,7 +5784,7 @@ function lvsApply(keepSid){setTimeout(lvsNvAllPaint,0);const F=LVS.F,sk=(typeof 
     &&(F.cat==="*"||(r.cat||"")===F.cat)&&(!F.g.length||LVS.kind==="nv"||F.g.includes(r.g||"-"))&&(!F.pv||LVS.kind==="nv"||(r.prx!=null?r.prx>=80:r.pr!=null?r.pr>=80:(r.pv===1||r.s2===1))));   /* TK_V0.9.41 打開過的場次用實際拿到的預覽圖（prx）判斷 */   /* TK_V0.8.96 預覽圖實際有八成以上（照真的拿得到的圖算） */
   LVS.Lb=L;const L2=F.lvf?L.filter(r=>lvsLvKey(r)===F.lvf):L;   /* TK_V0.8.97 網頁版：左邊等級格子（全部／未分級／−2…+2）再篩一次 */
   if(LVS.sel&&LVS.sel.set.size)lvsSelClear();LVS.L=L2;const c=LVS.root.querySelector("#lvsCnt");if(c)c.textContent=LVS.pc?`${L.length} 場${L.length!==(LVS.all||[]).length?`（共 ${(LVS.all||[]).length}）`:""} · 按等級＝存好跳下一場；沒按就滑到下一場＝上一場自動 −2`:`${L.length}/${(LVS.all||[]).length} 場`;
-  LVS.strip.innerHTML=LVS.L.map((r,i)=>LVS.pc&&typeof lvpCard==="function"?lvpCard(r,i):`<div class="lvsSI" data-i="${i}"><img loading="lazy" alt="" src="${lvsB()}/api/pc/vg/cover?sid=${r.sid}" onerror="this.style.visibility='hidden'"><em class="lvsSG"></em><span>${lvsE(r.name)}</span></div>`).join("");LVS.L.forEach((r,i)=>lvsStripPaint(i));
+  LVS.strip.innerHTML=LVS.L.map((r,i)=>LVS.pc&&typeof lvpCard==="function"?lvpCard(r,i):`<div class="lvsSI" data-i="${i}"><img loading="lazy" alt="" src="${imgB(lvsB())}/api/pc/vg/cover?sid=${r.sid}" onerror="this.style.visibility='hidden'"><em class="lvsSG"></em><span>${lvsE(r.name)}</span></div>`).join("");LVS.L.forEach((r,i)=>lvsStripPaint(i));
   if(LVS.pc&&typeof lvpSum==="function"){lvpSum();if((LVS.all||[]).some(r=>r.nep>0)&&typeof lvpPoll==="function")lvpPoll();}else lvsSumPaint();
   if(!LVS.L.length){LVS.box.innerHTML='<div class="lvsEmpty">沒有符合的場次</div>';return;}
   const st=keepSid?LVS.L.findIndex(r=>r.sid===keepSid):-1;lvsJump(Math.max(0,st));}
@@ -5793,7 +5798,7 @@ function lvsPre(ci){LVS.pf=LVS.pf||{};LVS.pfI=LVS.pfI||{};LVS.pfImg=LVS.pfImg||n
   want.forEach(sid=>{if(!LVS.pf[sid])LVS.pfQ.push({k:"i",sid});});
   const run=async()=>{if(LVS.pfRun>=4)return;const it=LVS.pfQ.shift();if(!it)return;LVS.pfRun=(LVS.pfRun||0)+1;
     try{if(it.k==="i"){if(!LVS.pf[it.sid]){LVS.pf[it.sid]=1;const [I,Inf]=await Promise.all([lvsGet("/api/pc/vg/sheetinfo?sid="+it.sid).catch(()=>null),lvsGet("/api/pc/vg/info?sid="+it.sid).catch(()=>null)]);
-        if(I){LVS.pfI[it.sid]={I,Inf,t:Date.now()};const ims=[];((I.parts)||[]).forEach(p=>{if(!p.ok)return;const nm=p.n-(p.m||[]).length;for(let si=0;si<((LVS.pfN[it.sid]??9)<5?(p.sheets||1):Math.min(3,p.sheets||1));si++)ims.push({k:"s",sid:it.sid,u:`${lvsB()}/api/pc/vg/sheet?sid=${it.sid}&ri=${p.ri}&i=${si}&n=${nm}`});});
+        if(I){LVS.pfI[it.sid]={I,Inf,t:Date.now()};const ims=[];((I.parts)||[]).forEach(p=>{if(!p.ok)return;const nm=p.n-(p.m||[]).length;for(let si=0;si<((LVS.pfN[it.sid]??9)<5?(p.sheets||1):Math.min(3,p.sheets||1));si++)ims.push({k:"s",sid:it.sid,u:`${imgB(lvsB())}/api/pc/vg/sheet?sid=${it.sid}&ri=${p.ri}&i=${si}&n=${nm}`});});
           const at=LVS.pfQ.findIndex(x=>x.k==="i");LVS.pfQ.splice(at<0?LVS.pfQ.length:at,0,...ims.slice(0,3));const r_=ims.slice(3);if((LVS.pfN[it.sid]??9)<5){const at2=LVS.pfQ.findIndex(x=>x.k==="s"&&(LVS.pfN[x.sid]??9)>=5);LVS.pfQ.splice(at2<0?LVS.pfQ.length:at2,0,...r_);}else LVS.pfQ.push(...r_);}else LVS.pf[it.sid]=0;}}
       else if(!LVS.pfImg.has(it.u)){await new Promise(res=>{const im=new Image();im.onload=im.onerror=()=>res();im.src=it.u;LVS.pfImg.set(it.u,im);});
         if(LVS.pfImg.size>400){const k=LVS.pfImg.keys().next().value;LVS.pfImg.delete(k);}}}catch(e){}
@@ -5837,8 +5842,8 @@ async function lvsBuild(s,refresh){s._built=true;const sid=+s.dataset.sid;let I=
   P.forEach(p=>{const k=kp(p)*cap,ps=p.step||I.step||30,M=new Set(p.m||[]),many=M.size>p.n*0.3,nm=p.n-M.size;s._step=ps*k;
     for(let q=0;q<p.n;q+=k){const si=Math.floor(q/per),r=q%per,cx=r%C,cy=Math.floor(r/C),L=p.L[q],ix=s._tiles.length;s._tiles.push({ri:p.ri,t:L,f:p.f[q],st:ps*k});
     const miss=M.has(q),ok=p.ok&&!miss;if(miss)nmiss++;   /* 這格還沒有預覽圖：少的話單張去要；很多就等背景做（照你清單的順序先做） */
-    const bg=ok?`background-size:${C*100}% ${Rw*100}%;background-position:${cx*100/(C-1)}% ${cy*100/(Rw-1)}%`:"",u=ok?`${lvsB()}/api/pc/vg/sheet?sid=${sid}&ri=${p.ri}&i=${si}&n=${nm}`:"";
-    H.push(`<div class="lvsT${LVS.sel&&LVS.sel.sid===sid&&LVS.sel.set.has(ix)?" on":""}${miss&&many?" wait":""}" data-q="${ix}" data-l="${L}"${u?` data-u="${u}"`:""} style="${bg}">${ok||many?"":`<img loading="lazy" alt="" src="${lvsB()}/api/pc/vg/thumb?sid=${sid}&t=${L}&h=240&s=30&near=20">`}<span>${lvsT(p.f[q])}</span></div>`);}});
+    const bg=ok?`background-size:${C*100}% ${Rw*100}%;background-position:${cx*100/(C-1)}% ${cy*100/(Rw-1)}%`:"",u=ok?`${imgB(lvsB())}/api/pc/vg/sheet?sid=${sid}&ri=${p.ri}&i=${si}&n=${nm}`:"";
+    H.push(`<div class="lvsT${LVS.sel&&LVS.sel.sid===sid&&LVS.sel.set.has(ix)?" on":""}${miss&&many?" wait":""}" data-q="${ix}" data-l="${L}"${u?` data-u="${u}"`:""} style="${bg}">${ok||many?"":`<img loading="lazy" alt="" src="${imgB(lvsB())}/api/pc/vg/thumb?sid=${sid}&t=${L}&h=240&s=30&near=20">`}<span>${lvsT(p.f[q])}</span></div>`);}});
   s._miss=nmiss>0;const nt=s.querySelector(".lvsWait");if(nt)nt.remove();
   {const real=s._tiles.length?Math.round((s._tiles.length-nmiss)/s._tiles.length*100):0;const row=(LVS.all||[]).find(r=>r.sid===sid);if(row){row.prx=real;if(LVS.F&&LVS.F.pv&&real<80)lvsSkipBad(sid);}}   /* TK_V0.9.41 勾了「跳過沒好的」：實際預覽圖不到八成 → 跳過 */
   if(nmiss>0&&nmiss>s._tiles.length*0.3)s.querySelector(".lvsH").insertAdjacentHTML("afterend",`<div class="lvsWait">⏳ 這場預覽圖還沒做完（${s._tiles.length-nmiss}/${s._tiles.length}），已排到背景最前面，做好會自動補上</div>`);
@@ -6123,7 +6128,7 @@ async function lvpUndo(){const A=(LVS.autoL||[]).slice();if(!A.length)return;if(
     const s=LVS.box.querySelector(`.lvsS[data-sid="${a.sid}"]`);if(s){s._lv=false;s.classList.remove("done");s.querySelectorAll("[data-lv]").forEach(x=>x.classList.toggle("on",a.prev!=null&&+x.dataset.lv===a.prev));}const i=LVS.L.findIndex(x=>x.sid===a.sid);if(i>=0)lvsStripPaint(i);}}
   LVS.autoL=[];LVS.auto=0;const au=document.getElementById("lvsAuto");if(au)au.textContent="";lvpSum();lvpCur(LVS.cur);lvsToast(`↩ 改回 ${n} 場`);}
 /* 左邊卡片 */
-function lvpCard(r,i){return `<div class="lvsSI lvpC" data-i="${i}"><div class="lvpIm"><img loading="lazy" alt="" src="${lvsB()}/api/pc/vg/cover?sid=${r.sid}" onerror="this.style.visibility='hidden'"><em class="lvsSG"></em><i class="lvpE"></i><b class="lvpDu">${lvsT(r.dur).replace(/^0:/,"")}</b></div><div class="lvpNm">${lvsE(r.name)}</div>${lvsNvl(r)}<small>${lvsSidL(r.sid)} · ${lvsD(r.t)} · ${lvpGB(r.mb)}${r.g?` · <u>${lvsE(r.g)}</u>`:""}</small></div>`;}
+function lvpCard(r,i){return `<div class="lvsSI lvpC" data-i="${i}"><div class="lvpIm"><img loading="lazy" alt="" src="${imgB(lvsB())}/api/pc/vg/cover?sid=${r.sid}" onerror="this.style.visibility='hidden'"><em class="lvsSG"></em><i class="lvpE"></i><b class="lvpDu">${lvsT(r.dur).replace(/^0:/,"")}</b></div><div class="lvpNm">${lvsE(r.name)}</div>${lvsNvl(r)}<small>${lvsSidL(r.sid)} · ${lvsD(r.t)} · ${lvpGB(r.mb)}${r.g?` · <u>${lvsE(r.g)}</u>`:""}</small></div>`;}
 function lvpCardEx(it,r){const e=it.querySelector(".lvpE");if(!e)return;const n=+r.ne||0,p=+r.nep||0;e.textContent=n?`✂ 初剪 ${n} ${p?"−":"✔"}`:"✂ −";e.classList.toggle("on",n>0&&!p);e.classList.toggle("run",p>0);   /* TK_V0.9.03 輸出中＝橘色 −；好了＝綠色 ✔ */
   it.classList.toggle("eRun",p>0);it.classList.toggle("eOk",n>0&&!p);it.style.setProperty("--lc",r.lv==null?"transparent":LVSC[String(r.lv)][2]);}
 /* 有在輸出的：每 6 秒問一次，做完就改成綠色 ✔ */
@@ -6190,7 +6195,7 @@ function clpDraw(){const F=CLP.F,d=CLP.d;if(!d||!CLP.root)return;const q=F.q.toL
   const g=CLP.root.querySelector("#clpG");g.innerHTML="";clpMore();}
 function clpMore(){const g=CLP.root&&CLP.root.querySelector("#clpG");if(!g)return;const old=g.querySelector(".clpMore");if(old)old.remove();const to=Math.min(CLP.L.length,CLP.n+120),H=[];
   for(;CLP.n<to;CLP.n++){const x=CLP.L[CLP.n],dt=new Date((x.t||0)*1000),p=n=>String(n).padStart(2,"0");
-    H.push(`<div class="clpC" data-i="${CLP.n}"><div class="clpIm"><img loading="lazy" alt="" src="${clpB()}/api/pc/vg/cover?sid=${x.sid}" onerror="this.style.visibility='hidden'"><i>${x.kind==="all"?`合併 ${x.n||""} 段`:`第 ${x.i||"?"} 段`}</i><b>${x.dur?clpT(x.dur):""}</b></div><div class="clpNm">${clpE(x.name||x.u)}</div><small>#${String(x.sid).padStart(5,"0")} · ${p(dt.getMonth()+1)}-${p(dt.getDate())} · ${clpGB(x.sz||0)}${x.g?` · <u>${clpE(x.g)}</u>`:""}</small></div>`);}
+    H.push(`<div class="clpC" data-i="${CLP.n}"><div class="clpIm"><img loading="lazy" alt="" src="${imgB(clpB())}/api/pc/vg/cover?sid=${x.sid}" onerror="this.style.visibility='hidden'"><i>${x.kind==="all"?`合併 ${x.n||""} 段`:`第 ${x.i||"?"} 段`}</i><b>${x.dur?clpT(x.dur):""}</b></div><div class="clpNm">${clpE(x.name||x.u)}</div><small>#${String(x.sid).padStart(5,"0")} · ${p(dt.getMonth()+1)}-${p(dt.getDate())} · ${clpGB(x.sz||0)}${x.g?` · <u>${clpE(x.g)}</u>`:""}</small></div>`);}
   g.insertAdjacentHTML("beforeend",H.join("")+(CLP.n<CLP.L.length?'<div class="clpMore">…</div>':(CLP.L.length?"":'<div class="lvsEmpty">沒有符合的片段</div>')));
   const m=g.querySelector(".clpMore");if(m&&"IntersectionObserver" in window){const io=new IntersectionObserver(es=>{if(es.some(e=>e.isIntersecting)){io.disconnect();clpMore();}},{rootMargin:"800px"});io.observe(m);}}
 function clpPlay(x){if(!x)return;let ov=document.getElementById("vgPv");if(ov&&ov._close)ov._close();else if(ov)ov.remove();ov=document.createElement("div");ov.id="vgPv";
@@ -6862,7 +6867,7 @@ setInterval(()=>{if(!document.hidden)pupAskCheck();},10*60*1000);document.addEve
 const SN={L:[],sid:0,box:null,seek:null,clk:null,cur:-1,t:0,view:0,lay:[4,5],mp4:false,time:true,fy:0,u:""};
 const snB=()=>(typeof B==="string"?B:"");
 const snHms=s=>{s=Math.max(0,Math.floor(+s||0));const p=n=>String(n).padStart(2,"0");return `${Math.floor(s/3600)}:${p(Math.floor(s%3600/60))}:${p(s%60)}`;};
-function snUrl(i){const x=SN.L[i];return x?`${snB()}/snap/${SN.sid}/${x[1]}`:"";}
+function snUrl(i){const x=SN.L[i];return x?`${imgB(snB())}/snap/${SN.sid}/${x[1]}`:"";}
 function snIdx(t){const L=SN.L;let lo=0,hi=L.length;while(lo<hi){const m=(lo+hi)>>1;if(L[m][0]<=t+1)lo=m+1;else hi=m;}return Math.max(0,lo-1);}
 function snMount(box,sid,L,seek,clk,lay){SN.L=(L||[]).slice();SN.sid=sid;SN.seek=seek;SN.clk=clk;SN.cur=-1;SN.t=0;SN.box=box;SN.view=0;SN.lay=(lay&&lay.length===2)?lay:[4,5];SN.mp4=false;if(!box)return false;
   try{const t=localStorage.getItem("tlm_sntime");SN.lab=t==="0"||t==="n"?"n":t==="x"?"x":"t";SN.gap=+(localStorage.getItem("tlm_sngap")??2);if(!isFinite(SN.gap))SN.gap=2;SN.zh=localStorage.getItem("tlm_snzh")||"r";SN.zv=localStorage.getItem("tlm_snzv")||"d";}catch(e){SN.lab="t";SN.gap=2;SN.zh="r";SN.zv="d";}
@@ -7152,7 +7157,7 @@ function gaPv(){const I=gaUsed();if(!I.length)return;let pv=document.getElementB
   const draw=()=>{const L=gaLay(),N=I.length,LY=gaLayouts(N);if(!LY.some(x=>x.C===GA.C))GA.C=LY[0].C;const C=GA.C,R=Math.ceil(N/C);
     const W=Math.min(innerWidth-44,900),cw=W/(C+(C-1)*L.gap),ch=cw*L.ratio,gp=L.gap*cw,TW=C*cw+(C-1)*gp,TH=R*ch+(R-1)*gp;
     pv.innerHTML=`<div class="gaPvB"><div class="gaPvH"><b>👁 ${C}×${R}</b><span style="flex:1"></span><button class="gaPvGo" data-pgo="1">▶ 就這樣輸出</button><button class="pill" data-px="1">✕</button></div>
-<div class="gaPvC" style="width:${TW}px;height:${TH}px">${I.map((it,i)=>{const c=i%C,r=Math.floor(i/C);return `<div class="gaPvT" style="left:${c*(cw+gp)}px;top:${r*(ch+gp)}px;width:${cw}px;height:${ch}px;z-index:${gaZ(c,r,L)}"><img loading="lazy" alt="" style="object-position:50% ${50-L.fy}%" src="${gaB()}/api/pc/vg/thumb?sid=${GA.sid}&t=${gaHit(it).toFixed(1)}&h=360&p=1"></div>`;}).join("")}</div><div class="gaPvDr" data-pdrag="1">⇕ 按住上下拉調高矮（${gaRt(L.ratio)}）</div>
+<div class="gaPvC" style="width:${TW}px;height:${TH}px">${I.map((it,i)=>{const c=i%C,r=Math.floor(i/C);return `<div class="gaPvT" style="left:${c*(cw+gp)}px;top:${r*(ch+gp)}px;width:${cw}px;height:${ch}px;z-index:${gaZ(c,r,L)}"><img loading="lazy" alt="" style="object-position:50% ${50-L.fy}%" src="${imgB(gaB())}/api/pc/vg/thumb?sid=${GA.sid}&t=${gaHit(it).toFixed(1)}&h=360&p=1"></div>`;}).join("")}</div><div class="gaPvDr" data-pdrag="1">⇕ 按住上下拉調高矮（${gaRt(L.ratio)}）</div>
 <div class="gaPvK"><div class="snMosR"><span>排版</span>${LY.map(x=>`<button data-pc="${x.C}" class="${x.C===C?"on":""}">${x.C}×${x.R}${x.fill?`（空 ${x.fill}）`:""}</button>`).join("")}</div>
 <div class="snMosR"><span>形狀</span>${[[16/9,"直 9:16"],[4/3,"3:4"],[1,"1:1"],[3/4,"4:3"],[9/16,"橫 16:9"]].map(([v,t])=>`<button data-prt="${v}" class="${Math.abs(L.ratio-v)<0.02?"on":""}">${t}</button>`).join("")}</div>
 <div class="snMosR"><span>間距</span><input type="range" min="-40" max="20" step="1" value="${Math.round(L.gap*100)}" data-pg="1"><b>${Math.round(L.gap*100)}%</b><small>負的＝交疊</small></div>
@@ -7189,7 +7194,7 @@ function snSelOpen(sid,R){const L=R.pickL,need=R.need||Math.round(L.length/2),co
   const draw=()=>{const k=sel.size,rows=Math.max(1,Math.ceil(k/cols));
     ov.innerHTML=`<div class="snSelW"><div class="snSelH"><b>挑截圖：要 ${need} 張</b><span class="${k===need?"ok":"warn"}">已選 ${k} / ${need}</span><button data-ss="x">✕</button></div>
 <div class="snSelN">已經先平均選好 ${need} 張（亮的）。點一下取消有擋住、拍糊的，再點旁邊的補上。${k!==need?`<br>選 ${k} 張也可以：版面會變成 ${snFitLay(k,cols).join(" 列 × ")} 欄${snFitLay(k,cols)[0]*snFitLay(k,cols)[1]>k?"（排不滿，最後一列會空）":"（剛好排滿）"}，之後還能換。`:""}</div>
-<div class="snSelG">${L.map((x,i)=>`<div class="snSelC${sel.has(i)?" on":""}" data-si="${i}"><img loading="lazy" alt="" src="${snB()}/snap/${sid}/${x[1]}"><b>${tm(x)}</b>${sel.has(i)?"<i>✔</i>":""}</div>`).join("")}</div>
+<div class="snSelG">${L.map((x,i)=>`<div class="snSelC${sel.has(i)?" on":""}" data-si="${i}"><img loading="lazy" alt="" src="${imgB(snB())}/snap/${sid}/${x[1]}"><b>${tm(x)}</b>${sel.has(i)?"<i>✔</i>":""}</div>`).join("")}</div>
 <div class="snSelB"><button data-ss="all">全選</button><button data-ss="none">全不選</button><button data-ss="even">平均選 ${need} 張</button><span style="flex:1"></span><button data-ss="cancel">不挑了</button><button class="snPkGo" data-ss="go"${k?"":" disabled"}>✔ 用這 ${k} 張</button></div></div>`;};
   draw();
   ov.onclick=async e=>{const c=e.target.closest("[data-si]");if(c){const i=+c.dataset.si;if(sel.has(i))sel.delete(i);else sel.add(i);   /* TK_V1.0.74 只改這一格（不整片重畫：手機上 200 多張不會閃、不會重新載圖） */
