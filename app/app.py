@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.56"
+APP_VERSION = "1.1.57"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -44870,6 +44870,10 @@ async function viewHist(onlyU){S.honly=onlyU;
   /* V1.1.50 手指一碰到某一場就先開始載（點下去時多半已經好了）；清單畫好 1 秒後先載最上面兩場 */
   $("#list").addEventListener("pointerdown",e=>{const r=e.target.closest(".hr");if(r&&r.dataset.id)try{rpWarm(+r.dataset.id,()=>true);}catch(x){}},{passive:true});
   setTimeout(()=>{if(!$("#list"))return;[...document.querySelectorAll("#list .hr[data-id]")].slice(0,2).forEach(r=>{try{rpWarm(+r.dataset.id,()=>!!$("#list"));}catch(x){}});},1000);
+  /* V1.1.57 捲到哪、停在畫面上超過 0.8 秒的場次：先把資料載好（不抓截圖；一次一場、一分鐘最多 12 場） */
+  try{const L=$("#list"),q=[],seen=new Set();let run=false,cnt=0,cT=Date.now();const pump=async()=>{if(run)return;run=true;while(q.length&&$("#list")===L){if(Date.now()-cT>60000){cT=Date.now();cnt=0;}if(cnt>=12){await new Promise(r=>setTimeout(r,3000));continue;}const id=q.shift();cnt++;try{await rpWarm(id,()=>$("#list")===L,true);}catch(x){}}run=false;};
+    const io=new IntersectionObserver(es=>es.forEach(en=>{const r=en.target,id=+r.dataset.id;if(en.isIntersecting){r._iv=setTimeout(()=>{if(seen.has(id)||!L.isConnected)return;seen.add(id);q.push(id);pump();},800);}else clearTimeout(r._iv);}),{threshold:0.6});
+    L.querySelectorAll(".hr[data-id]").forEach(r=>io.observe(r));new MutationObserver(()=>L.querySelectorAll(".hr[data-id]").forEach(r=>{if(!r._io){r._io=1;io.observe(r);}})).observe(L,{childList:true,subtree:true});}catch(x){}
   const bindCat=()=>{const cs=$("#catSel");if(cs)cs.onchange=e=>{S.hcat=e.target.value;drawHist(onlyU);histReload(onlyU);};};bindCat();
   catsLoad().then(()=>{const sl=$("#catSlot");if(sl){sl.innerHTML=catFilterHtml();bindCat();}if($("#list")&&S.hist)drawHist(onlyU);});      // V0.5.73 category dots + filter
   if(S.hist&&(S.histU||"")===(onlyU||""))drawHist(onlyU);else $("#list").innerHTML='<div class="empty">載入中…</div>';
@@ -46504,10 +46508,11 @@ const RPC=new Map(),RPI=[];
 async function rpGet(id){id=+id;const c=RPC.get(id);if(c&&c.d&&Date.now()-c.t<300000){RPC.delete(id);return c.d;}   /* V1.1.53 直接拿走（不再複製一份，大場次省 20～70 ms）；離開這場時放回去 */
   if(c&&c.p){RPC.delete(id);return c.p;}
   const d=await J("/api/replay?id="+id);if(d&&d.id&&d.ended){RPC.set(id,{d,t:Date.now()});while(RPC.size>12)RPC.delete(RPC.keys().next().value);}return d;}
-async function rpWarm(id,ok){id=+id;ok=ok||(()=>true);let d=null;const c=RPC.get(id);   /* V1.1.50 一場先載好：資料＋小請求＋截圖（ok() 變 false 就停） */
+async function rpWarm(id,ok,noSnap){id=+id;ok=ok||(()=>true);let d=null;const c=RPC.get(id);   /* V1.1.50 一場先載好：資料＋小請求＋截圖（ok() 變 false 就停） */
   if(c&&c.d&&Date.now()-c.t<300000)d=c.d;else if(c&&c.p){try{d=await c.p;}catch(e){return;}}else{try{const p=J("/api/replay?id="+id);RPC.set(id,{p,t:0});d=await p;}catch(e){RPC.delete(id);return;}
     if(d&&d.id&&d.ended){RPC.set(id,{d,t:Date.now()});while(RPC.size>16)RPC.delete(RPC.keys().next().value);}else{RPC.delete(id);return;}}
   try{pfmWarm(id);}catch(e){}
+  if(noSnap)return;
   const sn=(d.snaps||[]).slice(0,60);for(let k=0;k<sn.length;k+=12){if(!ok()||document.hidden)return;await Promise.all(sn.slice(k,k+12).map(x=>new Promise(res=>{const im=new Image();im.onload=im.onerror=()=>res();im.src=`${imgB(snB())}/snap/${id}/${x[1]}`+(window.FASTB?"?w="+snW():"");RPI.push(im);})));}
   while(RPI.length>600)RPI.shift();}
 /* V1.1.55 換場速度顯示（‹ › 中間那格的下面）：資料幾秒、第一頁截圖幾秒好、有沒有走快速通道、是不是預載過 */
