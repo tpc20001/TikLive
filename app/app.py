@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.49"
+APP_VERSION = "1.1.50"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -30254,11 +30254,32 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     if not P or P[0] != key: self._send(404, b'not found', 'text/plain'); return
                     P = P[1:]; rest = '/'.join(P); cache = 86400; get = None
                     if rest == 'ping': self._send(200, b'ok', 'text/plain'); return
+                    jf = None; sid_ = int(q.get('sid', q.get('id', '0')) or 0)          # V1.1.50 唯讀的資料也走這條（回放、檔案總管打開一場要的那幾個）
+                    if rest == 'api/replay':
+                        raw, gzb = win._replay_body(sid_); acc = 'gzip' in str(self.headers.get('Accept-Encoding', ''))
+                        self.send_response(200); self.send_header('Content-Type', 'application/json; charset=utf-8'); self.send_header('Access-Control-Allow-Origin', '*'); self.send_header('Cache-Control', 'no-store')
+                        b_ = gzb if (acc and gzb) else raw
+                        if acc and gzb: self.send_header('Content-Encoding', 'gzip')
+                        self.send_header('Content-Length', str(len(b_))); self.end_headers(); self.wfile.write(b_); return
+                    if rest == 'api/pc/vg/sheetinfo': jf = lambda: win._vg_sheet_info(sid_)
+                    elif rest == 'api/pc/vg/info': jf = lambda: win._vg_info(sid_)
+                    elif rest == 'api/pc/hist/strip': jf = lambda: {'ok': True, 'ranges': [r[:2] for r in win._hist_ranges(sid_)]}
+                    elif rest == 'api/pc/edit/list': jf = lambda: {'sid': sid_, 'projects': win._edit_projects_cx(sid_)}
+                    elif rest == 'api/pc/vb/note': jf = lambda: win._snote_get(sid_)
+                    elif rest == 'api/pc/stt/sub': v_ = str(q.get('v', '') or ''); jf = lambda: win._stt_sub(sid_, v_)
+                    if jf is not None:
+                        with sem: r_ = jf()
+                        b_ = json.dumps(_json_safe(r_), ensure_ascii=False).encode('utf-8'); acc = 'gzip' in str(self.headers.get('Accept-Encoding', ''))
+                        self.send_response(200); self.send_header('Content-Type', 'application/json; charset=utf-8'); self.send_header('Access-Control-Allow-Origin', '*'); self.send_header('Cache-Control', 'no-store')
+                        if acc and len(b_) > 2048:
+                            import gzip as _gz; b_ = _gz.compress(b_, 5); self.send_header('Content-Encoding', 'gzip')
+                        self.send_header('Content-Length', str(len(b_))); self.end_headers(); self.wfile.write(b_); return
                     if len(P) == 3 and P[0] == 'snap' and P[1].isdigit(): sid_, nm_ = int(P[1]), P[2]; get = lambda: win._snap_file(sid_, nm_); cache = 86400 * 7
                     elif len(P) == 2 and P[0] == 'avatar': u_ = P[1]; get = lambda: avatar_path(u_)
                     elif rest == 'api/pc/vg/sheet':
                         sid_ = int(q.get('sid', '0') or 0); ri_ = int(q.get('ri', '0') or 0); si_ = int(q.get('i', '0') or 0); get = lambda: win._vg_sheet(sid_, ri_, si_)
                     elif rest == 'api/pc/vg/cover': sid_ = int(q.get('sid', '0') or 0); get = lambda: win._vg_cover_fast(sid_)
+                    elif rest == 'api/pc/hist/thumb': t_ = float(q.get('t', '0') or 0); get = lambda: win._hist_thumb(sid_, t_)
                     elif rest == 'api/pc/vg/thumb':
                         sid_ = int(q.get('sid', '0') or 0); t_ = float(q.get('t', '0') or 0); h_ = int(q.get('h', '360') or 360); p_ = int(q.get('p', '0') or 0); s_ = int(q.get('s', '0') or 0)
                         nr_ = max(0, min(60, int(q.get('near', '0') or 0))); hh = 720 if h_ >= 720 else 360 if h_ >= 360 else 240
@@ -30298,6 +30319,11 @@ $r | ConvertTo-Json -Depth 4 -Compress
         except Exception: pass
 
     def _replay_bytes(self, sid, gz):
+        raw, gzb = self._replay_body(sid)
+        body, ex = (gzb, 'Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n') if (gz and gzb) else (raw, '')
+        return (f'HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {len(body)}\r\nCache-Control: no-store\r\n{ex}Connection: close\r\n\r\n').encode('ascii') + body
+
+    def _replay_body(self, sid):
         """V1.1.49 回放資料：JSON＋gzip 在背景做好；已下播的場次留 3 分鐘（前後幾場預載時，真的打開就不用再算一次）."""
         c = self.__dict__.setdefault('_rpb_c', {}); now = time.time(); x = c.get(int(sid))
         if x and now - x[0] < 180: raw, gzb = x[1], x[2]
@@ -30310,8 +30336,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 c[int(sid)] = (now, raw, gzb)
                 if len(c) > 24:
                     for k in sorted(c, key=lambda k: c[k][0])[:len(c) - 24]: c.pop(k, None)
-        body, ex = (gzb, 'Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n') if (gz and gzb) else (raw, '')
-        return (f'HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {len(body)}\r\nCache-Control: no-store\r\n{ex}Connection: close\r\n\r\n').encode('ascii') + body
+        return raw, gzb
 
     def _img_bg_send(self, sock, getter, cache=86400, ctype='image/jpeg'):
         """V1.1.49 圖片：背景找檔＋讀檔（最多同時 8 個），有 ETag（瀏覽器問有沒有變 → 304），畫面執行緒只寫出去."""
@@ -44267,7 +44292,7 @@ nav button,nav button.tbg,nav button.tset{flex:1 0 auto;white-space:nowrap;overf
 const B="__BASE__";
 /* V1.1.49 🚀 圖片快速通道：同一個區網、http 時，截圖／預覽大圖／縮圖改從「網頁的埠 +1」那個多執行緒小伺服器拿（不排主程式的隊）；連不到就照原本 */
 window.FASTB=window.FASTB||"";function imgB(b){return window.FASTB||b;}
-(async function fastInit(){try{if(location.protocol!=="http:")return;const b=typeof B==="string"?B:"";const r=await fetch(b+"/api/pc/fastimg",{cache:"no-store"});if(!r.ok)return;const j=await r.json();if(!j||!j.ok||!j.on||!j.port||!j.key)return;
+window.FASTP=(async function fastInit(){try{if(location.protocol!=="http:")return;const b=typeof B==="string"?B:"";const r=await fetch(b+"/api/pc/fastimg",{cache:"no-store"});if(!r.ok)return;const j=await r.json();if(!j||!j.ok||!j.on||!j.port||!j.key)return;
   const fb=`http://${location.hostname}:${j.port}/${j.key}`;const ac=new AbortController();const tm=setTimeout(()=>ac.abort(),1500);const p=await fetch(fb+"/ping",{cache:"no-store",signal:ac.signal});clearTimeout(tm);if(p.ok&&(await p.text())==="ok")window.FASTB=fb;}catch(e){}})();
 
 /* QSK-BEGIN TK_V1.0.35 快速找：電腦按 Ctrl+K 或 /，手機按上面的 🔍；找頁面、工具、主播、場次 */
@@ -44407,9 +44432,14 @@ async function J(p){const r=await fetch(B+p,{cache:"no-store"});if(r.status===40
 /* V1.1.49 回放打開時那幾個小請求（縮圖列、筆記、剪輯清單、字幕、截圖資訊…）：預載過的 90 秒內直接用，不再跟電腦要；有任何寫入（POST）就全部清掉 */
 (function(){if(window.PFM)return;const of=window.fetch.bind(window),M=new Map(),pat=/\/api\/pc\/(hist\/strip\?|vb\/note\?|edit\/list\?|stt\/sub\?id=\d+$|snap\/info\?|gfx$|novideo$)/;window.PFM=M;
   const key=u=>{const i=u.indexOf("/api/pc/");return i<0?u:u.slice(i);},mk=r=>new Response(r.b,{status:r.s,headers:r.h});
+  const FJ=/\/api\/(replay\?id=|pc\/vg\/sheetinfo\?|pc\/vg\/info\?|pc\/hist\/strip\?|pc\/edit\/list\?|pc\/vb\/note\?|pc\/stt\/sub\?id=\d+$)/;   /* V1.1.50 這幾個唯讀資料走快速通道 */
+  const of0=of;const ofx=(u,o)=>{try{const url=typeof u==="string"?u:"";const b=typeof B==="string"?B:"";
+      if(!window.FASTB&&window.FASTP&&!window.FASTD&&url&&FJ.test(url))return Promise.race([window.FASTP,new Promise(r=>setTimeout(r,700))]).then(()=>{window.FASTD=1;return ofx(u,o);});   /* 剛打開：等快速通道確認（最多 0.7 秒） */
+      if(window.FASTB&&url&&FJ.test(url)&&(url.startsWith(b+"/api/")||url.startsWith("/api/"))){const p=url.slice(url.indexOf("/api/"));
+      return of0(window.FASTB+p,{cache:"no-store"}).then(r=>r.ok?r:of0(u,o)).catch(()=>of0(u,o));}}catch(e){}return of0(u,o);};
   window.fetch=function(u,o){let url="";try{url=typeof u==="string"?u:(u&&u.url)||"";}catch(e){}const m=String((o&&o.method)||(u&&u.method)||"GET").toUpperCase();
-    if(m!=="GET"){M.clear();return of(u,o);}if(!pat.test(url))return of(u,o);const k=key(url),x=M.get(k);if(x&&Date.now()-x.t<90000)return x.p.then(mk);
-    const p=of(u,o).then(async r=>({b:await r.arrayBuffer(),s:r.status,h:[...r.headers]}));M.set(k,{t:Date.now(),p});p.then(r=>{if(r.s!==200)M.delete(k);},()=>M.delete(k));while(M.size>400)M.delete(M.keys().next().value);return p.then(mk);};
+    if(m!=="GET"){M.clear();return of(u,o);}if(!pat.test(url))return ofx(u,o);const k=key(url),x=M.get(k);if(x&&Date.now()-x.t<90000)return x.p.then(mk);
+    const p=ofx(u,o).then(async r=>({b:await r.arrayBuffer(),s:r.status,h:[...r.headers].filter(h=>!/^content-encoding$|^content-length$/i.test(h[0]))}));M.set(k,{t:Date.now(),p});p.then(r=>{if(r.s!==200)M.delete(k);},()=>M.delete(k));while(M.size>400)M.delete(M.keys().next().value);return p.then(mk);};
   window.pfmWarm=function(sid){const b=typeof B==="string"?B:"";["/api/pc/hist/strip?sid=","/api/pc/vb/note?sid=","/api/pc/edit/list?sid=","/api/pc/stt/sub?id=","/api/pc/snap/info?sid="].forEach(p=>{window.fetch(b+p+sid,{cache:"no-store"}).catch(()=>{});});};})();
 function toast(t,ms){const e=$("#toast");e.textContent=t;e.style.display="block";clearTimeout(e._t);e._t=setTimeout(()=>e.style.display="none",ms||2600);}
 function later(fn,ms){clearTimeout(S.timer);S.timer=setTimeout(()=>{if(document.hidden){S.pending=fn;return;}fn();},ms);}
@@ -48130,7 +48160,7 @@ function htlMount(host,o){if(!host)return null;const B_=typeof B==="string"?B:""
   const inRec=t=>!S.R||S.R.some(r=>t>=r[0]-0.5&&t<=r[1]+0.5);
   const thumb=t=>{let x=S.th[t];if(!x)x=S.th[t]={img:null,st:0};
     if(x.st===0&&S.busy<3){x.st=1;S.busy++;const im=new Image();im.onload=()=>{x.img=im;x.st=2;S.busy--;if(im.naturalHeight)S.ar=im.naturalWidth/im.naturalHeight;draw();};
-      im.onerror=()=>{x.st=3;S.busy--;setTimeout(()=>{if(x.st===3)x.st=0;},20000);};im.src=o.thumbUrl?o.thumbUrl(t):`${B_}/api/pc/hist/thumb?sid=${o.sid}&t=${t}`;}
+      im.onerror=()=>{x.st=3;S.busy--;setTimeout(()=>{if(x.st===3)x.st=0;},20000);};im.src=o.thumbUrl?o.thumbUrl(t):`${imgB(B_)}/api/pc/hist/thumb?sid=${o.sid}&t=${t}`;}
     return x.img;};
   function draw(){if(S.dead)return;if(!host.isConnected){S.dead=true;clearInterval(S.iv);return;}const w=c.clientWidth,h=c.clientHeight;if(!w||!h)return;
     if(!S.pps||S.lastW!==w){if(!S.pps)fit();S.lastW=w;}const dp=window.devicePixelRatio||1;

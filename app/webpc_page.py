@@ -2005,7 +2005,11 @@ body.oldLock{overflow:hidden}
 const B="__BASE__";
 /* V1.1.49 🚀 圖片快速通道：同一個區網、http 時，截圖／預覽大圖／縮圖改從「網頁的埠 +1」那個多執行緒小伺服器拿（不排主程式的隊）；連不到就照原本 */
 window.FASTB=window.FASTB||"";function imgB(b){return window.FASTB||b;}
-(async function fastInit(){try{if(location.protocol!=="http:")return;const b=typeof B==="string"?B:"";const r=await fetch(b+"/api/pc/fastimg",{cache:"no-store"});if(!r.ok)return;const j=await r.json();if(!j||!j.ok||!j.on||!j.port||!j.key)return;
+(function(){if(window._fjw)return;window._fjw=1;const of0=window.fetch.bind(window),FJ=/\/api\/(replay\?id=|pc\/vg\/sheetinfo\?|pc\/vg\/info\?|pc\/hist\/strip\?|pc\/edit\/list\?|pc\/vb\/note\?|pc\/stt\/sub\?id=\d+$)/;   /* V1.1.50 唯讀資料走快速通道 */
+  window.fetch=function(u,o){try{const url=typeof u==="string"?u:"",m=String((o&&o.method)||"GET").toUpperCase(),b=typeof B==="string"?B:"";
+    if(m==="GET"&&!window.FASTB&&window.FASTP&&!window.FASTD&&url&&FJ.test(url))return Promise.race([window.FASTP,new Promise(r=>setTimeout(r,700))]).then(()=>{window.FASTD=1;return window.fetch(u,o);});
+    if(m==="GET"&&window.FASTB&&url&&FJ.test(url)&&(url.startsWith(b+"/api/")||url.startsWith("/api/"))){const p=url.slice(url.indexOf("/api/"));return of0(window.FASTB+p,{cache:"no-store"}).then(r=>r.ok?r:of0(u,o)).catch(()=>of0(u,o));}}catch(e){}return of0(u,o);};})();
+window.FASTP=(async function fastInit(){try{if(location.protocol!=="http:")return;const b=typeof B==="string"?B:"";const r=await fetch(b+"/api/pc/fastimg",{cache:"no-store"});if(!r.ok)return;const j=await r.json();if(!j||!j.ok||!j.on||!j.port||!j.key)return;
   const fb=`http://${location.hostname}:${j.port}/${j.key}`;const ac=new AbortController();const tm=setTimeout(()=>ac.abort(),1500);const p=await fetch(fb+"/ping",{cache:"no-store",signal:ac.signal});clearTimeout(tm);if(p.ok&&(await p.text())==="ok")window.FASTB=fb;}catch(e){}})();
 
 /* QSK-BEGIN TK_V1.0.35 快速找：電腦按 Ctrl+K 或 /，手機按上面的 🔍；找頁面、工具、主播、場次 */
@@ -3700,7 +3704,7 @@ function htlMount(host,o){if(!host)return null;const B_=typeof B==="string"?B:""
   const inRec=t=>!S.R||S.R.some(r=>t>=r[0]-0.5&&t<=r[1]+0.5);
   const thumb=t=>{let x=S.th[t];if(!x)x=S.th[t]={img:null,st:0};
     if(x.st===0&&S.busy<3){x.st=1;S.busy++;const im=new Image();im.onload=()=>{x.img=im;x.st=2;S.busy--;if(im.naturalHeight)S.ar=im.naturalWidth/im.naturalHeight;draw();};
-      im.onerror=()=>{x.st=3;S.busy--;setTimeout(()=>{if(x.st===3)x.st=0;},20000);};im.src=o.thumbUrl?o.thumbUrl(t):`${B_}/api/pc/hist/thumb?sid=${o.sid}&t=${t}`;}
+      im.onerror=()=>{x.st=3;S.busy--;setTimeout(()=>{if(x.st===3)x.st=0;},20000);};im.src=o.thumbUrl?o.thumbUrl(t):`${imgB(B_)}/api/pc/hist/thumb?sid=${o.sid}&t=${t}`;}
     return x.img;};
   function draw(){if(S.dead)return;if(!host.isConnected){S.dead=true;clearInterval(S.iv);return;}const w=c.clientWidth,h=c.clientHeight;if(!w||!h)return;
     if(!S.pps||S.lastW!==w){if(!S.pps)fit();S.lastW=w;}const dp=window.devicePixelRatio||1;
