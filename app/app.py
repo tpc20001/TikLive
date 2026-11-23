@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.50"
+APP_VERSION = "1.1.51"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -5507,7 +5507,7 @@ class MainWindow(QMainWindow):
                 lk = olk[str(out)] = threading.Lock()
                 if len(olk) > 600:
                     for k_ in [k_ for k_, v_ in list(olk.items()) if not v_.locked()][:300]: olk.pop(k_, None)
-        sem = self.__dict__.setdefault('_vsheet_sem', threading.BoundedSemaphore(3)); one_ = self.__dict__.setdefault('_vsheet_lk', threading.Lock())
+        sem = self.__dict__.setdefault('_vsheet_sem', threading.BoundedSemaphore(4)); one_ = self.__dict__.setdefault('_vsheet_lk', threading.Lock())   # V1.1.51 3 → 4
         with lk:
             if out.exists() and out.stat().st_size > 0: return out
             if _app_closing(): return None
@@ -5526,7 +5526,7 @@ class MainWindow(QMainWindow):
         """TK_V0.8.93 連續分級：你接下來要看的幾場，大圖先在背景拼好（只讀 SSD、單一執行緒、一次一張；換清單就換做新的）."""
         st = self.__dict__.setdefault('_vsp', {'q': [], 'run': False, 'lock': threading.Lock(), 'done': 0})
         with st['lock']:
-            st['q'] = [int(x) for x in sids][:60]; st['t'] = time.time(); st['first'] = list(st['q'][:20])   # V1.1.33 先做每場前 3 張；V1.1.44 20 場
+            st['q'] = [int(x) for x in sids][:60]; st['t'] = time.time(); st['first'] = list(st['q'][:30])   # V1.1.33 先做每場前 3 張；V1.1.44 20 場
             if st.get('run', 0) >= 2: return {'ok': True}
             nw = 2 - int(st.get('run') or 0); st['run'] = int(st.get('run') or 0) + nw   # V1.1.44 兩條一起拼（電腦忙時 _vg_sheet 自己會變一次一張）
         def work():
@@ -30274,7 +30274,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
                         if acc and len(b_) > 2048:
                             import gzip as _gz; b_ = _gz.compress(b_, 5); self.send_header('Content-Encoding', 'gzip')
                         self.send_header('Content-Length', str(len(b_))); self.end_headers(); self.wfile.write(b_); return
-                    if len(P) == 3 and P[0] == 'snap' and P[1].isdigit(): sid_, nm_ = int(P[1]), P[2]; get = lambda: win._snap_file(sid_, nm_); cache = 86400 * 7
+                    if len(P) == 3 and P[0] == 'snap' and P[1].isdigit():
+                        sid_, nm_ = int(P[1]), P[2]; w_ = int(q.get('w', '0') or 0); cache = 86400 * 7
+                        get = (lambda: win._snap_small(sid_, nm_, w_) or win._snap_file(sid_, nm_)) if w_ else (lambda: win._snap_file(sid_, nm_))   # V1.1.51 ?w= 縮小版
                     elif len(P) == 2 and P[0] == 'avatar': u_ = P[1]; get = lambda: avatar_path(u_)
                     elif rest == 'api/pc/vg/sheet':
                         sid_ = int(q.get('sid', '0') or 0); ri_ = int(q.get('ri', '0') or 0); si_ = int(q.get('i', '0') or 0); get = lambda: win._vg_sheet(sid_, ri_, si_)
@@ -30308,6 +30310,42 @@ $r | ConvertTo-Json -Depth 4 -Compress
         setattr(app_, '_tlm_fastsrv', {'key': key, 'srv': srv, 'port': port})
         try: self._wd_log(f'🚀 圖片快速通道：埠 {port}')
         except Exception: pass
+
+    def _snap_small(self, sid, name, w):
+        """V1.1.51 回放總覽格子用的縮小版截圖（寬 240／360／480／720，存 SSD 的 _thumbs/snapw，原圖改了會重做）；原圖本來就不大就直接用原圖."""
+        w = min((240, 360, 480, 720), key=lambda x: abs(x - int(w or 0)))
+        src = self._snap_file(sid, name)
+        if src is None: return None
+        src = Path(src)
+        try: d0 = self._edit_roots()[0] / '_thumbs' / 'snapw' / str(int(sid))
+        except Exception: d0 = Path(PACKAGE_ROOT) / '_DB_SSD' / 'snapw' / str(int(sid))
+        out = d0 / (f'{w}_' + re.sub(r'[^0-9A-Za-z_.-]', '_', str(name)))
+        try:
+            st = src.stat()
+            if out.exists() and out.stat().st_mtime >= st.st_mtime: return out
+        except Exception: return src
+        olk = self.__dict__.setdefault('_snw_lk', {}); glk = self.__dict__.setdefault('_snw_glk', threading.Lock())
+        with glk:
+            lk = olk.setdefault(str(out), threading.Lock())
+            if len(olk) > 2000:
+                for k_ in [k_ for k_, v_ in list(olk.items()) if not v_.locked()][:1000]: olk.pop(k_, None)
+        with lk:
+            if out.exists() and out.stat().st_mtime >= st.st_mtime: return out
+            try:
+                from PySide6.QtGui import QImageReader
+                from PySide6.QtCore import QSize
+                rd = QImageReader(str(src)); sz = rd.size()
+                if not sz.isValid() or sz.width() <= w * 1.15: return src
+                rd.setScaledSize(QSize(w, max(1, round(sz.height() * w / sz.width())))); img = rd.read()
+                if img.isNull(): return src
+            except Exception: return src
+            out.parent.mkdir(parents=True, exist_ok=True); tmp = out.with_name(out.stem + '.tmp.jpg')
+            try:
+                if img.save(str(tmp), 'JPG', 80) and tmp.exists() and tmp.stat().st_size > 0: os.replace(tmp, out); return out
+            except Exception: pass
+            try: tmp.unlink()
+            except Exception: pass
+            return src
 
     def _fast_info(self):
         fs = getattr(QApplication.instance(), '_tlm_fastsrv', None) or {}
@@ -46371,7 +46409,7 @@ async function rpWarm(id,ok){id=+id;ok=ok||(()=>true);let d=null;const c=RPC.get
   if(c&&c.d&&Date.now()-c.t<300000)d=c.d;else if(c&&c.p){try{d=await c.p;}catch(e){return;}}else{try{const p=J("/api/replay?id="+id);RPC.set(id,{p,t:0});d=await p;}catch(e){RPC.delete(id);return;}
     if(d&&d.id&&d.ended){RPC.set(id,{d,t:Date.now()});while(RPC.size>16)RPC.delete(RPC.keys().next().value);}else{RPC.delete(id);return;}}
   try{pfmWarm(id);}catch(e){}
-  const sn=(d.snaps||[]).slice(0,60);for(let k=0;k<sn.length;k+=12){if(!ok()||document.hidden)return;await Promise.all(sn.slice(k,k+12).map(x=>new Promise(res=>{const im=new Image();im.onload=im.onerror=()=>res();im.src=`${imgB(snB())}/snap/${id}/${x[1]}`;RPI.push(im);})));}
+  const sn=(d.snaps||[]).slice(0,60);for(let k=0;k<sn.length;k+=12){if(!ok()||document.hidden)return;await Promise.all(sn.slice(k,k+12).map(x=>new Promise(res=>{const im=new Image();im.onload=im.onerror=()=>res();im.src=`${imgB(snB())}/snap/${id}/${x[1]}`+(window.FASTB?"?w="+snW():"");RPI.push(im);})));}
   while(RPI.length>600)RPI.shift();}
 async function rpPre(L,i){if(i<0||!L)return;const me_=RP&&RP.d.id,ok=()=>!!(RP&&RP.d.id===me_),ord=[i+1,i-1,i+2,i-2,i+3,i+4].filter(k=>k>=0&&k<L.length).map(k=>+L[k].id);
   /* V1.1.50 兩場一起載（圖片走快速通道時不排主程式的隊） */
@@ -47328,6 +47366,9 @@ const SN={L:[],sid:0,box:null,seek:null,clk:null,cur:-1,t:0,view:0,lay:[4,5],mp4
 const snB=()=>(typeof B==="string"?B:"");
 const snHms=s=>{s=Math.max(0,Math.floor(+s||0));const p=n=>String(n).padStart(2,"0");return `${Math.floor(s/3600)}:${p(Math.floor(s%3600/60))}:${p(s%60)}`;};
 function snUrl(i){const x=SN.L[i];return x?`${imgB(snB())}/snap/${SN.sid}/${x[1]}`:"";}
+/* V1.1.51 總覽格子用縮小版（快速通道才有；原圖留給放大看、下載） */
+function snW(){const c=(SN.lay&&SN.lay[1])||5,px=(window.innerWidth||800)/c*(window.devicePixelRatio||1);return px<=260?240:px<=380?360:px<=520?480:720;}
+function snUrlS(i){const u=snUrl(i);return u&&window.FASTB?u+"?w="+snW():u;}
 function snIdx(t){const L=SN.L;let lo=0,hi=L.length;while(lo<hi){const m=(lo+hi)>>1;if(L[m][0]<=t+1)lo=m+1;else hi=m;}return Math.max(0,lo-1);}
 function snMount(box,sid,L,seek,clk,lay){SN.L=(L||[]).slice();SN.sid=sid;SN.seek=seek;SN.clk=clk;SN.cur=-1;SN.t=0;SN.box=box;SN.view=0;SN.lay=(lay&&lay.length===2)?lay:[4,5];SN.mp4=false;if(!box)return false;
   try{const t=localStorage.getItem("tlm_sntime");SN.lab=t==="0"||t==="n"?"n":t==="x"?"x":"t";SN.gap=+(localStorage.getItem("tlm_sngap")??2);if(!isFinite(SN.gap))SN.gap=2;SN.zh=localStorage.getItem("tlm_snzh")||"r";SN.zv=localStorage.getItem("tlm_snzv")||"d";}catch(e){SN.lab="t";SN.gap=2;SN.zh="r";SN.zv="d";}
@@ -47458,7 +47499,7 @@ function snImgErr(im){const k=+(im.dataset.r||0);if(k>=3)return;im.dataset.r=k+1
 async function snRefresh(sid){if(SN._rf&&Date.now()-SN._rf<5000)return;SN._rf=Date.now();let j=null;try{j=await fetch(`${snB()}/api/pc/snap/info?sid=${sid}`,{cache:"no-store"}).then(r=>r.json());}catch(e){}
   if(!j||!j.ok||SN.sid!==sid)return;const L=j.snaps||[];if(JSON.stringify(L.map(x=>x[1]))!==JSON.stringify(SN.L.map(x=>x[1]))){SN.L=L.slice();SN.lay=j.layout||SN.lay;SN.view=0;if(L.length)snBuild();}}   /* TK_V0.9.92 截圖資料夾剛被搬走／換掉：自己再讀一次 */
 function snBuild(){const w=SN.box&&SN.box.querySelector(".snv");if(!w)return;const pg=w.querySelector(".snPg"),L=SN.L,lab=x=>{const pm=/_p(\d+)\.jpg$/.exec(x[1]||"");return `${SN.clk?SN.clk(x[0]):snHms(x[0])}${pm?" · "+pm[1]+"%":""}`;};
-  pg.innerHTML=`<div class="snSl snAll${SN.strip?" strip":""}"><div class="snGrid${SN.strip?" strip":""}">${L.map((x,i)=>`<div class="snG" data-gi="${i}"><img alt="" loading="lazy" src="${snUrl(i)}" onerror="snImgErr(this)"></div>`).join("")}${SN.lab==="x"?"":L.map((x,i)=>`<b class="snLb${SN.lab==="t"?" tm":""}" data-li="${i}">${SN.lab==="t"?(SN.clk?SN.clk(x[0]):snHms(x[0])):i+1}</b>`).join("")}</div></div>`
+  pg.innerHTML=`<div class="snSl snAll${SN.strip?" strip":""}"><div class="snGrid${SN.strip?" strip":""}">${L.map((x,i)=>`<div class="snG" data-gi="${i}"><img alt="" loading="lazy" src="${snUrlS(i)}" onerror="snImgErr(this)"></div>`).join("")}${SN.lab==="x"?"":L.map((x,i)=>`<b class="snLb${SN.lab==="t"?" tm":""}" data-li="${i}">${SN.lab==="t"?(SN.clk?SN.clk(x[0]):snHms(x[0])):i+1}</b>`).join("")}</div></div>`
     +(SN.strip?"":L.map((x,i)=>`<div class="snSl"><div class="snCrop"><img alt="" draggable="false" data-src="${snUrl(i)}"></div><div class="snSB"><span>📷 ${lab(x)} · ${i+1} / ${L.length}</span><a class="snDl" href="${snUrl(i)}" download="${(x[1]||"snap.jpg").split("/").pop()}" title="下載這一張">⬇ 下載</a><button class="snDl bad" data-sd="1" title="刪除這一張（不用確認）">🗑</button></div></div>`).join(""))   /* V0.7.11 展開時：只留往右排開的那一排 */;
   const n=w.querySelector(".snNP");if(n)n.textContent=L.length;snLabel();snGo(Math.min(SN.view,L.length),false,true);snFit();snFyApply();}
 function snLoadNear(){const w=SN.box&&SN.box.querySelector(".snv");if(!w)return;const sl=w.querySelectorAll(".snPg .snSl");for(let k=SN.view-1;k<=SN.view+1;k++){const im=sl[k]&&sl[k].querySelector("img[data-src]");if(im&&!im.src)im.src=im.dataset.src;}}
@@ -50236,16 +50277,16 @@ function lvsAhead(ci){if(!LVS.L.length)return;const now=Date.now();if(LVS.ahI===
   lvsGet("/api/pc/vg/ping?q="+LVS.L.slice(ci,ci+200).map(r=>r.sid).join(",")).catch(()=>{});
   lvsPre(ci);}
 /* V1.1.33 照左邊清單的順序，接下來 10 場先載好：每場資訊＋第一個畫面要用的大圖（每段前 3 張）；一次 2 個，近的先；資訊留 3 分鐘給打開時直接用 */
-function lvsPre(ci){LVS.pf=LVS.pf||{};LVS.pfI=LVS.pfI||{};LVS.pfImg=LVS.pfImg||new Map();const want=LVS.L.slice(ci+1,ci+21).map(r=>r.sid);LVS.pfQ=[];LVS.pfN=LVS.pfN||{};want.forEach((sid,k)=>{LVS.pfN[sid]=k;});   /* V1.1.44 20 場、一次 4 個、最近 5 場整段先載 */
+function lvsPre(ci){LVS.pf=LVS.pf||{};LVS.pfI=LVS.pfI||{};LVS.pfImg=LVS.pfImg||new Map();const NP=window.FASTB?30:20,want=LVS.L.slice(ci+1,ci+1+NP).map(r=>r.sid);   /* V1.1.51 快速通道開著：30 場 */LVS.pfQ=[];LVS.pfN=LVS.pfN||{};want.forEach((sid,k)=>{LVS.pfN[sid]=k;});   /* V1.1.44 20 場、一次 4 個、最近 5 場整段先載 */
   want.forEach(sid=>{if(!LVS.pf[sid])LVS.pfQ.push({k:"i",sid});});
-  const run=async()=>{if(LVS.pfRun>=4)return;const it=LVS.pfQ.shift();if(!it)return;LVS.pfRun=(LVS.pfRun||0)+1;
+  const run=async()=>{if(LVS.pfRun>=(window.FASTB?6:4))return;const it=LVS.pfQ.shift();if(!it)return;LVS.pfRun=(LVS.pfRun||0)+1;
     try{if(it.k==="i"){if(!LVS.pf[it.sid]){LVS.pf[it.sid]=1;const [I,Inf]=await Promise.all([lvsGet("/api/pc/vg/sheetinfo?sid="+it.sid).catch(()=>null),lvsGet("/api/pc/vg/info?sid="+it.sid).catch(()=>null)]);
-        if(I){LVS.pfI[it.sid]={I,Inf,t:Date.now()};const ims=[];((I.parts)||[]).forEach(p=>{if(!p.ok)return;const nm=p.n-(p.m||[]).length;for(let si=0;si<((LVS.pfN[it.sid]??9)<5?(p.sheets||1):Math.min(3,p.sheets||1));si++)ims.push({k:"s",sid:it.sid,u:`${imgB(lvsB())}/api/pc/vg/sheet?sid=${it.sid}&ri=${p.ri}&i=${si}&n=${nm}`});});
-          const at=LVS.pfQ.findIndex(x=>x.k==="i");LVS.pfQ.splice(at<0?LVS.pfQ.length:at,0,...ims.slice(0,3));const r_=ims.slice(3);if((LVS.pfN[it.sid]??9)<5){const at2=LVS.pfQ.findIndex(x=>x.k==="s"&&(LVS.pfN[x.sid]??9)>=5);LVS.pfQ.splice(at2<0?LVS.pfQ.length:at2,0,...r_);}else LVS.pfQ.push(...r_);}else LVS.pf[it.sid]=0;}}
+        if(I){LVS.pfI[it.sid]={I,Inf,t:Date.now()};const ims=[];((I.parts)||[]).forEach(p=>{if(!p.ok)return;const nm=p.n-(p.m||[]).length;for(let si=0;si<((LVS.pfN[it.sid]??9)<(window.FASTB?8:5)?(p.sheets||1):Math.min(3,p.sheets||1));si++)ims.push({k:"s",sid:it.sid,u:`${imgB(lvsB())}/api/pc/vg/sheet?sid=${it.sid}&ri=${p.ri}&i=${si}&n=${nm}`});});
+          const at=LVS.pfQ.findIndex(x=>x.k==="i");LVS.pfQ.splice(at<0?LVS.pfQ.length:at,0,...ims.slice(0,3));const r_=ims.slice(3);if((LVS.pfN[it.sid]??9)<(window.FASTB?8:5)){const at2=LVS.pfQ.findIndex(x=>x.k==="s"&&(LVS.pfN[x.sid]??9)>=(window.FASTB?8:5));LVS.pfQ.splice(at2<0?LVS.pfQ.length:at2,0,...r_);}else LVS.pfQ.push(...r_);}else LVS.pf[it.sid]=0;}}
       else if(!LVS.pfImg.has(it.u)){await new Promise(res=>{const im=new Image();im.onload=im.onerror=()=>res();im.src=it.u;LVS.pfImg.set(it.u,im);});
-        if(LVS.pfImg.size>400){const k=LVS.pfImg.keys().next().value;LVS.pfImg.delete(k);}}}catch(e){}
+        if(LVS.pfImg.size>700){const k=LVS.pfImg.keys().next().value;LVS.pfImg.delete(k);}}}catch(e){}
     LVS.pfRun--;run();};
-  run();run();run();run();}
+  for(let k=0;k<(window.FASTB?6:4);k++)run();}
 function lvsRefreshMiss(){if(!LVS.box||!LVS.box.isConnected){clearInterval(LVS.rt);return;}if(document.hidden)return;
   LVS.box.querySelectorAll(".lvsS").forEach(s=>{const i=+s.dataset.i;if(s._miss&&s._built&&i>=LVS.cur-1&&i<=LVS.cur+2)lvsBuild(s,true);});}
 /* 上面那排：等級顏色、現在這場框起來、放正中間 */

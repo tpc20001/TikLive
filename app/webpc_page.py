@@ -5798,16 +5798,16 @@ function lvsAhead(ci){if(!LVS.L.length)return;const now=Date.now();if(LVS.ahI===
   lvsGet("/api/pc/vg/ping?q="+LVS.L.slice(ci,ci+200).map(r=>r.sid).join(",")).catch(()=>{});
   lvsPre(ci);}
 /* V1.1.33 照左邊清單的順序，接下來 10 場先載好：每場資訊＋第一個畫面要用的大圖（每段前 3 張）；一次 2 個，近的先；資訊留 3 分鐘給打開時直接用 */
-function lvsPre(ci){LVS.pf=LVS.pf||{};LVS.pfI=LVS.pfI||{};LVS.pfImg=LVS.pfImg||new Map();const want=LVS.L.slice(ci+1,ci+21).map(r=>r.sid);LVS.pfQ=[];LVS.pfN=LVS.pfN||{};want.forEach((sid,k)=>{LVS.pfN[sid]=k;});   /* V1.1.44 20 場、一次 4 個、最近 5 場整段先載 */
+function lvsPre(ci){LVS.pf=LVS.pf||{};LVS.pfI=LVS.pfI||{};LVS.pfImg=LVS.pfImg||new Map();const NP=window.FASTB?30:20,want=LVS.L.slice(ci+1,ci+1+NP).map(r=>r.sid);   /* V1.1.51 快速通道開著：30 場 */LVS.pfQ=[];LVS.pfN=LVS.pfN||{};want.forEach((sid,k)=>{LVS.pfN[sid]=k;});   /* V1.1.44 20 場、一次 4 個、最近 5 場整段先載 */
   want.forEach(sid=>{if(!LVS.pf[sid])LVS.pfQ.push({k:"i",sid});});
-  const run=async()=>{if(LVS.pfRun>=4)return;const it=LVS.pfQ.shift();if(!it)return;LVS.pfRun=(LVS.pfRun||0)+1;
+  const run=async()=>{if(LVS.pfRun>=(window.FASTB?6:4))return;const it=LVS.pfQ.shift();if(!it)return;LVS.pfRun=(LVS.pfRun||0)+1;
     try{if(it.k==="i"){if(!LVS.pf[it.sid]){LVS.pf[it.sid]=1;const [I,Inf]=await Promise.all([lvsGet("/api/pc/vg/sheetinfo?sid="+it.sid).catch(()=>null),lvsGet("/api/pc/vg/info?sid="+it.sid).catch(()=>null)]);
-        if(I){LVS.pfI[it.sid]={I,Inf,t:Date.now()};const ims=[];((I.parts)||[]).forEach(p=>{if(!p.ok)return;const nm=p.n-(p.m||[]).length;for(let si=0;si<((LVS.pfN[it.sid]??9)<5?(p.sheets||1):Math.min(3,p.sheets||1));si++)ims.push({k:"s",sid:it.sid,u:`${imgB(lvsB())}/api/pc/vg/sheet?sid=${it.sid}&ri=${p.ri}&i=${si}&n=${nm}`});});
-          const at=LVS.pfQ.findIndex(x=>x.k==="i");LVS.pfQ.splice(at<0?LVS.pfQ.length:at,0,...ims.slice(0,3));const r_=ims.slice(3);if((LVS.pfN[it.sid]??9)<5){const at2=LVS.pfQ.findIndex(x=>x.k==="s"&&(LVS.pfN[x.sid]??9)>=5);LVS.pfQ.splice(at2<0?LVS.pfQ.length:at2,0,...r_);}else LVS.pfQ.push(...r_);}else LVS.pf[it.sid]=0;}}
+        if(I){LVS.pfI[it.sid]={I,Inf,t:Date.now()};const ims=[];((I.parts)||[]).forEach(p=>{if(!p.ok)return;const nm=p.n-(p.m||[]).length;for(let si=0;si<((LVS.pfN[it.sid]??9)<(window.FASTB?8:5)?(p.sheets||1):Math.min(3,p.sheets||1));si++)ims.push({k:"s",sid:it.sid,u:`${imgB(lvsB())}/api/pc/vg/sheet?sid=${it.sid}&ri=${p.ri}&i=${si}&n=${nm}`});});
+          const at=LVS.pfQ.findIndex(x=>x.k==="i");LVS.pfQ.splice(at<0?LVS.pfQ.length:at,0,...ims.slice(0,3));const r_=ims.slice(3);if((LVS.pfN[it.sid]??9)<(window.FASTB?8:5)){const at2=LVS.pfQ.findIndex(x=>x.k==="s"&&(LVS.pfN[x.sid]??9)>=(window.FASTB?8:5));LVS.pfQ.splice(at2<0?LVS.pfQ.length:at2,0,...r_);}else LVS.pfQ.push(...r_);}else LVS.pf[it.sid]=0;}}
       else if(!LVS.pfImg.has(it.u)){await new Promise(res=>{const im=new Image();im.onload=im.onerror=()=>res();im.src=it.u;LVS.pfImg.set(it.u,im);});
-        if(LVS.pfImg.size>400){const k=LVS.pfImg.keys().next().value;LVS.pfImg.delete(k);}}}catch(e){}
+        if(LVS.pfImg.size>700){const k=LVS.pfImg.keys().next().value;LVS.pfImg.delete(k);}}}catch(e){}
     LVS.pfRun--;run();};
-  run();run();run();run();}
+  for(let k=0;k<(window.FASTB?6:4);k++)run();}
 function lvsRefreshMiss(){if(!LVS.box||!LVS.box.isConnected){clearInterval(LVS.rt);return;}if(document.hidden)return;
   LVS.box.querySelectorAll(".lvsS").forEach(s=>{const i=+s.dataset.i;if(s._miss&&s._built&&i>=LVS.cur-1&&i<=LVS.cur+2)lvsBuild(s,true);});}
 /* 上面那排：等級顏色、現在這場框起來、放正中間 */
@@ -6872,6 +6872,9 @@ const SN={L:[],sid:0,box:null,seek:null,clk:null,cur:-1,t:0,view:0,lay:[4,5],mp4
 const snB=()=>(typeof B==="string"?B:"");
 const snHms=s=>{s=Math.max(0,Math.floor(+s||0));const p=n=>String(n).padStart(2,"0");return `${Math.floor(s/3600)}:${p(Math.floor(s%3600/60))}:${p(s%60)}`;};
 function snUrl(i){const x=SN.L[i];return x?`${imgB(snB())}/snap/${SN.sid}/${x[1]}`:"";}
+/* V1.1.51 總覽格子用縮小版（快速通道才有；原圖留給放大看、下載） */
+function snW(){const c=(SN.lay&&SN.lay[1])||5,px=(window.innerWidth||800)/c*(window.devicePixelRatio||1);return px<=260?240:px<=380?360:px<=520?480:720;}
+function snUrlS(i){const u=snUrl(i);return u&&window.FASTB?u+"?w="+snW():u;}
 function snIdx(t){const L=SN.L;let lo=0,hi=L.length;while(lo<hi){const m=(lo+hi)>>1;if(L[m][0]<=t+1)lo=m+1;else hi=m;}return Math.max(0,lo-1);}
 function snMount(box,sid,L,seek,clk,lay){SN.L=(L||[]).slice();SN.sid=sid;SN.seek=seek;SN.clk=clk;SN.cur=-1;SN.t=0;SN.box=box;SN.view=0;SN.lay=(lay&&lay.length===2)?lay:[4,5];SN.mp4=false;if(!box)return false;
   try{const t=localStorage.getItem("tlm_sntime");SN.lab=t==="0"||t==="n"?"n":t==="x"?"x":"t";SN.gap=+(localStorage.getItem("tlm_sngap")??2);if(!isFinite(SN.gap))SN.gap=2;SN.zh=localStorage.getItem("tlm_snzh")||"r";SN.zv=localStorage.getItem("tlm_snzv")||"d";}catch(e){SN.lab="t";SN.gap=2;SN.zh="r";SN.zv="d";}
@@ -7002,7 +7005,7 @@ function snImgErr(im){const k=+(im.dataset.r||0);if(k>=3)return;im.dataset.r=k+1
 async function snRefresh(sid){if(SN._rf&&Date.now()-SN._rf<5000)return;SN._rf=Date.now();let j=null;try{j=await fetch(`${snB()}/api/pc/snap/info?sid=${sid}`,{cache:"no-store"}).then(r=>r.json());}catch(e){}
   if(!j||!j.ok||SN.sid!==sid)return;const L=j.snaps||[];if(JSON.stringify(L.map(x=>x[1]))!==JSON.stringify(SN.L.map(x=>x[1]))){SN.L=L.slice();SN.lay=j.layout||SN.lay;SN.view=0;if(L.length)snBuild();}}   /* TK_V0.9.92 截圖資料夾剛被搬走／換掉：自己再讀一次 */
 function snBuild(){const w=SN.box&&SN.box.querySelector(".snv");if(!w)return;const pg=w.querySelector(".snPg"),L=SN.L,lab=x=>{const pm=/_p(\d+)\.jpg$/.exec(x[1]||"");return `${SN.clk?SN.clk(x[0]):snHms(x[0])}${pm?" · "+pm[1]+"%":""}`;};
-  pg.innerHTML=`<div class="snSl snAll${SN.strip?" strip":""}"><div class="snGrid${SN.strip?" strip":""}">${L.map((x,i)=>`<div class="snG" data-gi="${i}"><img alt="" loading="lazy" src="${snUrl(i)}" onerror="snImgErr(this)"></div>`).join("")}${SN.lab==="x"?"":L.map((x,i)=>`<b class="snLb${SN.lab==="t"?" tm":""}" data-li="${i}">${SN.lab==="t"?(SN.clk?SN.clk(x[0]):snHms(x[0])):i+1}</b>`).join("")}</div></div>`
+  pg.innerHTML=`<div class="snSl snAll${SN.strip?" strip":""}"><div class="snGrid${SN.strip?" strip":""}">${L.map((x,i)=>`<div class="snG" data-gi="${i}"><img alt="" loading="lazy" src="${snUrlS(i)}" onerror="snImgErr(this)"></div>`).join("")}${SN.lab==="x"?"":L.map((x,i)=>`<b class="snLb${SN.lab==="t"?" tm":""}" data-li="${i}">${SN.lab==="t"?(SN.clk?SN.clk(x[0]):snHms(x[0])):i+1}</b>`).join("")}</div></div>`
     +(SN.strip?"":L.map((x,i)=>`<div class="snSl"><div class="snCrop"><img alt="" draggable="false" data-src="${snUrl(i)}"></div><div class="snSB"><span>📷 ${lab(x)} · ${i+1} / ${L.length}</span><a class="snDl" href="${snUrl(i)}" download="${(x[1]||"snap.jpg").split("/").pop()}" title="下載這一張">⬇ 下載</a><button class="snDl bad" data-sd="1" title="刪除這一張（不用確認）">🗑</button></div></div>`).join(""))   /* V0.7.11 展開時：只留往右排開的那一排 */;
   const n=w.querySelector(".snNP");if(n)n.textContent=L.length;snLabel();snGo(Math.min(SN.view,L.length),false,true);snFit();snFyApply();}
 function snLoadNear(){const w=SN.box&&SN.box.querySelector(".snv");if(!w)return;const sl=w.querySelectorAll(".snPg .snSl");for(let k=SN.view-1;k<=SN.view+1;k++){const im=sl[k]&&sl[k].querySelector("img[data-src]");if(im&&!im.src)im.src=im.dataset.src;}}
