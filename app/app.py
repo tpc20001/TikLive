@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.44"
+APP_VERSION = "1.1.45"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -2883,6 +2883,7 @@ class MainWindow(QMainWindow):
         self.tab_order = list(self.ui_settings.value("tab_order", [], type=list) or [])
         self.priority_streamers = set(self.ui_settings.value('priority_streamers', [], type=list) or [])
         self.novideo_streamers = set(self.ui_settings.value('novideo_streamers', [], type=list) or [])   # V0.6.59 只錄聲音（照常監控、錄 M4A，不錄 MP4）
+        self.paused_streamers = self._paused_load()                     # V1.1.45 ⏸ 暫停監控並封存（不連線、不錄新的；以前的照常整理、傳 YouTube）
         self.normal_retry_seconds = int(self.ui_settings.value('normal_retry_seconds',60))
         self.priority_retry_seconds = int(self.ui_settings.value('priority_retry_seconds',10))
         self._load_cfg()
@@ -16803,6 +16804,66 @@ try { NLConnect | Out-Null; Unset
                 self.statusBar().showMessage('已取消刪除'); return
         self._remove_streamer_from_roster(username)
 
+    # ---------------- V1.1.45 ⏸ 暫停監控並封存 ----------------
+    def _paused_path(self): return Path(PACKAGE_ROOT) / '_DB_SSD' / 'paused_streamers.json'
+
+    def _paused_load(self):
+        """{帳號: 暫停的時間}. 存 _DB_SSD（SSD）＋ ui_settings 各一份，哪份在就用哪份."""
+        d = {}
+        try:
+            p = self._paused_path()
+            if p.exists(): d = {str(k): float(v or 0) for k, v in (json.loads(p.read_text(encoding='utf-8')) or {}).items()}
+        except Exception: d = {}
+        if not d:
+            try: d = {str(k): float(v or 0) for k, v in (json.loads(str(self.ui_settings.value('paused_streamers_json', '') or '{}')) or {}).items()}
+            except Exception: d = {}
+        return d
+
+    def _paused(self):
+        d = self.__dict__.get('paused_streamers')
+        if d is None: d = self.paused_streamers = self._paused_load()
+        return d
+
+    def _paused_save(self):
+        d = dict(self._paused())
+        try:
+            p = self._paused_path(); p.parent.mkdir(parents=True, exist_ok=True); tp = p.with_suffix('.tmp')
+            tp.write_text(json.dumps(d, ensure_ascii=False), encoding='utf-8'); os.replace(tp, p)
+        except Exception: pass
+        try: self.ui_settings.setValue('paused_streamers_json', json.dumps(d, ensure_ascii=False))
+        except Exception: pass
+
+    def _host_pause(self, u, on):
+        """暫停（on）：關掉這位的連線（直播中的話這一場就停在這裡，已錄的照常收尾、轉檔）、之後不再連線；主播清單、等級、分類、以前的場次全部留著，
+        YouTube 排隊、轉檔、整理照常. 恢復（not on）：監控有在跑就馬上把這位接回來."""
+        u = str(u or '').strip(); roster = set(self._roster_ids())
+        if u not in roster:
+            m = {x.casefold(): x for x in roster}; u = m.get(u.casefold(), u)
+        if u not in roster: return {'ok': False, 'message': '主播清單裡沒有這位'}
+        d = self._paused(); nm = self.streamer_names.get(u, u)
+        if on:
+            if u in d: return {'ok': True, 'message': f'{nm} 已經是暫停中', 'paused': True}
+            live = self.engine_status.get(u) == 'LIVE'
+            d[u] = time.time(); self._paused_save()
+            e = self.engines.pop(u, None)
+            if e:
+                try: e.close()
+                except Exception: pass
+            self.engine_status.pop(u, None)
+            try: self.update_stream_tabs(); self.update_pending_tiles()
+            except Exception: pass
+            try: self._wd_log(f'⏸ 暫停監控並封存：{nm}（@{u}）' + ('，原本直播中、這一場停在這裡' if live else ''))
+            except Exception: pass
+            return {'ok': True, 'paused': True, 'message': f'⏸ {nm} 暫停監控了：不再連線、不錄新的；以前的場次照常整理、傳 YouTube' + ('（剛剛直播中的這一場已收尾）' if live else '')}
+        if u not in d: return {'ok': True, 'message': f'{nm} 本來就在監控', 'paused': False}
+        d.pop(u, None); self._paused_save(); started = False
+        if self.engines:
+            try: self.start_monitor(auto=True); started = u in self.engines
+            except Exception: pass
+        try: self._wd_log(f'▶ 恢復監控：{nm}（@{u}）')
+        except Exception: pass
+        return {'ok': True, 'paused': False, 'message': f'▶ {nm} 恢復監控' + ('，已經開始連線' if started else '（下次開始監控時一起連）')}
+
     def _remove_streamer_from_roster(self, username):
         username=str(username)
         try: self._roster_removed_log(username, self.streamer_names.get(username, username))   # TK_V0.8.34.042 記下什麼時候移除（之後再加回來會提醒）
@@ -23771,6 +23832,9 @@ try { NLConnect | Out-Null; Unset
             ai = self._avatar_info(u)
             roster.append({'u': u, 'n': i + 1, 'name': self.streamer_names.get(u, u), 'cat': of.get(u, ''), 'avatar': bool(ai.get('avatar')), 'av': int(ai.get('avatar_mt') or 0) % 1000000007,
                            'g': str((gr_.get(u) or {}).get('g') or '')})                 # TK_V0.9.34 S／A／E／F（跟審核同一份）
+        PZ = self._paused()
+        for r in roster:
+            if r['u'] in PZ: r['paused'] = 1; r['pt'] = PZ[r['u']]                 # V1.1.45
         for c in cats: c['count'] = sum(1 for r in roster if r['cat'] == c['id'])
         try:                                                     # V0.6.32 每位主播的統計（場次、MP4 合計、鑽石、留言、時長、觀眾、錄到 %…）
             stt = self._streamer_stats(); mp = self._mp4_sizes()
@@ -36762,7 +36826,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             missing=[]
             if self.engines and hasattr(self,'stream_list'):
                 users=[str(self.stream_list.item(i).data(Qt.UserRole) or '') for i in range(self.stream_list.count())]
-                missing=[u for u in users if u and u not in self.engines]
+                PZ=self._paused(); missing=[u for u in users if u and u not in self.engines and u not in PZ]   # V1.1.45 暫停的不補
                 if missing:
                     try: self.start_monitor(auto=True)
                     except Exception: self._ui_error('watchdog start_monitor')
@@ -38831,7 +38895,7 @@ exit /b 1
                     if lh and lh[-1][1] == -2 and lh[-1][2]: d2['auto'] += 1
         first = min(ts) if ts else None; last = max(ts) if ts else None
         days_seen = len({datetime.fromtimestamp(t).strftime('%Y-%m-%d') for t in ts})
-        return {'ok': True, 'u': u, 'n': len(S), 'first': first, 'last': last, 'obs_days': int((now - first) // 86400) + 1 if first else 0, 'live_days': days_seen,
+        return {'ok': True, 'u': u, 'paused': (self._paused().get(u) or 0) if u in self._paused() else None, 'n': len(S), 'first': first, 'last': last, 'obs_days': int((now - first) // 86400) + 1 if first else 0, 'live_days': days_seen,
                 'avg_min': round(sum(secs) / len(secs) / 60) if secs else 0, 'tot_h': round(sum(secs) / 3600, 1), 'lv': C, 'm2': d2,
                 'ever1': e1, 'ever2': e2, 'yt': ytn, 'out': outn, 'clip': clipn}
 
@@ -40079,7 +40143,8 @@ exit /b 1
             hand=set((getattr(_core_module(),'RESUME_HANDOFF',None) or {}).keys())
             if hand: ordered=[u for u in ordered if u in hand]+[u for u in ordered if u not in hand]
         except Exception: pass
-        users=[u for u in ordered if u not in self.engines]
+        PZ=self._paused()                                       # V1.1.45 暫停監控的主播不連線
+        users=[u for u in ordered if u not in self.engines and u not in PZ]
         if not users:
             self.statusBar().showMessage('背景監控已在執行中'); return
         for idx,u in enumerate(users):
@@ -43989,7 +44054,8 @@ body.oldLock{overflow:hidden}
 .rvLvH{grid-column:1/-1;display:flex;align-items:center;gap:8px;padding:10px 4px 2px;font-size:14px;color:var(--gc);border-bottom:2px solid var(--gc)}.rvLvH b{font-size:17px}.rvLvH em{font-style:normal;opacity:.65;font-size:12px;margin-left:auto}
 .rvC{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}.rvGP{position:fixed;z-index:2147483200;background:var(--panel,#1b1f27);border:1px solid var(--border,#3a414d);border-radius:14px;padding:8px;box-shadow:0 8px 28px rgba(0,0,0,.55);max-width:calc(100vw - 12px)}
 .rvT[data-s]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}.rvT.rvPlay{outline:3px solid #4dc9ff;outline-offset:-3px}   /* TK_V1.0.87 */
-.rvGPa{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}.rvGPa button{flex:1;padding:8px 10px;border-radius:10px;border:1px solid var(--border,#3a414d);background:transparent;color:inherit;font-size:13px;white-space:nowrap}.rvGPa .rvGPdel{color:#ff6b81;border-color:#ff6b8166}.rvGPa .rvGPclip{color:#ffc94d;border-color:#ffc94d66}.rvGPh small{opacity:.7}   /* TK_V1.0.88 */
+.crpz{margin:14px 0 6px;padding:9px 12px;border:1px dashed #f0ad4e88;border-radius:12px;color:#f0ad4e;display:flex;flex-direction:column;gap:2px}.crpz span{color:var(--sub,#9aa4b2);font-size:12px}.crx.pz{opacity:.62}.crx.pz .avatar,.crx.pz img{filter:grayscale(.8)}.crpzT{color:#f0ad4e!important;font-weight:700}
+.rvGPa{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}.rvGPz{margin-top:7px}.rvGPa .rvGPpz{color:#f0ad4e;border-color:#f0ad4e66}.rvGPpzs{color:#f0ad4e;font-weight:700;margin-bottom:3px}.rvGPa button{flex:1;padding:8px 10px;border-radius:10px;border:1px solid var(--border,#3a414d);background:transparent;color:inherit;font-size:13px;white-space:nowrap}.rvGPa .rvGPdel{color:#ff6b81;border-color:#ff6b8166}.rvGPa .rvGPclip{color:#ffc94d;border-color:#ffc94d66}.rvGPh small{opacity:.7}   /* TK_V1.0.88 */
 .rvX{border:1px solid #4dc9ff!important;color:#4dc9ff!important;font-weight:700;border-radius:9px;padding:4px 10px;background:transparent}
 .rvGPs{font-size:12px;line-height:1.55;padding:6px 6px 4px;margin:0 0 4px;border-radius:9px;background:rgba(255,255,255,.04);max-width:360px}.rvGPs b{font-size:13px}
 .rvGPl{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:3px}.rvGPl span{color:var(--c)}.rvGPm{display:flex;flex-wrap:wrap;gap:3px 10px;margin-top:3px}.rvGPm .rvGPd{color:#ff6b81;font-weight:700;flex:1 1 100%}.rvGPm span{min-width:0}.rvGPm span:not(.rvGPd){white-space:nowrap}   /* TK_V1.0.94 原本 class="d" 撞到全域的狀態小圓點（寬高 9px）→ 被擠成一個字一行；改名＋自己一整行 */.rvGPm small{font-weight:400;opacity:.8}.rvGPe{opacity:.85;margin-top:3px}   /* TK_V1.0.90 */
@@ -44868,6 +44934,7 @@ const RULES=[
   {t:"空間不夠時",d:"<ul><li>SSD 剩不到 <b>"+RU_V('rec.ssd_min_free','GB',60)+"</b>：新的錄影改成直接錄在影片庫硬碟。</li><li>影片硬碟剩不到 <b>"+RU_V('rec.video_min_free','GB',30)+"</b>：不開始新的錄影（<b>聲音照錄</b>）。</li><li>🛡 C 槽守門員每分鐘看 C 剩多少、減少多快：第 1 級先停不急的背景工作；第 2 級全速把東西搬走；第 3 級（剩不到 15 GB 或 20 分鐘內會滿）才會一位一位停掉正在錄到 C 的影片（F → E → 未分級先停）。</li></ul>"},
   {t:"同一場直播的判定（斷線、重開）",d:"<ul><li>主播斷線後 <b>"+RU_V('conn.grace_minutes','分鐘',10)+"內</b>連回同一個直播間＝<b>續寫同一場</b>（錄影會分成第 2 段、第 3 段…）。</li><li>直播中卻 <b>"+RU_V('monitor.silent_min','分鐘',30)+"</b>沒有任何留言、禮物、進場、人數也沒變（而且沒在錄影）→ 重新連一次確認：還在播就續寫，結束了就把結束時間改回最後有資料的時間。</li><li>程式重開、斷電、超過 10 分鐘才連回來 → 會變成<b>另一場</b>。這種被切開的，用「⧉ 合併重複場次」合回一場（見「場次合併」）。</li></ul>"},
   {t:"開程式、熱更新時的監控",d:"<ul><li>開程式 3 秒後自動開始監控（設定可以關）。正在錄的場次在熱更新、重開時會<b>接著錄同一場</b>。</li><li>搬硬碟切換後，如果找不到影片硬碟（例如 R 槽代號跑掉），程式<b>先不開始監控</b>，不會錄到別的地方，會提示你去磁碟管理改代號。</li></ul>"},
+  {t:"⏸ 暫停監控並封存",d:"<ul><li>主播分類（或審核、檔案總管）<b>長按主播</b> → 主播選單 →「⏸ 暫停監控並封存」。</li><li>從那一刻起<b>不再連線、不錄新的</b>（直播中的話那一場停在那裡、照常收尾）；主播清單、等級、分類、<b>以前的場次全部留著</b>，照常轉檔、整理、照等級排隊上傳 YouTube、照保留天數刪原檔。</li><li>在主播分類移到最下面「⏸ 暫停監控（封存）」那區，同一個選單按「▶ 恢復監控」就接回來。</li><li>跟「🗑 刪除主播」不一樣：刪除＝整位全部刪掉（等於標 F 再處置）。</li></ul>"},
   {t:"只錄聲音的主播（照審核等級 G）",d:"<ul><li><b>在「主播審核」標 G＝只錄聲音</b>；改成別的等級就恢復錄影片。以前另外的「只錄聲音的主播」清單已經拿掉，程式每分鐘照等級對一次，以審核等級為準。</li><li>G 的主播直播中照樣錄畫面（FLV 先放 C 槽），下播後截 60 張圖＋字幕，自動傳 YouTube，傳好才移走原檔。</li><li>直播中每 <b>"+RU_V('rec.snap_min','分鐘',2)+"</b>另外拍一張快照，回放時在影片的位置左右翻看。</li></ul>"}]},
  {k:"play",i:"📺",c:"#4dc9ff",t:"回放與直播中觀看：延遲、預載入",s:[
   {t:"為什麼要「+3 秒」",d:RU_BAR([[3,"留言／禮物（資料）","#4dc9ff"],[1,"約 3 秒","#f0ad4e"],[3,"畫面上才看到","#45d483"]])+"<ul><li>TikTok 的畫面比留言、禮物的資料<b>晚大約 3 秒</b>。所以在回放點一則留言或禮物，會跳到「那個時間 <b>+3 秒</b>」，畫面才對得上（秒數在回放設定可以改）。</li><li>送禮動畫也跟著這個延遲一起延後，畫面上出現禮物那一刻才跳動畫。</li><li>點<b>禮物</b>時會再<b>早 0.5 秒</b>落地，播放 0.5 秒後動畫完整出現。</li></ul>"},
@@ -45621,7 +45688,7 @@ async function drawCats(){const sb=$("#sbody");if(!sb)return;if(!S.cats)sb.inner
 <section class="ssec"><h3>主播 <small style="font-weight:400;color:var(--sub)">點右上角色塊改分類・點場次／MP4 看歷史</small></h3><div class="cflt"><button data-f=""${!f?' class="on"':""}>全部 ${C.roster.length}</button><button data-f="none"${f==="none"?' class="on"':""}>○ 未分類 ${C.roster.filter(r=>!r.cat).length}</button>${C.cats.map(c=>`<button data-f="${c.id}"${f===c.id?' class="on"':""}><i class="cdot" style="background:${c.color};border-color:${c.color}"></i>${esc(c.name)} ${c.count}</button>`).join("")}</div>
 <div class="cflt cgf">${[["","等級全部"],...CAT_G.map(g=>[g[0],g[0]+" "+g[1]]),["-","沒等級"]].map(([v,t])=>`<button data-g="${v}"${fg===v?' class="on"':""}${v&&v!=="-"?` style="--gc:${CAT_GC[v]}"`:""}>${t} ${v===""?C.roster.length:C.roster.filter(r=>v==="-"?!r.g:r.g===v).length}</button>`).join("")}</div>
 <input class="search" id="catQ" placeholder="🔍 搜尋主播名字 / @帳號" value="${esc(S.catQ||"")}" style="width:100%;margin:2px 0 6px;box-sizing:border-box"><div style="display:flex;align-items:center;gap:8px;margin:2px 0 6px"><span class="snote" style="margin:0">排序</span><select class="pill" id="catSort" style="flex:1">${SO.map(([k2,t])=>`<option value="${k2}"${k2===S.catSort?" selected":""}>${t}</option>`).join("")}</select></div>${C.stats_ready===false?`<div class="snote">${(C.stats_prog||{}).err?"⚠ 統計失敗，2 分鐘後自動再試："+esc(C.stats_prog.err):"⏳ 統計資料整理中 "+((C.stats_prog||{}).total?`${C.stats_prog.done}／${C.stats_prog.total} 場`:"")+"（第一次比較久，之後只算新的場次），數字會邊算邊出現"}</div>`:""}
-<div class="crl">${R.map(r=>{const c=catById(r.cat),ex=extra(r).replace(/^ · /,"");return `<div class="crx${c?"":" none"}"${c?` style="--cc:${c.color}"`:""} data-u="${esc(r.u)}" data-n="${esc(r.name)}"><span class="cdrag${S.catSort?" off":""}" title="${S.catSort?"排序改成「依主播清單順序」才能拖":"長按拖曳：調整主播清單順序"}">☰</span><span class="gno">${p2(r.n)}</span>${avHtml(r.u,r.avatar,r.name,r.av)}<div class="ci"><b>${esc(r.name)}</b><small>@${esc(r.u)}${ex?" · "+esc(ex):""}</small></div><button class="cgr${r.g?"":" none"}"${r.g?` style="--gc:${CAT_GC[r.g]}"`:""} title="S 無條件保存／A 保存／E 觀察／F 刪除（跟審核同一份；標 F 不會刪任何東西）">${r.g||"－"}</button><button class="cstb" title="點一下看這位主播的歷史紀錄（長按這一列也可以）"><b>${r.sess||0} 場</b><span>${sz(r.mp4)} <u>📜</u></span></button><button class="ctag${c?"":" none"}"${c?` style="--cc:${c.color}"`:""} title="分類：${c?esc(c.name):"未分類"}（點一下改）" aria-label="改分類"></button></div>`;}).join("")||'<div class="snote">沒有符合的主播</div>'}</div>
+<div class="crl">${[R.filter(r=>!r.paused),R.filter(r=>r.paused)].map((RR,pi)=>(pi&&RR.length?`<div class="crpz"><b>⏸ 暫停監控（封存）${RR.length} 位</b><span>不連線、不錄新的；以前的場次照常整理、排隊傳 YouTube。長按一位 →「▶ 恢復監控」</span></div>`:"")+RR.map(r=>{const c=catById(r.cat),ex=extra(r).replace(/^ · /,"");const pz=r.paused?`<small class="crpzT">⏸ 暫停中${r.pt?`（${new Date(r.pt*1000).getMonth()+1}/${new Date(r.pt*1000).getDate()} 起）`:""}</small>`:"";return `<div class="crx${c?"":" none"}${r.paused?" pz":""}"${c?` style="--cc:${c.color}"`:""} data-u="${esc(r.u)}" data-n="${esc(r.name)}"><span class="cdrag${S.catSort?" off":""}" title="${S.catSort?"排序改成「依主播清單順序」才能拖":"長按拖曳：調整主播清單順序"}">☰</span><span class="gno">${p2(r.n)}</span>${avHtml(r.u,r.avatar,r.name,r.av)}<div class="ci"><b>${esc(r.name)}</b><small>@${esc(r.u)}${ex?" · "+esc(ex):""}</small>${pz}</div><button class="cgr${r.g?"":" none"}"${r.g?` style="--gc:${CAT_GC[r.g]}"`:""} title="S 無條件保存／A 保存／E 觀察／F 刪除（跟審核同一份；標 F 不會刪任何東西）">${r.g||"－"}</button><button class="cstb" title="點一下看這位主播的歷史紀錄（長按這一列也可以）"><b>${r.sess||0} 場</b><span>${sz(r.mp4)} <u>📜</u></span></button><button class="ctag${c?"":" none"}"${c?` style="--cc:${c.color}"`:""} title="分類：${c?esc(c.name):"未分類"}（點一下改）" aria-label="改分類"></button></div>`;}).join("")).join("")||'<div class="snote">沒有符合的主播</div>'}</div>
 <div class="snote">${st.running?"⏳ 正在搬檔案…":st.last?`上次整理 ${fmtClk(st.last)}：搬了 ${st.moved_last||0} 個檔案${st.busy?`，${st.busy} 個正在被使用（看完後 1 分鐘內自動再試）`:""}${st.conflict?`，${st.conflict} 個目的地已有同名檔案（沒動）`:""}`:"還沒整理過"}</div></section>`;
   $("#catSort").onchange=e=>{S.catSort=e.target.value;lsSet("tlm_catsort",S.catSort);drawCats();};
   {const ci=$("#catQ");if(ci)ci.oninput=e=>{S.catQ=e.target.value;const q=S.catQ.trim().toLowerCase();let n=0;           // V0.6.61 打字就篩選（不重畫，游標不會跳）
@@ -45643,7 +45710,10 @@ async function drawCats(){const sb=$("#sbody");if(!sb)return;if(!S.cats)sb.inner
     const gb=w.querySelector(".cgr");if(gb)gb.onclick=e=>{e.stopPropagation();catGPick(gb,w.dataset.u,w.dataset.n);};
     const dh=w.querySelector(".cdrag");if(dh)catDragInit(dh,w);   /* TK_V0.9.45 長按 ☰ 拖曳順序 */
     const hb=w.querySelector(".cstb");if(hb)hb.onclick=()=>{location.hash="who/"+encodeURIComponent(w.dataset.u);};   // V0.6.21 跳到這位主播的歷史紀錄
-    let lp=null;w.addEventListener("pointerdown",e=>{if(e.target.closest("button")||e.target.closest(".cdrag"))return;clearTimeout(lp);lp=setTimeout(()=>{if(navigator.vibrate)navigator.vibrate(15);location.hash="who/"+encodeURIComponent(w.dataset.u);},550);});
+    let lp=null;w.addEventListener("pointerdown",e=>{if(e.target.closest("button")||e.target.closest(".cdrag"))return;clearTimeout(lp);lp=setTimeout(()=>{if(navigator.vibrate)navigator.vibrate(15);   /* V1.1.45 長按＝主播選單（歷史紀錄、檔案總管、等級、分類、暫停監控並封存、刪除主播） */
+      const r=(S.cats&&S.cats.roster||[]).find(x=>x.u===w.dataset.u)||{};w._lpT=Date.now();
+      hostSheet(w,{u:w.dataset.u,name:w.dataset.n,g:r.g||"",rvBtn:true,paused:!!r.paused,onG:ng=>{r.g=ng;drawCats();},onCat:()=>{S.catsT=0;drawCats();},onPause:()=>{S.catsT=0;drawCats();}});},550);});
+    w.addEventListener("click",e=>{if(w._lpT&&Date.now()-w._lpT<900){e.stopPropagation();e.preventDefault();}},true);
     ["pointerup","pointercancel","pointerleave"].forEach(ev=>w.addEventListener(ev,()=>clearTimeout(lp)));w.addEventListener("pointermove",e=>{if(Math.abs(e.movementY)>4||Math.abs(e.movementX)>4)clearTimeout(lp);});
     w.addEventListener("contextmenu",e=>e.preventDefault());});}
 function drawPerf(){const sb=$("#sbody");if(!sb)return;
@@ -49381,13 +49451,16 @@ function hostSheet(anchor,o){const u=o.u,nm=o.name||u;let ov=document.getElement
   ov=document.createElement("div");ov.id="rvGP";ov.className="rvGP";
   const gb=()=>RVGK.map(k=>`<button data-gp="${k}" class="${g0===k?"on":""}" style="--gc:${RVG[k][2]}"><b>${k}</b><small>${RVG[k][1]}</small></button>`).join("")+`<button data-gp="" class="${!g0?"on":""}"><b>－</b><small>清除</small></button>`;
   ov.innerHTML=`<div class="rvGPh">${rvE(nm)}${o.sub?` <small>${rvE(o.sub)}</small>`:""}</div><div class="rvGPs"><span class="rvGPw">📊 統計讀取中…</span></div><div class="rvGPt">等級</div><div class="rvGPb">${gb()}</div><div class="rvGPt">📁 分類資料夾</div><div class="rvGPc"><span class="rvGPw">讀取中…</span></div>
-<div class="rvGPa">${o.rvBtn?`<button data-ga="rv">🗂 看這位的審核</button>`:""}<button data-ga="del" class="rvGPdel">🗑 刪除主播…</button><button data-ga="clip" class="rvGPclip" title="這位主播剪好的影片（初剪、GIF…）">📁 剪輯影片</button></div>`;
+<div class="rvGPa"><button data-ga="hist">📜 歷史紀錄</button><button data-ga="fx">🗃 檔案總管</button><button data-ga="host">👤 主播總覽</button><button data-ga="room">🔴 直播間</button></div>
+<div class="rvGPa">${o.rvBtn!==false?`<button data-ga="rv">🗂 看這位的審核</button>`:""}<button data-ga="clip" class="rvGPclip" title="這位主播剪好的影片（初剪、GIF…）">📁 剪輯影片</button></div>
+<div class="rvGPa rvGPz"><button data-ga="pause" class="rvGPpz">${o.paused?"▶ 恢復監控":"⏸ 暫停監控並封存…"}</button></div><div class="rvGPa rvGPz"><button data-ga="del" class="rvGPdel">🗑 刪除主播…（全部刪掉，跟標 F 處置一樣）</button></div>`;   /* V1.1.45 */
   document.body.appendChild(ov);const place=()=>{const rc=anchor.getBoundingClientRect(),W=ov.offsetWidth,H=ov.offsetHeight;ov.style.left=Math.max(6,Math.min(window.innerWidth-W-6,rc.left+rc.width/2-W/2))+"px";ov.style.top=Math.max(6,(rc.bottom+H+6<window.innerHeight?rc.bottom+4:rc.top-H-4<6?window.innerHeight-H-6:rc.top-H-4))+"px";};place();
   rvCats().then(C=>{const box=ov.querySelector(".rvGPc");if(!box)return;const L=(C&&C.cats)||[],cur=((C&&C.of)||{})[u]||"";if(!L.length){box.innerHTML='<span class="rvGPw">還沒有分類（設定 → 🗂 主播分類）</span>';return;}
     box.innerHTML=`<button data-gc="" class="${cur?"":"on"}"><i style="background:transparent;border:1px dashed #8a93a3"></i>未分類</button>`+L.map(c=>`<button data-gc="${rvE(c.id)}" class="${cur===c.id?"on":""}" title="📁 ${rvE(c.folder)}"><i style="background:${rvE(c.color||"#8994a4")}"></i>${rvE(c.name)}</button>`).join("");place();});
   rvGet("/api/pc/host/sum?u="+encodeURIComponent(u)).then(j=>{const box=ov.querySelector(".rvGPs");if(!box)return;if(!j||!j.ok){box.innerHTML='<span class="rvGPw">讀不到統計</span>';return;}   /* TK_V1.0.90 主播統計 */
     const D=t=>{const d=new Date(t*1000);return `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;},L=j.lv||{},M=j.m2||{};
-    box.innerHTML=`<div>👁 觀測 <b>${j.obs_days}</b> 天${j.first?`（${D(j.first)} 起）`:""} · 播了 <b>${j.n}</b> 場（${j.live_days} 天有播）· 平均 <b>${j.avg_min}</b> 分鐘／場 · 共 ${j.tot_h} 小時</div>
+    {const pz=ov.querySelector(".rvGPpz");if(pz&&j.paused!==undefined){o.paused=j.paused!=null;pz.textContent=o.paused?"▶ 恢復監控":"⏸ 暫停監控並封存…";}}   /* V1.1.45 */
+    box.innerHTML=`${j.paused!=null&&j.paused!==undefined?`<div class="rvGPpzs">⏸ 暫停監控中${j.paused?`（${D(j.paused)} 起）`:""}：不連線、不錄新的；以前的照常整理、傳 YouTube</div>`:""}<div>👁 觀測 <b>${j.obs_days}</b> 天${j.first?`（${D(j.first)} 起）`:""} · 播了 <b>${j.n}</b> 場（${j.live_days} 天有播）· 平均 <b>${j.avg_min}</b> 分鐘／場 · 共 ${j.tot_h} 小時</div>
 <div class="rvGPl"><span style="--c:#2ecc71">+2 保存 <b>${L["2"]||0}</b></span><span style="--c:#9ad94a">+1 待剪輯 <b>${L["1"]||0}</b></span><span style="--c:#f0c419">0 未分類 <b>${L["0"]||0}</b></span><span style="--c:#8a93a3">沒標 <b>${L.n||0}</b></span><span style="--c:#ff4d6d">−2 <b>${L["-2"]||0}</b></span></div>
 ${L["-2"]?`<div class="rvGPm"><span class="rvGPd">🔴 直接 −2（沒剪、從沒 +1/+2）<b>${M.direct||0}</b>${M.auto?`<small>（其中滑過自動 −2：${M.auto}）</small>`:""}</span><span>✂ 剪完才 −2 <b>${M.clip||0}</b></span><span>↘ 曾 +1/+2 後 −2 <b>${M.was||0}</b></span></div>`:""}
 <div class="rvGPe">${j.clip?"":"<small>（還沒剪過）</small> "}曾經 +1：<b>${j.ever1}</b> 場 · 曾經 +2：<b>${j.ever2}</b> 場${j.yt?`（YouTube 傳過 ${j.yt}）`:""} · 剪過 <b>${j.clip}</b> 場${j.out?` · 轉出過 ${j.out}`:""}</div>`;place();}).catch(()=>{});
@@ -49397,6 +49470,14 @@ ${L["-2"]?`<div class="rvGPm"><span class="rvGPd">🔴 直接 −2（沒剪、�
       const c=((C.cats)||[]).find(x=>x.id===id);rvToast(c?`✔ ${nm} → ${c.name}（檔案在背景搬到 📁 ${c.folder}）`:`✔ ${nm} → 未分類`);if(o.onCat)o.onCat(id);return;}
     const ba=e.target.closest("[data-ga]");if(ba){close();
       if(ba.dataset.ga==="clip"){if(typeof PAGES!=="undefined"&&typeof go==="function")go(44,u);else location.hash="clips/"+encodeURIComponent(u);return;}   /* TK_V1.0.95 */
+      const isPC=typeof PAGES!=="undefined"&&typeof go==="function";   /* V1.1.45 跳到這位的各個頁面 */
+      if(ba.dataset.ga==="hist"){if(isPC){try{hostOpen(u);}catch(_){}}else location.hash="who/"+encodeURIComponent(u);return;}
+      if(ba.dataset.ga==="fx"){if(isPC)go(38,u);else location.hash="rvx/"+encodeURIComponent(u);return;}
+      if(ba.dataset.ga==="host"){try{hostOpen(u);}catch(_){}return;}
+      if(ba.dataset.ga==="room"){if(isPC){try{go(0);}catch(_){}}else location.hash="room/"+encodeURIComponent(u);return;}
+      if(ba.dataset.ga==="pause"){if(o.paused){const r=await rvPost("/api/pc/host/pause",{u,on:0});rvToast((r&&r.ok!==false?"":"✖ ")+((r&&r.message)||"沒有成功"));if(r&&r.ok!==false&&o.onPause)o.onPause(false);return;}
+        if(!confirm(`⏸ 暫停監控並封存「${nm}」？\n\n・從現在起不再連線、不錄新的直播（直播中的話這一場停在這裡）\n・以前的場次、影片、等級、分類全部留著，照常整理、照常排隊上傳 YouTube\n・在主播分類移到最下面「⏸ 暫停監控」那區，隨時可以恢復\n\n（要整位刪掉請用下面的「刪除主播」）`))return;
+        const r=await rvPost("/api/pc/host/pause",{u,on:1});rvToast((r&&r.ok!==false?"":"✖ ")+((r&&r.message)||"沒有成功"));if(r&&r.ok!==false&&o.onPause)o.onPause(true);return;}
       if(ba.dataset.ga==="rv"){if(typeof PAGES!=="undefined"&&typeof go==="function")go(38,u);else location.hash="rv/"+encodeURIComponent(u);return;}
       if(!confirm(`🗑 刪除主播「${nm}」？\n\n會刪掉這位的全部資料：所有場次的影片、錄音、截圖、場次紀錄、留言、禮物、觀眾紀錄，並停止監控。\n剪輯成品（初剪、GIF…）不會刪。`))return;
       if(!confirm(`再確認一次：「${nm}」刪了就沒辦法復原。\n\n（只想刪影片的話，請改用 −2）`))return;
@@ -49449,7 +49530,7 @@ ${d.n?`<button class="yhcDel" data-y="del">🗑 全部刪除（${d.n} 個、${GB
       if(!confirm("再確認一次：刪了沒辦法復原。"))return;if((prompt("最後一步：輸入「刪除」兩個字")||"").trim()!=="刪除")return;
       b.disabled=true;b.textContent="刪除中…";const r=await rvPost("/api/pc/yt/hold_purge",{upto:d.upto});rvToast((r&&r.ok!==false?"✔ ":"✖ ")+((r&&r.message)||"沒有成功"));YHC.chk.clear();yhcSave();yhcMount(root);}};}
 function rvGPick(card){const u=card.dataset.ru,row=((RV.L&&RV.L.rows)||[]).find(r=>r.u===u);if(!row)return;
-  hostSheet(card,{u,name:row.name||u,g:row.g||"",onG:ng=>{const c=RV.L.counts||(RV.L.counts={}),old=row.g||"";c[old]=Math.max(0,(c[old]||0)-1);row.g=ng;c[ng]=(c[ng]||0)+1;
+  hostSheet(card,{u,name:row.name||u,g:row.g||"",rvBtn:false,onG:ng=>{const c=RV.L.counts||(RV.L.counts={}),old=row.g||"";c[old]=Math.max(0,(c[old]||0)-1);row.g=ng;c[ng]=(c[ng]||0)+1;
     const T=RV.root&&RV.root.querySelector(".rvChips");if(T)T.innerHTML=rvChips();rvDrawGrid();}});}
 /* TK_V1.0.87 主播每一場的格子：長按 → 從那個時間開始播影片（用檔案總管同一個播放視窗） */
 async function rvTilePlay(tile){const sid=+tile.dataset.s,L=+tile.dataset.t||0;if(!sid)return;if(typeof lvsPlayAt!=="function"){rvToast("這頁沒有播放器");return;}
