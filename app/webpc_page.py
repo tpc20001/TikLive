@@ -2939,7 +2939,7 @@ const vbT=s=>{s=Math.max(0,Math.floor(+s||0));const p=n=>String(n).padStart(2,"0
 const vbD=t=>{if(!t)return "";const d=new Date(t*1000),p=n=>String(n).padStart(2,"0");return `${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;};
 const vbToast=m=>(typeof toast==="function"?toast(m):alert(m));
 async function vbPost(p,d){if(typeof post==="function")return await post(p,d);if(typeof deepPost==="function")return await deepPost(p,d);return {};}
-function vbSrc(i,k){const r=VB.R[i];return r?`${vbB()}/api/pc/vb/file?sid=${r.sid}&k=${k||0}`:"";}
+function vbSrc(i,k){const r=VB.R[i];return r?`${imgB(vbB())}/api/pc/vb/file?sid=${r.sid}&k=${k||0}`:"";}
 function vbCur(){return VB.root&&VB.root.querySelector(".vbStage>video.vbOn");}
 function vbHid(){return VB.root&&VB.root.querySelector(".vbStage>video:not(.vbOn)");}
 function vbMount(root){VB.root=root;
@@ -5801,7 +5801,8 @@ function lvsAhead(ci){if(!LVS.L.length)return;const now=Date.now();if(LVS.ahI===
   lvsGet("/api/pc/vg/ping?q="+LVS.L.slice(ci,ci+200).map(r=>r.sid).join(",")).catch(()=>{});
   lvsPre(ci);}
 /* V1.1.33 照左邊清單的順序，接下來 10 場先載好：每場資訊＋第一個畫面要用的大圖（每段前 3 張）；一次 2 個，近的先；資訊留 3 分鐘給打開時直接用 */
-function lvsPre(ci){LVS.pf=LVS.pf||{};LVS.pfI=LVS.pfI||{};LVS.pfImg=LVS.pfImg||new Map();const NP=window.FASTB?30:20,want=LVS.L.slice(ci+1,ci+1+NP).map(r=>r.sid);   /* V1.1.51 快速通道開著：30 場 */LVS.pfQ=[];LVS.pfN=LVS.pfN||{};want.forEach((sid,k)=>{LVS.pfN[sid]=k;});   /* V1.1.44 20 場、一次 4 個、最近 5 場整段先載 */
+function lvsPre(ci){if(window.FASTP&&!window.FASTB&&!LVS.fpw){LVS.fpw=1;Promise.race([window.FASTP,new Promise(r=>setTimeout(r,700))]).then(()=>lvsPre(ci));return;}   /* V1.1.54 等快速通道確認再預載（網址才會一致、快取用得到） */
+  LVS.pf=LVS.pf||{};LVS.pfI=LVS.pfI||{};LVS.pfImg=LVS.pfImg||new Map();const NP=window.FASTB?30:20,want=LVS.L.slice(ci+1,ci+1+NP).map(r=>r.sid);   /* V1.1.51 快速通道開著：30 場 */LVS.pfQ=[];LVS.pfN=LVS.pfN||{};want.forEach((sid,k)=>{LVS.pfN[sid]=k;});   /* V1.1.44 20 場、一次 4 個、最近 5 場整段先載 */
   want.forEach(sid=>{if(!LVS.pf[sid])LVS.pfQ.push({k:"i",sid});});
   const run=async()=>{if(LVS.pfRun>=(window.FASTB?6:4))return;const it=LVS.pfQ.shift();if(!it)return;LVS.pfRun=(LVS.pfRun||0)+1;
     try{if(it.k==="i"){if(!LVS.pf[it.sid]){LVS.pf[it.sid]=1;const [I,Inf]=await Promise.all([lvsGet("/api/pc/vg/sheetinfo?sid="+it.sid).catch(()=>null),lvsGet("/api/pc/vg/info?sid="+it.sid).catch(()=>null)]);
@@ -6014,7 +6015,7 @@ function lvsPlayAt(sid,info,ri,t,pick){const r=info.ranges[ri];if(!r||r[4]<0){lv
   ov.innerHTML=`<div class="vgPvW"><div class="vgPvH"><b class="vgPvT">${lvsT(F)}</b><span class="grow"></span>${pick?`<button class="pill" data-p="sel">${isOn()?"✔ 已選取":"選取這張"}</button>`:""}<button class="pill" data-p="rp">開回放</button><button class="pill" data-p="x">✕</button></div>
 <div class="vgPvS"><video playsinline autoplay controls></video>${LVS_SWH}</div></div>`;
   document.body.appendChild(ov);const v=ov.querySelector("video"),tl=ov.querySelector(".vgPvT");lvsSwipe(ov,v,lvsSwFrame(sid,info,ri,pick));
-  v.addEventListener("loadedmetadata",()=>{try{v.currentTime=Math.max(0,F-LVS_PRE);}catch(e){}},{once:true});   /* TK_V0.9.28 預覽提早 10 秒開始（看得比較完整）；剪輯照選的格子準時 */v.src=`${lvsB()}/api/pc/vb/file?sid=${sid}&k=${r[4]}`;v.play().catch(()=>{});
+  v.addEventListener("loadedmetadata",()=>{try{v.currentTime=Math.max(0,F-LVS_PRE);}catch(e){}},{once:true});   /* TK_V0.9.28 預覽提早 10 秒開始（看得比較完整）；剪輯照選的格子準時 */v.src=`${imgB(lvsB())}/api/pc/vb/file?sid=${sid}&k=${r[4]}`;v.play().catch(()=>{});
   v.addEventListener("timeupdate",()=>{tl.textContent=lvsT(v.currentTime);});
   const close=fromBack=>{if(!ov.isConnected)return;try{v.pause();v.removeAttribute("src");v.load();}catch(e){}ov.remove();if(fromBack!==true&&typeof vgBackDone==="function")vgBackDone(close);};ov._close=close;
   if(typeof vgBackPush==="function")vgBackPush(close);

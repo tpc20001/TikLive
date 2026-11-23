@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.53"
+APP_VERSION = "1.1.54"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -30249,6 +30249,41 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 if et: self.send_header('ETag', et)
                 self.send_header('Cache-Control', f'private, max-age={int(cache)}' if cache else 'no-store'); self.end_headers()
                 if body: self.wfile.write(body)
+            def _media(self, sid, i):
+                try: _, files, _ = win._web_replay_files(sid); fi = files[i]
+                except Exception: self._send(404, b'not found', 'text/plain'); return
+                if fi['kind'] == 'flv': self._send(415, b'flv', 'text/plain'); return
+                self._stream(Path(fi['path']))
+            def _stream(self, pth):
+                ext = pth.suffix.lower()
+                ctype = {'.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.m4a': 'audio/mp4', '.mp3': 'audio/mpeg'}.get(ext, 'application/octet-stream')
+                try: size = pth.stat().st_size
+                except Exception: self._send(404, b'not found', 'text/plain'); return
+                def touch():
+                    try: _IoGovernor.get().reading()                        # 有人在看：轉檔放慢（跟原本一樣）
+                    except Exception: pass
+                    win._media_t = time.time()
+                touch()
+                rng = str(self.headers.get('Range', '') or '').strip(); m = re.match(r'bytes=(\d*)-(\d*)$', rng); a, b = 0, size - 1; code = 200
+                if m and (m.group(1) or m.group(2)):
+                    if m.group(1): a = int(m.group(1)); b = int(m.group(2)) if m.group(2) else size - 1
+                    else: a = max(0, size - int(m.group(2)))
+                    b = min(b, size - 1)
+                    if a > b:
+                        self.send_response(416); self.send_header('Content-Range', f'bytes */{size}'); self.send_header('Content-Length', '0'); self.end_headers(); return
+                    code = 206
+                self.send_response(code); self.send_header('Content-Type', ctype); self.send_header('Accept-Ranges', 'bytes'); self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Length', str(b - a + 1)); self.send_header('Cache-Control', 'no-store')
+                if code == 206: self.send_header('Content-Range', f'bytes {a}-{b}/{size}')
+                self.end_headers()
+                left = b - a + 1; tt = time.time()
+                with open(pth, 'rb') as fh:
+                    fh.seek(a)
+                    while left > 0:
+                        ch = fh.read(min(262144, left))
+                        if not ch: break
+                        self.wfile.write(ch); left -= len(ch)
+                        if time.time() - tt > 2: touch(); tt = time.time()
             def do_GET(self):
                 try:
                     from urllib.parse import urlsplit, parse_qs, unquote
@@ -30256,6 +30291,12 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     if not P or P[0] != key: self._send(404, b'not found', 'text/plain'); return
                     P = P[1:]; rest = '/'.join(P); cache = 86400; get = None
                     if rest == 'ping': self._send(200, b'ok', 'text/plain'); return
+                    if len(P) == 3 and P[0] == 'media' and P[1].isdigit() and P[2].isdigit():     # V1.1.54 回放影片／錄音（可以跳到任何位置）
+                        self._media(int(P[1]), int(P[2])); return
+                    if rest == 'api/pc/vb/file':                                    # V1.1.54 檔案總管預覽影片
+                        p_ = win._vb_path(int(q.get('sid', '0') or 0), int(q.get('k', '0') or 0))
+                        if p_ is None or not Path(p_).exists(): self._send(404, b'not found', 'text/plain'); return
+                        self._stream(Path(p_)); return
                     jf = None; sid_ = int(q.get('sid', q.get('id', '0')) or 0)          # V1.1.50 唯讀的資料也走這條（回放、檔案總管打開一場要的那幾個）
                     if rest == 'api/replay':
                         raw, gzb = win._replay_body(sid_); acc = 'gzip' in str(self.headers.get('Accept-Encoding', ''))
@@ -44343,6 +44384,7 @@ nav button,nav button.tbg,nav button.tset{flex:1 0 auto;white-space:nowrap;overf
 const B="__BASE__";
 /* V1.1.49 🚀 圖片快速通道：同一個區網、http 時，截圖／預覽大圖／縮圖改從「網頁的埠 +1」那個多執行緒小伺服器拿（不排主程式的隊）；連不到就照原本 */
 window.FASTB=window.FASTB||"";function imgB(b){return window.FASTB||b;}
+function mB(u){return (window.FASTB&&/^\/media\//.test(u)?window.FASTB:(typeof B==="string"?B:""))+u;}   /* V1.1.54 回放影片也走快速通道 */
 window.FASTP=(async function fastInit(){try{if(location.protocol!=="http:")return;const b=typeof B==="string"?B:"";const r=await fetch(b+"/api/pc/fastimg",{cache:"no-store"});if(!r.ok)return;const j=await r.json();if(!j||!j.ok||!j.on||!j.port||!j.key)return;
   const fb=`http://${location.hostname}:${j.port}/${j.key}`;const ac=new AbortController();const tm=setTimeout(()=>ac.abort(),1500);let ok=false;try{const p=await fetch(fb+"/ping",{cache:"no-store",signal:ac.signal});clearTimeout(tm);ok=p.ok&&(await p.text())==="ok";}catch(e){}
   if(ok)window.FASTB=fb;document.documentElement.dataset.fast=ok?"1":"0";
@@ -46208,7 +46250,7 @@ function seek(t,play){
   if(RP.mode==="stream"){RP.seg=loc.s;RP.sbase=loc.t;RP.t=loc.t;RP.fi=loc.s.f;me().src=B+`/aud/${d.id}?t=${loc.t.toFixed(1)}`;RP.pend=null;
     if(want)playMe();btns();paint(true);return;}
   const pos=loc.t-loc.s.start+loc.s.off;RP.t=loc.t;
-  if(RP.fi!==loc.s.f){RP.fi=loc.s.f;RP.pend={pos,play:want};me().src=B+d.files[loc.s.f].url;me().load();if(want)playMe();}
+  if(RP.fi!==loc.s.f){RP.fi=loc.s.f;RP.pend={pos,play:want};me().src=mB(d.files[loc.s.f].url);me().load();if(want)playMe();}
   else if(me().readyState<1){RP.pend={pos,play:want};if(want)playMe();}
   else{try{me().currentTime=pos;}catch(e){}if(want)playMe();else me().pause();}
   btns();paint(true);}
@@ -46462,6 +46504,7 @@ async function viewRP(id,at,how){
   RP.bgIv=setInterval(rsBg,1500);
   const m=me();
   m.addEventListener("loadedmetadata",()=>{if(RP&&RP.pend){const p=RP.pend;RP.pend=null;try{m.currentTime=p.pos;}catch(e){}if(p.play)playMe();}});
+  m.addEventListener("error",()=>{try{const fb=window.FASTB;if(fb&&m.src&&m.src.startsWith(fb)&&!m._fbk){m._fbk=1;const pos=m.currentTime||0;if(RP&&!RP.pend)RP.pend={pos,play:!!RP.playing};m.src=(typeof B==="string"?B:"")+m.src.slice(fb.length);m.load();}}catch(e){}});   /* V1.1.54 快速通道放影片出錯：改走原本的 */
   m.addEventListener("play",()=>{if(RP){RP.playing=true;btns();}const bg=$("#big");if(bg)bg.style.display="none";try{m.playbackRate=+UI.rate||1;}catch(x){}});
   m.addEventListener("loadedmetadata",()=>{try{m.playbackRate=+UI.rate||1;}catch(x){}});
   m.addEventListener("loadedmetadata",()=>{if(RP){RP.rsKey="";rsLay();setTimeout(rsBg,300);}});m.addEventListener("resize",()=>{if(RP){RP.rsKey="";rsLay();}});m.addEventListener("playing",()=>{if(RP){RP.rsKey="";rsLay();}});m.addEventListener("seeked",()=>setTimeout(rsBg,200));
@@ -46519,7 +46562,7 @@ async function viewRP(id,at,how){
   btns();paint(true);RP.iv=setInterval(tick,250);
   if(UI.rpTab&&UI.rpTab!=="chat"){const tb=document.querySelector(`#rtabs button[data-k="${UI.rpTab}"]`);if(tb)setTimeout(()=>tb.click(),0);}
   if(+UI.autoplay)setTimeout(()=>{if(RP&&!RP.playing)seek(RP.t,true);},300);
-  if(RP.mode==="video"||RP.mode==="afile"){const loc=locate(startT,RP.mode);if(loc){RP.fi=loc.s.f;RP.pend={pos:loc.t-loc.s.start+loc.s.off,play:false};m.src=B+d.files[loc.s.f].url;}}
+  if(RP.mode==="video"||RP.mode==="afile"){const loc=locate(startT,RP.mode);if(loc){RP.fi=loc.s.f;RP.pend={pos:loc.t-loc.s.start+loc.s.off,play:false};m.src=mB(d.files[loc.s.f].url);}}
   if(at&&d.live_start){const jo=how==="hl"?0:(UI.jump===undefined||isNaN(+UI.jump))?3:+UI.jump;const t=Math.max(0,Math.min(d.total,at-d.live_start+jo-(how==='hl'?0:0.5)));     // V0.6.15 從送禮者的禮物跳過來（V1.1.19 早 0.5 秒，送禮動畫完整出現）
     if(UI.rpTab!=="gifts"){const tb=document.querySelector('#rtabs button[data-k="gifts"]');if(tb)setTimeout(()=>tb.click(),0);}
     setTimeout(()=>{if(!RP)return;RP.follow=true;seek(t,true);toast(how==="hl"?`✨ 從精彩片段開始播（${hms(at-d.live_start)}）`:`從禮物時間 ${hms(at-d.live_start)} ${jo>=0?"+":"−"}${Math.abs(jo)} 秒開始播`);},400);}
@@ -47102,7 +47145,7 @@ const vbT=s=>{s=Math.max(0,Math.floor(+s||0));const p=n=>String(n).padStart(2,"0
 const vbD=t=>{if(!t)return "";const d=new Date(t*1000),p=n=>String(n).padStart(2,"0");return `${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;};
 const vbToast=m=>(typeof toast==="function"?toast(m):alert(m));
 async function vbPost(p,d){if(typeof post==="function")return await post(p,d);if(typeof deepPost==="function")return await deepPost(p,d);return {};}
-function vbSrc(i,k){const r=VB.R[i];return r?`${vbB()}/api/pc/vb/file?sid=${r.sid}&k=${k||0}`:"";}
+function vbSrc(i,k){const r=VB.R[i];return r?`${imgB(vbB())}/api/pc/vb/file?sid=${r.sid}&k=${k||0}`:"";}
 function vbCur(){return VB.root&&VB.root.querySelector(".vbStage>video.vbOn");}
 function vbHid(){return VB.root&&VB.root.querySelector(".vbStage>video:not(.vbOn)");}
 function vbMount(root){VB.root=root;
@@ -50294,7 +50337,8 @@ function lvsAhead(ci){if(!LVS.L.length)return;const now=Date.now();if(LVS.ahI===
   lvsGet("/api/pc/vg/ping?q="+LVS.L.slice(ci,ci+200).map(r=>r.sid).join(",")).catch(()=>{});
   lvsPre(ci);}
 /* V1.1.33 照左邊清單的順序，接下來 10 場先載好：每場資訊＋第一個畫面要用的大圖（每段前 3 張）；一次 2 個，近的先；資訊留 3 分鐘給打開時直接用 */
-function lvsPre(ci){LVS.pf=LVS.pf||{};LVS.pfI=LVS.pfI||{};LVS.pfImg=LVS.pfImg||new Map();const NP=window.FASTB?30:20,want=LVS.L.slice(ci+1,ci+1+NP).map(r=>r.sid);   /* V1.1.51 快速通道開著：30 場 */LVS.pfQ=[];LVS.pfN=LVS.pfN||{};want.forEach((sid,k)=>{LVS.pfN[sid]=k;});   /* V1.1.44 20 場、一次 4 個、最近 5 場整段先載 */
+function lvsPre(ci){if(window.FASTP&&!window.FASTB&&!LVS.fpw){LVS.fpw=1;Promise.race([window.FASTP,new Promise(r=>setTimeout(r,700))]).then(()=>lvsPre(ci));return;}   /* V1.1.54 等快速通道確認再預載（網址才會一致、快取用得到） */
+  LVS.pf=LVS.pf||{};LVS.pfI=LVS.pfI||{};LVS.pfImg=LVS.pfImg||new Map();const NP=window.FASTB?30:20,want=LVS.L.slice(ci+1,ci+1+NP).map(r=>r.sid);   /* V1.1.51 快速通道開著：30 場 */LVS.pfQ=[];LVS.pfN=LVS.pfN||{};want.forEach((sid,k)=>{LVS.pfN[sid]=k;});   /* V1.1.44 20 場、一次 4 個、最近 5 場整段先載 */
   want.forEach(sid=>{if(!LVS.pf[sid])LVS.pfQ.push({k:"i",sid});});
   const run=async()=>{if(LVS.pfRun>=(window.FASTB?6:4))return;const it=LVS.pfQ.shift();if(!it)return;LVS.pfRun=(LVS.pfRun||0)+1;
     try{if(it.k==="i"){if(!LVS.pf[it.sid]){LVS.pf[it.sid]=1;const [I,Inf]=await Promise.all([lvsGet("/api/pc/vg/sheetinfo?sid="+it.sid).catch(()=>null),lvsGet("/api/pc/vg/info?sid="+it.sid).catch(()=>null)]);
@@ -50498,7 +50542,7 @@ function lvsPlayAt(sid,info,ri,t,pick){const r=info.ranges[ri];if(!r||r[4]<0){lv
   ov.innerHTML=`<div class="vgPvW"><div class="vgPvH"><b class="vgPvT">${lvsT(F)}</b><span class="grow"></span>${pick?`<button class="pill" data-p="sel">${isOn()?"✔ 已選取":"選取這張"}</button>`:""}<button class="pill" data-p="rp">開回放</button><button class="pill" data-p="x">✕</button></div>
 <div class="vgPvS"><video playsinline autoplay controls></video>${LVS_SWH}</div></div>`;
   document.body.appendChild(ov);const v=ov.querySelector("video"),tl=ov.querySelector(".vgPvT");lvsSwipe(ov,v,lvsSwFrame(sid,info,ri,pick));
-  v.addEventListener("loadedmetadata",()=>{try{v.currentTime=Math.max(0,F-LVS_PRE);}catch(e){}},{once:true});   /* TK_V0.9.28 預覽提早 10 秒開始（看得比較完整）；剪輯照選的格子準時 */v.src=`${lvsB()}/api/pc/vb/file?sid=${sid}&k=${r[4]}`;v.play().catch(()=>{});
+  v.addEventListener("loadedmetadata",()=>{try{v.currentTime=Math.max(0,F-LVS_PRE);}catch(e){}},{once:true});   /* TK_V0.9.28 預覽提早 10 秒開始（看得比較完整）；剪輯照選的格子準時 */v.src=`${imgB(lvsB())}/api/pc/vb/file?sid=${sid}&k=${r[4]}`;v.play().catch(()=>{});
   v.addEventListener("timeupdate",()=>{tl.textContent=lvsT(v.currentTime);});
   const close=fromBack=>{if(!ov.isConnected)return;try{v.pause();v.removeAttribute("src");v.load();}catch(e){}ov.remove();if(fromBack!==true&&typeof vgBackDone==="function")vgBackDone(close);};ov._close=close;
   if(typeof vgBackPush==="function")vgBackPush(close);
