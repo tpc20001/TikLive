@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.55"
+APP_VERSION = "1.1.56"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -3010,7 +3010,8 @@ class MainWindow(QMainWindow):
         except Exception: pass
         try:                                                                  # V1.1.41 轉檔排隊先看哪些可以直接合併（背景一條）；熱更新後舊版排的交給這一版重新排
             QTimer.singleShot(8000, self._mqc_start)
-            QTimer.singleShot(3000, lambda: threading.Thread(target=self._fast_srv_start, name='TikLiveFastStart', daemon=True).start())                    # V1.1.49 圖片快速通道
+            QTimer.singleShot(3000, lambda: threading.Thread(target=self._fast_srv_start, name='TikLiveFastStart', daemon=True).start())
+            QTimer.singleShot(5000, self._snapw_bg)                           # V1.1.56 回放截圖縮小版先做好                    # V1.1.49 圖片快速通道
             app_ = QApplication.instance()
             if not getattr(app_, '_tlm_mq_take141', False):
                 setattr(app_, '_tlm_mq_take141', True)
@@ -30392,6 +30393,46 @@ $r | ConvertTo-Json -Depth 4 -Compress
             try: tmp.unlink()
             except Exception: pass
             return src
+
+    def _snapw_bg(self):
+        """V1.1.56 背景先把最近 14 天場次的回放截圖做好縮小版（360、480 寬，平板直放／橫放用），第一次打開就不用現做.
+        一條執行緒、一張一張、每張休息一下；電腦忙就停 1 分鐘；每 30 分鐘看一次有沒有新場次."""
+        app_ = QApplication.instance(); rt = getattr(app_, '_tlm_snapw', None)
+        if rt is None:
+            rt = {'done': set()}
+            try: setattr(app_, '_tlm_snapw', rt)
+            except Exception: pass
+        rt['gen'] = rt.get('gen', 0) + 1; gen = rt['gen']
+        def loop():
+            time.sleep(120)
+            while rt.get('gen') == gen and not _app_closing():
+                try:
+                    t0 = datetime.now().timestamp() - 14 * 86400
+                    rows = self._web_db(f"SELECT s.id FROM sessions s WHERE s.ended_at IS NOT NULL AND {self._WEB_E} >= ? ORDER BY {self._WEB_E} DESC LIMIT 400", (t0,)) or []
+                    for (sid,) in rows:
+                        if rt.get('gen') != gen or _app_closing(): return
+                        sid = int(sid)
+                        if sid in rt['done']: continue
+                        try: L = self._snap_list(sid)
+                        except Exception: L = []
+                        for _t, nm, _p in L[:80]:
+                            for w in (360, 480):
+                                while True:
+                                    try: busy = bool(self._busy_guard()[0])
+                                    except Exception: busy = False
+                                    if not busy or rt.get('gen') != gen: break
+                                    time.sleep(60)
+                                try: self._snap_small(sid, nm, w)
+                                except Exception: pass
+                                time.sleep(0.03)
+                        rt['done'].add(sid)
+                except Exception:
+                    try: self._ui_error('snapw bg')
+                    except Exception: pass
+                for _i in range(1800):
+                    if rt.get('gen') != gen: return
+                    time.sleep(1)
+        threading.Thread(target=loop, name='TikLiveSnapW', daemon=True).start()
 
     def _fast_info(self):
         fs = getattr(QApplication.instance(), '_tlm_fastsrv', None) or {}
