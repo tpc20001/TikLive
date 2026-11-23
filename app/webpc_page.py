@@ -2005,7 +2005,7 @@ body.oldLock{overflow:hidden}
 const B="__BASE__";
 /* V1.1.49 🚀 圖片快速通道：同一個區網、http 時，截圖／預覽大圖／縮圖改從「網頁的埠 +1」那個多執行緒小伺服器拿（不排主程式的隊）；連不到就照原本 */
 window.FASTB=window.FASTB||"";function imgB(b){return window.FASTB||b;}
-(function(){if(window._fjw)return;window._fjw=1;const of0=window.fetch.bind(window),FJ=/\/api\/(replay\?id=|pc\/vg\/sheetinfo\?|pc\/vg\/info\?|pc\/hist\/strip\?|pc\/edit\/list\?|pc\/vb\/note\?|pc\/stt\/sub\?id=\d+$)/;   /* V1.1.50 唯讀資料走快速通道 */
+(function(){if(window._fjw)return;window._fjw=1;const of0=window.fetch.bind(window),FJ=/\/api\/(replay\?id=|sessions\?|pc\/vg\/sheetinfo\?|pc\/vg\/info\?|pc\/hist\/strip\?|pc\/edit\/list\?|pc\/vb\/note\?|pc\/stt\/sub\?id=\d+$)/;   /* V1.1.50 唯讀資料走快速通道 */
   window.fetch=function(u,o){try{const url=typeof u==="string"?u:"",m=String((o&&o.method)||"GET").toUpperCase(),b=typeof B==="string"?B:"";
     if(m==="GET"&&!window.FASTB&&window.FASTP&&!window.FASTD&&url&&FJ.test(url))return Promise.race([window.FASTP,new Promise(r=>setTimeout(r,700))]).then(()=>{window.FASTD=1;return window.fetch(u,o);});
     if(m==="GET"&&window.FASTB&&url&&FJ.test(url)&&(url.startsWith(b+"/api/")||url.startsWith("/api/"))){const p=url.slice(url.indexOf("/api/"));return of0(window.FASTB+p,{cache:"no-store"}).then(r=>r.ok?r:of0(u,o)).catch(()=>of0(u,o));}}catch(e){}return of0(u,o);};})();
@@ -6912,7 +6912,7 @@ function snVis(c,r,C,R,cw,th,gp){const x=c*(cw+gp),y=r*(th+gp);let vx=x,vw=cw,vy
   if(gp<0){if(SN.zh==="r"){if(c<C-1)vw=cw+gp;}else{if(c>0){vx=x-gp;vw=cw+gp;}}if(SN.zv==="d"){if(r<R-1)vh=th+gp;}else{if(r>0){vy=y-gp;vh=th+gp;}}}
   return {x:vx,y:vy,w:Math.max(8,vw),h:Math.max(8,vh)};}
 function snCrop(on){SN.crop=!!on;const w=SN.box&&SN.box.querySelector(".snv");if(w)w.querySelector(".snPg").classList.toggle("crop",SN.crop);}
-function snCropDl(i){const x=SN.L[i];if(!x)return;const im=new Image();im.onload=()=>{const ar=(SN.cw||9)/(SN.th||16),nw=im.naturalWidth,nh=im.naturalHeight;let cw,ch;if(nw/nh>ar){ch=nh;cw=Math.round(nh*ar);}else{cw=nw;ch=Math.round(nw/ar);}
+function snCropDl(i){const x=SN.L[i];if(!x)return;const im=new Image();if(window.FASTB)im.crossOrigin="anonymous";im.onload=()=>{const ar=(SN.cw||9)/(SN.th||16),nw=im.naturalWidth,nh=im.naturalHeight;let cw,ch;if(nw/nh>ar){ch=nh;cw=Math.round(nh*ar);}else{cw=nw;ch=Math.round(nw/ar);}
   const sx=(nw-cw)/2,sy=(nh-ch)*(50-SN.fy)/100,cv=document.createElement("canvas");cv.width=cw;cv.height=ch;cv.getContext("2d").drawImage(im,sx,sy,cw,ch,0,0,cw,ch);
   cv.toBlob(b=>{const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=(x[1]||"snap.jpg").split("/").pop().replace(/\.jpg$/i,"_裁切.jpg");document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},4000);},"image/jpeg",0.92);};im.src=snUrl(i);}
 function snZ(c,r){return 1+(SN.zv==="d"?r:500-r)*200+(SN.zh==="r"?c:199-c);}   /* 誰疊在誰上面：下搭上／上搭下、右搭左／左搭右 */
@@ -6991,7 +6991,7 @@ function snPick(){if(!SN.mp4){(typeof toast==="function"?toast:alert)((SN.mp4why
       (typeof toast==="function"?toast:alert)((j&&j.ok?"✔ ":"✖ ")+((j&&j.message)||"沒有成功"));if(j&&j.ok){ov.remove();SN.regenOn=true;SN.lay=[R,C];setTimeout(()=>snInfo(SN.sid),800);}}};}
 async function snMerge(){const w=SN.box&&SN.box.querySelector(".snv");if(!w||!SN.L.length)return;const T=m=>(typeof toast==="function"?toast(m):0);T("合成中…");
   const N=SN.L.length,C=SN.strip?N:Math.max(1,snLayEff()[1]),R=Math.ceil(N/C),ratio=(SN.th||100)/(SN.cw||56);   /* 跟畫面上一樣：比例、間距（負數重疊）、誰疊誰、▲▼、時間／編號，原圖大小 */
-  const imgs=await Promise.all(SN.L.map((x,i)=>new Promise(res=>{const im=new Image();im.onload=()=>res(im);im.onerror=()=>res(null);im.src=snUrl(i);})));
+  const imgs=await Promise.all(SN.L.map((x,i)=>new Promise(res=>{const im=new Image();if(window.FASTB)im.crossOrigin="anonymous";im.onload=()=>res(im);im.onerror=()=>res(null);im.src=snUrl(i);})));
   const nat=imgs.find(Boolean);if(!nat){T("✖ 讀不到照片");return;}let tw=nat.naturalWidth||720,k=tw/(SN.cw||56),gs=(+SN.gap||0)*k,th=Math.round(tw*ratio);
   let CW=C*tw+(C-1)*gs,CH=R*th+(R-1)*gs;const f=Math.min(1,16000/Math.max(CW,CH));if(f<1){tw*=f;th*=f;gs*=f;CW*=f;CH*=f;}
   const cv=document.createElement("canvas");cv.width=Math.max(1,Math.round(CW));cv.height=Math.max(1,Math.round(CH));const g=cv.getContext("2d");g.fillStyle="#000";g.fillRect(0,0,cv.width,cv.height);

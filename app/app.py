@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.51"
+APP_VERSION = "1.1.52"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -17865,10 +17865,12 @@ try { NLConnect | Out-Null; Unset
         if rest=='api/room': J(self._web_room(q.get('u',''))); return
         if rest=='api/sessions':                                   # V0.6.23b 背景執行，不再讓主程式畫面卡住
             a=(int(q.get('n','60') or 60),q.get('from',''),q.get('to',''),q.get('u',''),q.get('q',''),q.get('cat',''),q.get('us',''))
-            def w(sock=sock,a=a):
-                try: b=json.dumps(_json_safe(self._web_sessions(*a)),ensure_ascii=False)
-                except Exception as ex: b=json.dumps({'error':str(ex)},ensure_ascii=False)
-                self._ui_call.emit(lambda b=b,s=sock: self._phone_send(s,'200 OK',b,'application/json; charset=utf-8'))
+            gz_='gzip' in str((getattr(sock,'_hdr',{}) or {}).get('accept-encoding',''))
+            def w(sock=sock,a=a,gz_=gz_):
+                try: r_=self._web_sessions(*a)
+                except Exception as ex: r_={'error':str(ex)}
+                data=self._json_resp(r_,gz_)                                   # V1.1.52 壓縮也在背景
+                self._ui_call.emit(lambda d=data,s=sock: self._phone_raw(s,d))
             threading.Thread(target=w,daemon=True).start(); return
         if rest=='api/days': J(self._web_days()); return
         if rest=='api/hchart':                                     # V0.6.05 每場小圖表（背景執行緒查資料庫）
@@ -30267,6 +30269,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     elif rest == 'api/pc/edit/list': jf = lambda: {'sid': sid_, 'projects': win._edit_projects_cx(sid_)}
                     elif rest == 'api/pc/vb/note': jf = lambda: win._snote_get(sid_)
                     elif rest == 'api/pc/stt/sub': v_ = str(q.get('v', '') or ''); jf = lambda: win._stt_sub(sid_, v_)
+                    elif rest == 'api/sessions':                                    # V1.1.52 歷史清單（唯讀）
+                        a_ = (int(q.get('n', '60') or 60), q.get('from', ''), q.get('to', ''), q.get('u', ''), q.get('q', ''), q.get('cat', ''), q.get('us', ''))
+                        jf = lambda: win._web_sessions(*a_)
                     if jf is not None:
                         with sem: r_ = jf()
                         b_ = json.dumps(_json_safe(r_), ensure_ascii=False).encode('utf-8'); acc = 'gzip' in str(self.headers.get('Accept-Encoding', ''))
@@ -30350,6 +30355,14 @@ $r | ConvertTo-Json -Depth 4 -Compress
     def _fast_info(self):
         fs = getattr(QApplication.instance(), '_tlm_fastsrv', None) or {}
         return {'ok': bool(fs.get('srv')), 'port': int(fs.get('port') or 0), 'key': fs.get('key') or '', 'on': bool(self.cfg('phone.fastimg'))}
+
+    def _json_resp(self, obj, gz):
+        """V1.1.52 JSON 整包回應（含 gzip）在背景做好."""
+        raw = json.dumps(_json_safe(obj), ensure_ascii=False).encode('utf-8'); ex = ''
+        if gz and len(raw) > 2048:
+            import gzip as _gz
+            raw = _gz.compress(raw, 5); ex = 'Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n'
+        return (f'HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: {len(raw)}\r\nCache-Control: no-store\r\n{ex}Connection: close\r\n\r\n').encode('ascii') + raw
 
     def _phone_raw(self, sock, data):
         """V1.1.49 背景已經做好的整包回應（標頭＋內容），畫面執行緒只負責寫出去."""
@@ -44470,7 +44483,7 @@ async function J(p){const r=await fetch(B+p,{cache:"no-store"});if(r.status===40
 /* V1.1.49 回放打開時那幾個小請求（縮圖列、筆記、剪輯清單、字幕、截圖資訊…）：預載過的 90 秒內直接用，不再跟電腦要；有任何寫入（POST）就全部清掉 */
 (function(){if(window.PFM)return;const of=window.fetch.bind(window),M=new Map(),pat=/\/api\/pc\/(hist\/strip\?|vb\/note\?|edit\/list\?|stt\/sub\?id=\d+$|snap\/info\?|gfx$|novideo$)/;window.PFM=M;
   const key=u=>{const i=u.indexOf("/api/pc/");return i<0?u:u.slice(i);},mk=r=>new Response(r.b,{status:r.s,headers:r.h});
-  const FJ=/\/api\/(replay\?id=|pc\/vg\/sheetinfo\?|pc\/vg\/info\?|pc\/hist\/strip\?|pc\/edit\/list\?|pc\/vb\/note\?|pc\/stt\/sub\?id=\d+$)/;   /* V1.1.50 這幾個唯讀資料走快速通道 */
+  const FJ=/\/api\/(replay\?id=|sessions\?|pc\/vg\/sheetinfo\?|pc\/vg\/info\?|pc\/hist\/strip\?|pc\/edit\/list\?|pc\/vb\/note\?|pc\/stt\/sub\?id=\d+$)/;   /* V1.1.50 這幾個唯讀資料走快速通道 */
   const of0=of;const ofx=(u,o)=>{try{const url=typeof u==="string"?u:"";const b=typeof B==="string"?B:"";
       if(!window.FASTB&&window.FASTP&&!window.FASTD&&url&&FJ.test(url))return Promise.race([window.FASTP,new Promise(r=>setTimeout(r,700))]).then(()=>{window.FASTD=1;return ofx(u,o);});   /* 剛打開：等快速通道確認（最多 0.7 秒） */
       if(window.FASTB&&url&&FJ.test(url)&&(url.startsWith(b+"/api/")||url.startsWith("/api/"))){const p=url.slice(url.indexOf("/api/"));
@@ -47406,7 +47419,7 @@ function snVis(c,r,C,R,cw,th,gp){const x=c*(cw+gp),y=r*(th+gp);let vx=x,vw=cw,vy
   if(gp<0){if(SN.zh==="r"){if(c<C-1)vw=cw+gp;}else{if(c>0){vx=x-gp;vw=cw+gp;}}if(SN.zv==="d"){if(r<R-1)vh=th+gp;}else{if(r>0){vy=y-gp;vh=th+gp;}}}
   return {x:vx,y:vy,w:Math.max(8,vw),h:Math.max(8,vh)};}
 function snCrop(on){SN.crop=!!on;const w=SN.box&&SN.box.querySelector(".snv");if(w)w.querySelector(".snPg").classList.toggle("crop",SN.crop);}
-function snCropDl(i){const x=SN.L[i];if(!x)return;const im=new Image();im.onload=()=>{const ar=(SN.cw||9)/(SN.th||16),nw=im.naturalWidth,nh=im.naturalHeight;let cw,ch;if(nw/nh>ar){ch=nh;cw=Math.round(nh*ar);}else{cw=nw;ch=Math.round(nw/ar);}
+function snCropDl(i){const x=SN.L[i];if(!x)return;const im=new Image();if(window.FASTB)im.crossOrigin="anonymous";im.onload=()=>{const ar=(SN.cw||9)/(SN.th||16),nw=im.naturalWidth,nh=im.naturalHeight;let cw,ch;if(nw/nh>ar){ch=nh;cw=Math.round(nh*ar);}else{cw=nw;ch=Math.round(nw/ar);}
   const sx=(nw-cw)/2,sy=(nh-ch)*(50-SN.fy)/100,cv=document.createElement("canvas");cv.width=cw;cv.height=ch;cv.getContext("2d").drawImage(im,sx,sy,cw,ch,0,0,cw,ch);
   cv.toBlob(b=>{const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=(x[1]||"snap.jpg").split("/").pop().replace(/\.jpg$/i,"_裁切.jpg");document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},4000);},"image/jpeg",0.92);};im.src=snUrl(i);}
 function snZ(c,r){return 1+(SN.zv==="d"?r:500-r)*200+(SN.zh==="r"?c:199-c);}   /* 誰疊在誰上面：下搭上／上搭下、右搭左／左搭右 */
@@ -47485,7 +47498,7 @@ function snPick(){if(!SN.mp4){(typeof toast==="function"?toast:alert)((SN.mp4why
       (typeof toast==="function"?toast:alert)((j&&j.ok?"✔ ":"✖ ")+((j&&j.message)||"沒有成功"));if(j&&j.ok){ov.remove();SN.regenOn=true;SN.lay=[R,C];setTimeout(()=>snInfo(SN.sid),800);}}};}
 async function snMerge(){const w=SN.box&&SN.box.querySelector(".snv");if(!w||!SN.L.length)return;const T=m=>(typeof toast==="function"?toast(m):0);T("合成中…");
   const N=SN.L.length,C=SN.strip?N:Math.max(1,snLayEff()[1]),R=Math.ceil(N/C),ratio=(SN.th||100)/(SN.cw||56);   /* 跟畫面上一樣：比例、間距（負數重疊）、誰疊誰、▲▼、時間／編號，原圖大小 */
-  const imgs=await Promise.all(SN.L.map((x,i)=>new Promise(res=>{const im=new Image();im.onload=()=>res(im);im.onerror=()=>res(null);im.src=snUrl(i);})));
+  const imgs=await Promise.all(SN.L.map((x,i)=>new Promise(res=>{const im=new Image();if(window.FASTB)im.crossOrigin="anonymous";im.onload=()=>res(im);im.onerror=()=>res(null);im.src=snUrl(i);})));
   const nat=imgs.find(Boolean);if(!nat){T("✖ 讀不到照片");return;}let tw=nat.naturalWidth||720,k=tw/(SN.cw||56),gs=(+SN.gap||0)*k,th=Math.round(tw*ratio);
   let CW=C*tw+(C-1)*gs,CH=R*th+(R-1)*gs;const f=Math.min(1,16000/Math.max(CW,CH));if(f<1){tw*=f;th*=f;gs*=f;CW*=f;CH*=f;}
   const cv=document.createElement("canvas");cv.width=Math.max(1,Math.round(CW));cv.height=Math.max(1,Math.round(CH));const g=cv.getContext("2d");g.fillStyle="#000";g.fillRect(0,0,cv.width,cv.height);
