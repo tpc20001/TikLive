@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.63"
+APP_VERSION = "1.1.64"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -36925,6 +36925,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
     # 全部在背景執行緒（TikLivePhoneFx）：adb／scrcpy 都不在畫面執行緒跑；scrcpy 只收手機已經壓好的畫面（不解碼、不開視窗），電腦幾乎不花力氣。
     # 先錄成 MKV（斷電、拔線也播得了）→ 下播後 FFmpeg 不重新壓縮換成 MP4（idle）→ 搬到影片資料夾 TikLive_手機特效\帳號\。
     PFX_PKG = 'com.zhiliaoapp.musically'
+    PFX_PKGS = ('com.zhiliaoapp.musically', 'com.ss.android.ugc.trill')       # V1.1.64 TikTok 國際版有兩個套件名稱（各地區不同），兩個都認
+
+    def _pfx_pkg(self):
+        return ((self._pfx_S().get('dev') or {}).get('pkg')) or self.PFX_PKG
 
     def _pfx_S(self):
         app = QApplication.instance(); S = getattr(app, '_tlm_pfx', None) if app is not None else None
@@ -37018,7 +37022,11 @@ $r | ConvertTo-Json -Depth 4 -Compress
         o = {}
         for k, p in (('model', 'ro.product.model'), ('andv', 'ro.build.version.release'), ('miui', 'ro.miui.ui.version.name')):
             rc, out = self._pfx_sh(adb, ser, 'getprop ' + p, 8); o[k] = out.strip()[:40] if rc == 0 else ''
-        rc, out = self._pfx_sh(adb, ser, 'pm path ' + self.PFX_PKG, 10); o['tiktok'] = 'package:' in out
+        o['pkg'] = ''
+        for pk in self.PFX_PKGS:
+            rc, out = self._pfx_sh(adb, ser, 'pm path ' + pk, 10)
+            if 'package:' in out: o['pkg'] = pk; break
+        o['tiktok'] = bool(o['pkg'])
         rc, out = self._pfx_sh(adb, ser, 'input keyevent 0', 10)                     # 小米沒開「USB 調試（安全設置）」會不准程式按手機
         o['inject'] = not ('INJECT_EVENTS' in out or 'SecurityException' in out)
         return o
@@ -37075,9 +37083,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
             if d.get('st') == 'ok':
                 if d0.get('serial') != d.get('serial') or d0.get('st') != 'ok':
                     d.update(self._pfx_props(adb, d['serial'])); S['info_t'] = 0
-                    self._pfx_log(f'手機連上：{d.get("model") or d["serial"]}（Android {d.get("andv","?")}）' + ('' if d.get('tiktok') else '；⚠ 沒裝 TikTok') + ('' if d.get('inject') else '；⚠ 小米要開「USB 調試（安全設置）」'))
+                    self._pfx_log(f'手機連上：{d.get("model") or d["serial"]}（Android {d.get("andv","?")}）' + (f'；TikTok：{d.get("pkg")}' if d.get('tiktok') else '；⚠ 沒裝 TikTok') + ('' if d.get('inject') else '；沒開「USB 偵錯（安全設定）」：程式不能按手機，螢幕要一直亮著才行'))
                 else:
-                    for k in ('model', 'andv', 'miui', 'tiktok', 'inject', 'bat', 'temp', 'awake', 'fg', 'act', 'info_t'): 
+                    for k in ('model', 'andv', 'miui', 'tiktok', 'pkg', 'inject', 'bat', 'temp', 'awake', 'fg', 'act', 'info_t'): 
                         if k in d0: d.setdefault(k, d0[k])
             elif d0.get('st') == 'ok': self._pfx_log('手機斷線（' + {'unauth': '要在手機上按允許', 'none': '找不到手機', 'offline': '離線'}.get(d.get('st'), d.get('st', '')) + '）')
             S['dev'] = d
@@ -37106,7 +37114,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             cur['chk'] = now
             if dev.get('awake') is False: self._pfx_sh(adb, ser, 'input keyevent KEYCODE_WAKEUP', 8)
             fg, act = dev.get('fg') or '', dev.get('act') or ''; cur['act'] = act
-            if fg and fg != self.PFX_PKG:
+            if fg and fg not in self.PFX_PKGS:
                 cur['bad'] = int(cur.get('bad') or 0) + 1
                 if cur['bad'] >= 2:
                     self._pfx_log(f'前景不是 TikTok（{fg}），重新打開 @{cur["u"]} 的直播間'); cur['bad'] = 0; cur['reopen'] = int(cur.get('reopen') or 0) + 1
@@ -37115,12 +37123,12 @@ $r | ConvertTo-Json -Depth 4 -Compress
 
     def _pfx_open(self, adb, ser, u):
         sh = lambda c, t=12: self._pfx_sh(adb, ser, c, t)
-        sh('input keyevent KEYCODE_WAKEUP'); time.sleep(0.7); sh('wm dismiss-keyguard'); time.sleep(0.5)
+        sh('input keyevent KEYCODE_WAKEUP'); time.sleep(0.7); sh('wm dismiss-keyguard'); time.sleep(0.5)   # 沒開「安全設定」時按鍵會被擋：沒關係，螢幕設成充電時不休眠就一直亮著
         sh('svc power stayon usb')                                               # 插著 USB 不關螢幕
-        sh(f'am start -a android.intent.action.VIEW -d "https://www.tiktok.com/@{u}/live" -p {self.PFX_PKG}', 20)
+        sh(f'am start -a android.intent.action.VIEW -d "https://www.tiktok.com/@{u}/live" -p {self._pfx_pkg()}', 20)
         for _ in range(8):
             time.sleep(1.5); fg, act = self._pfx_fg(adb, ser)
-            if fg == self.PFX_PKG: return act or '?'
+            if fg in self.PFX_PKGS: return act or '?'
         return ''
 
     def _pfx_tmp(self):
@@ -37172,7 +37180,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         if cur: self._pfx_seg_done(cur); self._pfx_log(f'停止錄 @{cur["u"]}（{why}）')
         S['cur'] = None
         if adb and ser:
-            for c in ('input keyevent KEYCODE_HOME', 'svc power stayon false', 'input keyevent KEYCODE_SLEEP'): self._pfx_sh(adb, ser, c, 8)
+            self._pfx_sh(adb, ser, 'am start -a android.intent.action.MAIN -c android.intent.category.HOME', 10)   # 回桌面（不用按鍵，沒開安全設定也行）；不關「充電時螢幕不休眠」
 
     def _pfx_seg_done(self, cur):
         f = (cur or {}).get('file')
@@ -37315,8 +37323,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
             if not T or dev.get('st') != 'ok': return {'ok': False, 'message': '手機還沒連上'}
             def run_(T=T, ser=dev['serial']):
                 self._pfx_sh(T[0], ser, 'input keyevent KEYCODE_WAKEUP', 8); time.sleep(0.6); self._pfx_sh(T[0], ser, 'wm dismiss-keyguard', 8)
-                self._pfx_sh(T[0], ser, 'monkey -p ' + self.PFX_PKG + ' -c android.intent.category.LAUNCHER 1', 15); time.sleep(5)
-                fg, act = self._pfx_fg(T[0], ser); self._pfx_log(f'測試：前景 {fg or "?"} / {act or "?"}' + ('（✔ TikTok 打開了）' if fg == self.PFX_PKG else '（✖ 沒看到 TikTok）'))
+                self._pfx_sh(T[0], ser, f'am start -a android.intent.action.VIEW -d "https://www.tiktok.com/" -p {self._pfx_pkg()}', 15); time.sleep(5)
+                fg, act = self._pfx_fg(T[0], ser); self._pfx_log(f'測試：前景 {fg or "?"} / {act or "?"}' + ('（✔ TikTok 打開了）' if fg in self.PFX_PKGS else '（✖ 沒看到 TikTok）'))
                 S['info_t'] = 0
             threading.Thread(target=run_, daemon=True).start(); return {'ok': True, 'message': '叫醒手機、打開 TikTok…（5 秒後看下面紀錄）'}
         return {'ok': False, 'message': '不認得的操作'}
@@ -50267,7 +50275,7 @@ function pfxGuide(){return `<details class="pfC"><summary>📋 第一次設定�
 <li>TikTok（國際版，不是抖音）登入一個<b>小帳號</b>（帳號密碼你自己在手機上打，程式不碰）。</li>
 <li>設定 → 密碼與安全 → 螢幕鎖定：<b>無</b>（程式才能自己叫醒進直播間）。</li>
 <li>設定 → 我的手機 → 全部參數 → 連按「MIUI 版本」7 下 → 開啟開發者選項。</li>
-<li>設定 → 更多設定 → 開發者選項：打開 <b>USB 偵錯</b>、<b>USB 偵錯（安全設定）</b>（小米會要你登入小米帳號、可能要插 SIM 卡；沒開這個程式不能幫你按手機）、<b>不鎖定螢幕（充電時）</b>。</li>
+<li>設定 → 更多設定 → 開發者選項：打開 <b>USB 偵錯</b>、<b>USB 偵錯（安全設定）</b>（小米會要你登入小米帳號、插 SIM 卡；<b>不想登入可以不開</b>，只是程式不能幫你按手機：螢幕就靠「充電時螢幕不休眠」一直亮著）、<b>不鎖定螢幕（充電時）</b>。</li>
 <li>設定 → 應用程式 → TikTok → 省電策略：<b>無限制</b>；自動啟動打開。系統更新：關閉自動下載更新。</li>
 <li>通知：打開「勿擾」或把其他 App 的懸浮通知關掉，不然會錄進畫面。</li>
 <li>用<b>資料傳輸線</b>插電腦（有些線只能充電）。手機跳出「允許 USB 偵錯嗎？」→ 勾<b>一律允許這台電腦</b> → 允許。</li>
@@ -50277,7 +50285,7 @@ function pfxHtml(j){const D=j.dev||{},c=j.cur,cf=j.cfg||{},gr=j.gr||{};const gC=
   const devS={ok:`<span class="pfOk">✔ 連上</span> ${rvE(D.model||D.serial||"")} · Android ${rvE(D.andv||"?")}${D.miui?" · "+rvE(D.miui):""}`,notools:`<span class="pfW">還沒裝 scrcpy</span>`,none:`<span class="pfBad">找不到手機</span>（USB 插好了嗎？開發者選項的 USB 偵錯有開嗎？）`,unauth:`<span class="pfW">手機上要按「允許 USB 偵錯」</span>（勾一律允許）`,offline:`<span class="pfBad">手機離線</span>（拔掉重插）`}[D.st]||`<span class="pfBad">${rvE(D.st||"?")}</span> ${rvE(D.msg||"")}`;
   let h=`<div class="pfC"><h4>🔌 狀態</h4><div class="pfR">${j.tools?`<span>scrcpy <span class="pfOk">✔ v${rvE(j.scrv||"?")}</span></span>`:`<span>scrcpy <span class="pfBad">✖ 沒裝</span></span> <button class="pfB go" data-pa="tools" ${j.dl_run?"disabled":""}>⬇ 自動下載（官方 GitHub）</button>`}${j.dl?`<span class="pfSub">${rvE(j.dl)}</span>`:""}</div>
   <div class="pfR" style="margin-top:4px">📱 ${devS}</div>`;
-  if(D.st==="ok")h+=`<div class="pfR">${D.bat!=null?`🔋 ${D.bat}%`:""} ${D.temp!=null?`<span class="${D.temp>=(cf.temp_stop||46)?"pfBad":D.temp>=40?"pfW":""}">🌡 ${D.temp.toFixed(1)}°C</span>`:""} <span>TikTok ${D.tiktok?'<span class="pfOk">✔</span>':'<span class="pfBad">✖ 沒裝（要國際版）</span>'}</span> <span>安全設定 ${D.inject===false?'<span class="pfBad">✖ 要開「USB 偵錯（安全設定）」</span>':'<span class="pfOk">✔</span>'}</span> ${D.fg?`<span class="pfSub">前景：${rvE(D.fg)}${D.act?" / "+rvE(String(D.act).split(".").pop()):""}</span>`:""} <button class="pfB" data-pa="test">🔔 測試手機</button></div>`;
+  if(D.st==="ok")h+=`<div class="pfR">${D.bat!=null?`🔋 ${D.bat}%`:""} ${D.temp!=null?`<span class="${D.temp>=(cf.temp_stop||46)?"pfBad":D.temp>=40?"pfW":""}">🌡 ${D.temp.toFixed(1)}°C</span>`:""} <span>TikTok ${D.tiktok?`<span class="pfOk">✔</span>${D.pkg&&D.pkg.indexOf("trill")>=0?' <span class="pfSub">(trill)</span>':""}`:'<span class="pfBad">✖ 沒裝（要國際版）</span>'}</span> <span>安全設定 ${D.inject===false?'<span class="pfW">沒開（也能錄：螢幕要設「充電時螢幕不休眠」、鎖定「無」）</span>':'<span class="pfOk">✔</span>'}</span> ${D.fg?`<span class="pfSub">前景：${rvE(D.fg)}${D.act?" / "+rvE(String(D.act).split(".").pop()):""}</span>`:""} <button class="pfB" data-pa="test">🔔 測試手機</button></div>`;
   if(!j.tools)h+=`<div class="pfSub" style="margin-top:6px">也可以自己到 github.com/Genymobile/scrcpy 的 Releases 下載 scrcpy-win64 的 zip，解壓到 ${rvE(j.tdir)}</div>`;
   h+=`</div>`;
   if(c)h+=`<div class="pfC pfRec"><h4>${c.rec?'<span class="pfDot"></span>':"⏳ "}正在錄：${rvE(c.name||c.u)} @${rvE(c.u)} ${gC(c.u)}</h4><div class="pfR"><span>已錄 ${pfxDur(j.now-(c.t_start||j.now))}</span><span>第 ${c.seg||0} 段</span><span>這段 ${((c.size||0)/1e6).toFixed(0)} MB</span>${c.sid?`<span>#${rvE(c.sid)}</span>`:""}${c.reopen?`<span class="pfW">重新打開直播間 ${c.reopen} 次</span>`:""}${c.off_t?`<span class="pfW">主播斷線中（等 ${cf.off_grace||90} 秒）</span>`:""}<button class="pfB st" data-pa="stop">⏹ 停止</button></div>${j.wait?`<div class="pfW" style="margin-top:4px">${rvE(j.wait)}</div>`:""}</div>`;
