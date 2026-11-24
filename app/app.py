@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.67"
+APP_VERSION = "1.1.68"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -37258,6 +37258,17 @@ $r | ConvertTo-Json -Depth 4 -Compress
             self._pfx_log(f'▶ 排進 YouTube：{dst.name}')
         except Exception as e: self._pfx_log(f'排 YouTube 失敗：{e!r}')
 
+    def _pfx_fdur(self, p, dflt):
+        """V1.1.68 手機特效檔真正的長度（FFmpeg 量，記住）；量不到用錄影的起訖時間."""
+        c = self.__dict__.setdefault('_pfx_fdur_c', {})
+        try: k = (str(p), p.stat().st_size)
+        except Exception: return dflt
+        if k not in c:
+            try:
+                ff = self._experiment_ffmpeg(); c[k] = float(ffmpeg_info(ff, p)[3] or 0) if ff else 0.0
+            except Exception: c[k] = 0.0
+        return c[k] if c[k] > 0 else dflt
+
     def _pfx_segs(self, sid):
         """這場手機特效的每一段：[(檔案, 影片第 0 秒的時間 e0, 長度)]；e0 用聲音對齊的（還沒對好用錄影開始時間）."""
         D = self._phr_db()['items']; out = []
@@ -37267,7 +37278,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             if not p.is_file(): continue
             it = D.get(str(x.get('phr') or '')) or {}
             e0 = float(it['e0']) if it.get('e0') is not None else float(x.get('t0') or 0)
-            out.append((p, e0, float(x.get('t1') or 0) - float(x.get('t0') or 0), bool(it.get('e0') is not None and it.get('st') == 'ok' and '用錄影時間' not in str(it.get('msg') or '')), ix))
+            out.append((p, e0, self._pfx_fdur(p, float(x.get('t1') or 0) - float(x.get('t0') or 0)), bool(it.get('e0') is not None and it.get('st') == 'ok' and '用錄影時間' not in str(it.get('msg') or '')), ix))
         return out
 
     def _pfx_gifts(self, sid, mn=10):
@@ -37344,7 +37355,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         try: sid = int(d.get('sid'))
         except Exception: return {'ok': False, 'message': '沒有場次'}
         mode = 'big' if d.get('mode') == 'big' else 'user'; u = str(d.get('u') or '')
-        pre = max(0.0, min(30.0, float(d.get('pre', cfg.get('pre', 2))))); post = max(2.0, min(60.0, float(d.get('post', cfg.get('post', 12)))))
+        pre = max(-60.0, min(60.0, float(d.get('pre', cfg.get('pre', 2))))); post = max(-pre + 1.0, min(180.0, float(d.get('post', cfg.get('post', 12)))))
         mn = int(d.get('min', cfg.get('big', 2000) if mode == 'big' else cfg.get('min', 10)))
         for k_, v_ in (('pre', pre), ('post', post), ('big' if mode == 'big' else 'min', mn)): cfg[k_] = v_
         self._pfx_cfg_save(cfg)
@@ -37352,27 +37363,31 @@ $r | ConvertTo-Json -Depth 4 -Compress
         segs = self._pfx_segs(sid)
         if not segs: return {'ok': False, 'message': '這場沒有手機特效版'}
         adj = d.get('adj') if isinstance(d.get('adj'), dict) else {}; use_def = bool(d.get('adj') is not None)
-        W0 = []                                                                 # V1.1.67 每個禮物自己的前後（格子調過的 → 學到的 → 面板的）
+        W0 = []; n_in = 0                                                       # V1.1.67 每個禮物自己的前後（格子調過的 → 學到的 → 面板的）
         for rid, ts, g, dd, nk in rows:
             a_ = adj.get(str(rid))
-            if a_: p0, p1 = max(0.0, min(60.0, float(a_[0]))), max(1.0, min(120.0, float(a_[1])))
+            if a_: p0 = max(-120.0, min(60.0, float(a_[0]))); p1 = max(-p0 + 1.0, min(180.0, float(a_[1])))   # V1.1.68 開始可以比送禮晚（前＝負的）
             elif use_def: dp = self._pfx_gdef(g); p0, p1 = (dp[0], dp[1]) if dp else (pre, post)
             else: p0, p1 = pre, post
+            p1 = max(p1, -p0 + 1.0)
             for i, (p, e0, dur, _al, _ix) in enumerate(segs):
                 pos = float(ts) - e0
-                if -p0 <= pos <= dur + 1: W0.append([i, max(0.0, pos - p0), min(dur, pos + p1)]); break
+                if pos + p1 > 0 and pos - p0 < dur:
+                    a0, b0 = max(0.0, pos - p0), min(dur, pos + p1)
+                    if b0 - a0 >= 0.5: W0.append([i, a0, b0]); n_in += 1
+                    break
         W = []                                                                  # (檔案序, 開始, 結束)：同一檔相連的併成一段
         for i, a, b in sorted(W0):
             if W and W[-1][0] == i and a <= W[-1][2] + 0.5: W[-1][2] = max(W[-1][2], b)
             else: W.append([i, a, b])
-        rows = [r[1:] for r in rows]
+        rows = [r[1:] for r in rows]; n_all = len(rows)
         if not W: return {'ok': False, 'message': f'沒有符合的禮物落在手機錄到的時間裡（{len(rows)} 個禮物）'}
         u0 = str((self._web_db('SELECT username FROM sessions WHERE id=?', (sid,)) or [['']])[0][0] or ''); nick = self.streamer_names.get(u0, u0)
         who = (re.sub(r'[\\/:*?"<>|\s]+', '_', (rows[0][3] if rows else u) or u)[:20] if mode == 'user' else f'{mn}鑽以上')
-        name = re.sub(r'[\\/:*?"<>|\s]+', '_', f'{nick or sid}_#{sid}_{who}_禮物{len(rows)}個')[:90]
+        name = re.sub(r'[\\/:*?"<>|\s]+', '_', f'{nick or sid}_#{sid}_{who}_禮物{n_in}個')[:90]
         S['gj'] = {'run': True, 'msg': f'準備剪 {len(W)} 段', 'done': 0, 'total': len(W), 'name': name, 't0': time.time()}
         threading.Thread(target=self._pfx_gclip_run, args=(segs, W, name), daemon=True, name='TikLivePfxGift').start()
-        return {'ok': True, 'message': f'🎁 開始剪：{len(rows)} 個禮物 → {len(W)} 段（每段送禮前 {pre:g} 秒～後 {post:g} 秒），好了會出現在下面'}
+        return {'ok': True, 'message': f'🎁 開始剪：{n_in} 個禮物 → {len(W)} 段（照每一格設定的前後；連在一起的併成一段），好了會出現在下面'}
 
     def _pfx_gclip_run(self, segs, W, name):
         S = self._pfx_S(); J = S['gj']; tmpd = self._pfx_tmp() / ('g_' + str(int(time.time())))
@@ -37387,10 +37402,15 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     if not bz: break
                     J['msg'] = '電腦忙，先等'; time.sleep(5)
                 o = tmpd / f'{k:04d}.mp4'
-                r = subprocess.run([ff, '-y', '-v', 'error', '-ss', f'{a:.2f}', '-i', str(segs[i][0]), '-t', f'{b - a:.2f}', '-map', '0:v:0', '-map', '0:a:0?'] + va +
-                                   ['-r', '30', '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart', str(o)],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=900, **_no_window_kwargs(idle=True))
-                if r.returncode == 0 and o.is_file(): parts.append(o)
+                r = subprocess.run([ff, '-y', '-v', 'error', '-ss', f'{a:.3f}', '-i', str(segs[i][0]), '-t', f'{b - a:.3f}', '-map', '0:v:0', '-map', '0:a:0?'] + va +
+                                   ['-r', '30', '-af', 'aresample=async=1:first_pts=0,apad', '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart', str(o)],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=900, **_no_window_kwargs(idle=True))   # 輸入端 -ss＋重新壓縮＝對到那一格；輸出 -t 讓影音都剛好那麼長
+                if r.returncode == 0 and o.is_file():
+                    parts.append(o)
+                    try:
+                        got = float(ffmpeg_info(ff, o)[3] or 0); J['req'] = J.get('req', 0) + (b - a); J['got'] = J.get('got', 0) + got
+                        if abs(got - (b - a)) > 0.2: self._pfx_log(f'禮物剪輯第 {k + 1} 段長度 {got:.2f} 秒，設定 {b - a:.2f} 秒')
+                    except Exception: pass
                 J.update(done=k + 1, msg=f'剪第 {k + 1}/{len(W)} 段（{"顯示卡" if enc != "libx264" else "CPU"}）')
             if not parts: raise RuntimeError('一段都沒剪成')
             lst = tmpd / 'list.txt'; lst.write_text(''.join(f"file '{p.as_posix()}'\n" for p in parts), encoding='utf-8')
@@ -37400,7 +37420,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
             r = subprocess.run([ff, '-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', str(lst), '-c', 'copy', '-movflags', '+faststart', str(tmp)],
                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=1800, **_no_window_kwargs(idle=True))
             if r.returncode != 0 or not tmp.is_file(): raise RuntimeError('接起來失敗：' + (r.stderr or b'').decode('utf-8', 'replace')[-200:])
-            os.replace(tmp, out); J.update(msg=f'✔ 好了：{out.name}（{len(parts)} 段）', out=out.name); self._pfx_log('🎁 禮物剪輯：' + out.name)
+            try: tot = float(ffmpeg_info(ff, out if out.exists() else tmp)[3] or 0) if tmp.exists() or out.exists() else 0
+            except Exception: tot = 0
+            os.replace(tmp, out); J.update(msg=f'✔ 好了：{out.name}（{len(parts)} 段，共 {tot:.1f} 秒；設定 {float(J.get("req") or 0):.1f} 秒）', out=out.name); self._pfx_log('🎁 禮物剪輯：' + out.name)
         except Exception as e: J['msg'] = f'✖ {e}'; self._pfx_log(f'禮物剪輯失敗：{e}')
         finally:
             J['run'] = False; shutil.rmtree(tmpd, ignore_errors=True)
@@ -50652,6 +50674,8 @@ function geCss(){if(document.getElementById("geCss"))return;const s=document.cre
 #pfxGE video{width:100%;max-height:52vh;background:#000;border-radius:10px}
 #pfxGE .geBar{position:relative;height:30px;border-radius:8px;background:rgba(120,140,170,.18);overflow:hidden}#pfxGE .geBar i{position:absolute;top:0;bottom:0;background:#2e7df655;border-left:3px solid #2e7df6;border-right:3px solid #2e7df6}#pfxGE .geBar em{position:absolute;top:0;bottom:0;width:2px;background:#f5c542}#pfxGE .geBar u{position:absolute;top:0;bottom:0;width:2px;background:#ff4d6d}
 #pfxGE .geF{display:flex;gap:8px;align-items:center;padding:10px 96px 10px 12px;border-top:1px solid rgba(140,150,165,.25)}#pfxGE .geF span{flex:1;font-size:13px}`;document.head.appendChild(s);}
+function geRg(r){const a=r.pos-GE.cur.pre,e=r.pos+GE.cur.post;return [Math.max(0,Math.min(r.pos-30,a-5)),Math.max(r.pos+60,e+10)];}   /* V1.1.68 時間條範圍跟著開始／結束延伸 */
+function geLab(pre,post){return (pre>=0?`前 ${pre}`:`後 ${-pre} 起`)+` / 後 ${post}`;}
 function geF(t){t=Math.max(0,t);const h=Math.floor(t/3600),m=Math.floor(t%3600/60),x=Math.floor(t%60);return (h?h+":"+String(m).padStart(2,"0"):m)+":"+String(x).padStart(2,"0");}
 async function pfxGEOpen(sid){geCss();geClose();Object.assign(GE,{sid:+sid,mode:null,u:"",nick:"",rows:[],shown:10,sel:-1,adj:{},G:null,min:10,big:2000,pre:2,post:12});
   const o=document.createElement("div");o.id="pfxGE";o.innerHTML=`<div class="geH"><b>🎁 禮物剪輯 #${String(sid).padStart(5,"0")}</b><button class="gb" data-g="x">✕ 關閉</button></div><div class="geB" id="geB"><div class="geS">讀取中…</div></div><div class="geF" id="geF"></div>`;document.body.appendChild(o);
@@ -50662,12 +50686,12 @@ function geClose(){const o=document.getElementById("pfxGE");if(o){try{const v=o.
 async function geLoad(mode,u,nick){GE.mode=mode;GE.u=u||"";GE.nick=nick||"";GE.sel=-1;GE.shown=10;GE.adj={};
   const mn=mode==="big"?GE.big:GE.min;let j=null;try{j=await rvGet(`/api/pc/pfx/gtiles?sid=${GE.sid}&mode=${mode}&u=${encodeURIComponent(GE.u)}&min=${mn}`);}catch(e){}
   GE.rows=(j&&j.rows)||[];geDraw();}
-function geTile(r,i){const a=GE.adj[r.rid];const pre=a?a[0]:r.pre,post=a?a[1]:r.post;return `<div class="geT${GE.sel===i?" sel":""}${a?" ok":""}" data-gt="${i}"><span class="geS">#${i+1} · ${geF(r.pos)}</span><b>${rvE(r.g||"禮物")}</b><span>💎 ${r.dia.toLocaleString()}</span><span class="geS">${rvE(r.nick)}</span><span>${a?'<span class="ok">✔ </span>':""}前 ${pre} / 後 ${post}${!a&&r.dn?` <span class="geS">(學 ${r.dn})</span>`:""}</span></div>`;}
+function geTile(r,i){const a=GE.adj[r.rid];const pre=a?a[0]:r.pre,post=a?a[1]:r.post;return `<div class="geT${GE.sel===i?" sel":""}${a?" ok":""}" data-gt="${i}"><span class="geS">#${i+1} · ${geF(r.pos)}</span><b>${rvE(r.g||"禮物")}</b><span>💎 ${r.dia.toLocaleString()}</span><span class="geS">${rvE(r.nick)}</span><span>${a?'<span class="ok">✔ </span>':""}${geLab(pre,post)}${!a&&r.dn?` <span class="geS">(學 ${r.dn})</span>`:""}</span></div>`;}
 function geDraw(){const B=document.getElementById("geB"),F=document.getElementById("geF");if(!B)return;const G=GE.G||{rows:[]};let h="";
   h+=`<div class="geR"><button class="gb${GE.mode==="big"?" on":""}" data-g="big">💎 不分是誰：單次 ≥</button><input class="gn" type="number" id="geBig" min="1" value="${GE.big}"><span>鑽（這場 ${G.big||0} 個）</span></div>
   <div class="geR"><span>👤 選一位大哥（不算 &lt;</span><input class="gn" type="number" id="geMin" min="0" value="${GE.min}"><span>鑽）</span><button class="gb" data-g="ref">重新列</button></div>
   <div class="geU">${(G.rows||[]).map(r=>`<button class="gb${GE.mode==="user"&&GE.u===r[0]?" on":""}" data-g="user" data-u="${rvE(r[0])}" data-n="${rvE(r[1])}">${rvE(r[1])} · ${r[2]} 個 · ${r[3].toLocaleString()}💎</button>`).join("")||'<span class="geS">這場沒有符合的送禮</span>'}</div>`;
-  if(GE.mode){const R=GE.rows,n=Math.min(GE.shown,R.length);h+=`<div class="geS">${GE.mode==="big"?`單次 ≥ ${GE.big} 鑽`:rvE(GE.nick)}：${R.length} 個禮物落在手機錄到的時間。點一格調整那一段（只載那一小段），調好按 OK；沒調的用預設（學到的優先）。</div>`;
+  if(GE.mode){const R=GE.rows,n=Math.min(GE.shown,R.length);h+=`<div class="geS">${GE.mode==="big"?`單次 ≥ ${GE.big} 鑽`:rvE(GE.nick)}：${R.length} 個禮物落在手機錄到的時間。點一格調整那一段（只載那一小段），調好按 OK；沒調的用預設（學到的優先）。開始可以比送禮晚（特效延遲時用 +1／+5）。輸出就是藍色那段，秒數一樣。</div>`;
     h+=`<div class="geStrip" id="geStrip">${R.slice(0,n).map(geTile).join("")}${n<R.length?`<div class="geMore" id="geMore">往右滑載入更多（${R.length-n}）</div>`:""}</div>`;
     if(GE.sel>=0&&R[GE.sel])h+=geEdHtml(R[GE.sel]);}
   B.innerHTML=h;
@@ -50678,16 +50702,19 @@ function geEdHtml(r){const a=GE.adj[r.rid]||[r.pre,r.post];GE.cur={pre:+a[0],pos
   return `<div class="geEd" id="geEd"><div class="geR"><b>#${GE.sel+1} ${rvE(r.g)} 💎${r.dia.toLocaleString()}</b><span class="geS">${rvE(r.nick)} · 手機影片 ${geF(r.pos)}${r.al?"":" · ⏱ 時間對齊（可能差幾秒）"}</span></div>
   <video id="geV" playsinline preload="metadata" src="${rvB()}/api/pc/pfx/file?i=${r.f}#t=${Math.max(0,r.pos-a[0]).toFixed(1)}"></video>
   <div class="geBar" id="geBar"></div>
-  <div class="geR"><span>開始：送禮前</span><button class="gb" data-g="a" data-v="5">−5</button><button class="gb" data-g="a" data-v="1">−1</button><b id="gePre" style="min-width:44px;text-align:center"></b><button class="gb" data-g="a" data-v="-1">+1</button><button class="gb" data-g="a" data-v="-5">+5</button><span>秒</span></div>
-  <div class="geR"><span>結束：送禮後</span><button class="gb" data-g="b" data-v="-5">−5</button><button class="gb" data-g="b" data-v="-1">−1</button><b id="gePost" style="min-width:44px;text-align:center"></b><button class="gb" data-g="b" data-v="1">+1</button><button class="gb" data-g="b" data-v="5">+5</button><span>秒</span></div>
+  <div class="geR" id="geSpan" style="font-weight:700"></div>
+  <div class="geR"><span>開始</span><button class="gb" data-g="a" data-v="5">−5</button><button class="gb" data-g="a" data-v="1">−1</button><b id="gePre" style="min-width:96px;text-align:center"></b><button class="gb" data-g="a" data-v="-1">+1</button><button class="gb" data-g="a" data-v="-5">+5</button><span>秒</span></div>
+  <div class="geR"><span>結束</span><button class="gb" data-g="b" data-v="-5">−5</button><button class="gb" data-g="b" data-v="-1">−1</button><b id="gePost" style="min-width:96px;text-align:center"></b><button class="gb" data-g="b" data-v="1">+1</button><button class="gb" data-g="b" data-v="5">+5</button><span>秒</span></div>
   <div class="geR"><button class="gb" data-g="play">▶ 播這段</button><button class="gb" data-g="pa">⏮ 從開始</button><button class="gb" data-g="pg">🎁 從送禮</button><span style="flex:1"></span><button class="gb go" data-g="ok">✔ OK（下一個）</button></div></div>`;}
-function geBarDraw(){const r=GE.rows[GE.sel];if(!r)return;const L=Math.max(0,r.pos-30),H=r.pos+60,W=H-L,b=document.getElementById("geBar");if(!b)return;
+function geBarDraw(){const r=GE.rows[GE.sel];if(!r)return;const [L,H]=geRg(r),W=H-L,b=document.getElementById("geBar");if(!b)return;
   const a=Math.max(0,r.pos-GE.cur.pre),e=r.pos+GE.cur.post;const v=document.getElementById("geV");const ct=v?v.currentTime:a;
   b.innerHTML=`<i style="left:${(a-L)/W*100}%;width:${(e-a)/W*100}%"></i><em style="left:${(r.pos-L)/W*100}%"></em><u style="left:${Math.min(100,Math.max(0,(ct-L)/W*100))}%"></u>`;
-  const p=document.getElementById("gePre"),q=document.getElementById("gePost");if(p)p.textContent=GE.cur.pre;if(q)q.textContent=GE.cur.post;}
+  const p=document.getElementById("gePre"),q=document.getElementById("gePost"),z=document.getElementById("geSpan");
+  if(p)p.textContent=GE.cur.pre>0?`送禮前 ${GE.cur.pre}`:GE.cur.pre<0?`送禮後 ${-GE.cur.pre}`:"送禮當下";if(q)q.textContent=`送禮後 ${GE.cur.post}`;
+  if(z)z.textContent=`剪 ${geF(a)} → ${geF(e)}（${(e-a).toFixed(0)} 秒）・送禮在 ${geF(r.pos)}`;}
 function geVidWire(){const v=document.getElementById("geV");geBarDraw();if(!v)return;const r=GE.rows[GE.sel];
   v.addEventListener("timeupdate",()=>{geBarDraw();if(GE.stopAt!=null&&v.currentTime>=GE.stopAt){v.pause();GE.stopAt=null;}});
-  const bar=document.getElementById("geBar");bar.addEventListener("click",e=>{const R=bar.getBoundingClientRect(),L=Math.max(0,r.pos-30);try{v.currentTime=L+(e.clientX-R.left)/R.width*(r.pos+60-L);}catch(x){}});}
+  const bar=document.getElementById("geBar");bar.addEventListener("click",e=>{const R=bar.getBoundingClientRect(),[L,H]=geRg(r);try{v.currentTime=L+(e.clientX-R.left)/R.width*(H-L);}catch(x){}});}
 function gePlay(from){const v=document.getElementById("geV"),r=GE.rows[GE.sel];if(!v||!r)return;const a=Math.max(0,r.pos-GE.cur.pre);GE.stopAt=r.pos+GE.cur.post;try{v.currentTime=from==null?a:from;}catch(e){}v.play().catch(()=>{});}
 async function geClick(e){const b=e.target.closest("[data-g],[data-gt]");if(!b)return;
   if(b.dataset.gt!=null){const i=+b.dataset.gt;GE.sel=GE.sel===i?-1:i;const sx=(document.getElementById("geStrip")||{}).scrollLeft||0;geDraw();const st=document.getElementById("geStrip");if(st)st.scrollLeft=sx;const ed=document.getElementById("geEd");if(ed)ed.scrollIntoView({behavior:"smooth",block:"nearest"});return;}
@@ -50696,8 +50723,8 @@ async function geClick(e){const b=e.target.closest("[data-g],[data-gt]");if(!b)r
   if(g==="big"){GE.big=+(document.getElementById("geBig").value||2000);geLoad("big");return;}
   if(g==="user"){GE.min=+(document.getElementById("geMin").value||0);geLoad("user",b.dataset.u,b.dataset.n);return;}
   if(g==="ref"){GE.min=+(document.getElementById("geMin").value||0);try{GE.G=await rvGet(`/api/pc/pfx/gifts?sid=${GE.sid}&min=${GE.min}`);}catch(x){}GE.mode=null;geDraw();return;}
-  if(g==="a"&&r){GE.cur.pre=Math.max(0,Math.min(60,GE.cur.pre+(+b.dataset.v)));geBarDraw();const v=document.getElementById("geV");try{v.currentTime=Math.max(0,r.pos-GE.cur.pre);}catch(x){}return;}
-  if(g==="b"&&r){GE.cur.post=Math.max(1,Math.min(120,GE.cur.post+(+b.dataset.v)));geBarDraw();gePlay(Math.max(0,r.pos+GE.cur.post-3));return;}
+  if(g==="a"&&r){GE.cur.pre=Math.max(-120,Math.min(60,GE.cur.pre+(+b.dataset.v)));if(GE.cur.post<1-GE.cur.pre)GE.cur.post=1-GE.cur.pre;geBarDraw();const v=document.getElementById("geV");try{v.currentTime=Math.max(0,r.pos-GE.cur.pre);}catch(x){}return;}
+  if(g==="b"&&r){GE.cur.post=Math.max(1-GE.cur.pre,Math.min(180,GE.cur.post+(+b.dataset.v)));geBarDraw();gePlay(Math.max(0,r.pos+GE.cur.post-3));return;}
   if(g==="play"){gePlay();return;}if(g==="pa"){gePlay();return;}if(g==="pg"&&r){gePlay(r.pos);return;}
   if(g==="ok"&&r){GE.adj[r.rid]=[GE.cur.pre,GE.cur.post];const x=await rvPost("/api/pc/pfx/set",{op:"glearn",sid:GE.sid,rid:r.rid,g:r.g,dia:r.dia,pre:GE.cur.pre,post:GE.cur.post,d_pre:r.pre,d_post:r.post,al:r.al});
     if(x&&x.def){GE.rows.forEach(y=>{if(y.g===r.g&&!GE.adj[y.rid]){y.pre=x.def[0];y.post=x.def[1];y.dn=x.def[2];}});}
