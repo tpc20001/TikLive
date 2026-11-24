@@ -923,6 +923,9 @@ def route(win, sock, method, rest, q, body):
         _bg(win, sock, win._health_page); return True
     if name == 'pfx' and method == 'GET': J(win._pfx_info_web()); return True          # V1.1.63 手機錄特效狀態（只讀）
     if name == 'pfx/gifts' and method == 'GET': J(win._pfx_gifts(q.get('sid', '0'), int(q.get('min', '10') or 10))); return True   # V1.1.66 這場送禮的人（只讀）
+    if name == 'pfx/gtiles' and method == 'GET': J(win._pfx_gtiles(int(q.get('sid', '0') or 0), 'big' if q.get('mode') == 'big' else 'user', q.get('u', ''), int(q.get('min', '10') or 10))); return True   # V1.1.67 禮物格子（只讀）
+    if name == 'pfx/has' and method == 'GET':                                    # V1.1.67 這場有沒有手機特效版（剪刀先選版本用）
+        J({'ok': True, 'files': [Path(x['f']).name for x in win._pfx_idx() if str(x.get('sid')) == str(q.get('sid', '')) and Path(x['f']).is_file()]}); return True
     if name == 'pfx/gfile' and method == 'GET':
         p_ = win._pfx_gfile(q.get('f', ''))
         if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True

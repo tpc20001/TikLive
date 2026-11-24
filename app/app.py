@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.66"
+APP_VERSION = "1.1.67"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -4889,7 +4889,7 @@ class MainWindow(QMainWindow):
             try: key = (str(p), p.stat().st_size)
             except Exception: continue
             if key not in dc: dc[key] = ffmpeg_info(ff, p)[3] if ff else 0.0; new_ = True
-            out.append({'k': k, 'name': p.name, 'dur': round(float(dc[key] or 0), 2), 'sz': key[1], 'path': str(p), 'cut': k >= nv})
+            out.append({'k': k, 'name': p.name, 'dur': round(float(dc[key] or 0), 2), 'sz': key[1], 'path': str(p), 'cut': k >= nv and '手機特效' not in p.name, 'pfx': '手機特效' in p.name})
         if new_: self._edit_dur_save()
         return out
 
@@ -37261,13 +37261,13 @@ $r | ConvertTo-Json -Depth 4 -Compress
     def _pfx_segs(self, sid):
         """這場手機特效的每一段：[(檔案, 影片第 0 秒的時間 e0, 長度)]；e0 用聲音對齊的（還沒對好用錄影開始時間）."""
         D = self._phr_db()['items']; out = []
-        for x in self._pfx_idx():
+        for ix, x in enumerate(self._pfx_idx()):
             if str(x.get('sid')) != str(sid): continue
             p = Path(x['f'])
             if not p.is_file(): continue
             it = D.get(str(x.get('phr') or '')) or {}
             e0 = float(it['e0']) if it.get('e0') is not None else float(x.get('t0') or 0)
-            out.append((p, e0, float(x.get('t1') or 0) - float(x.get('t0') or 0), bool(it.get('e0') is not None and it.get('st') == 'ok' and '用錄影時間' not in str(it.get('msg') or ''))))
+            out.append((p, e0, float(x.get('t1') or 0) - float(x.get('t0') or 0), bool(it.get('e0') is not None and it.get('st') == 'ok' and '用錄影時間' not in str(it.get('msg') or '')), ix))
         return out
 
     def _pfx_gifts(self, sid, mn=10):
@@ -37277,6 +37277,64 @@ $r | ConvertTo-Json -Depth 4 -Compress
         segs = self._pfx_segs(sid)
         return {'ok': True, 'sid': sid, 'rows': [[str(a or ''), str(b or a or ''), int(c or 0), int(d or 0), int(e or 0)] for a, b, c, d, e in rows], 'big': int(big[0][0] or 0),
                 'segs': len(segs), 'aligned': sum(1 for x in segs if x[3]), 'cfg': {k: self._pfx_cfg().get(k) for k in ('pre', 'post', 'min', 'big')}}
+
+    def _pfx_grows(self, sid, mode, u, mn):
+        if mode == 'user': return self._web_db('SELECT rowid, ts, gift_name, diamonds, nickname FROM gifts WHERE session_id=? AND username=? AND diamonds>=? ORDER BY ts', (int(sid), u, int(mn))) or []
+        return self._web_db('SELECT rowid, ts, gift_name, diamonds, nickname FROM gifts WHERE session_id=? AND diamonds>=? ORDER BY ts', (int(sid), int(mn))) or []
+
+    def _pfx_gtiles(self, sid, mode, u, mn):
+        """V1.1.67 禮物格子：每個禮物在手機影片的第幾秒、預設前後（學到的優先）."""
+        segs = self._pfx_segs(sid); cfg = self._pfx_cfg(); out = []
+        for rid, ts, g, dd, nk in self._pfx_grows(sid, mode, u, mn):
+            for p, e0, dur, al, ix in segs:
+                pos = float(ts) - e0
+                if -5 <= pos <= dur + 1:
+                    dp = self._pfx_gdef(g)
+                    out.append({'rid': rid, 'ts': float(ts), 'g': str(g or ''), 'dia': int(dd or 0), 'nick': str(nk or ''), 'f': ix, 'pos': round(pos, 2), 'fdur': round(dur, 1), 'al': al,
+                                'pre': dp[0] if dp else float(cfg.get('pre', 2)), 'post': dp[1] if dp else float(cfg.get('post', 12)), 'dn': dp[2] if dp else 0})
+                    break
+        return {'ok': True, 'sid': int(sid), 'rows': out, 'n_all': len(out)}
+
+    def _pfx_learn_path(self): return Path(PACKAGE_ROOT) / '_DB_SSD' / 'pfx_gift_learn.json'
+
+    def _pfx_learn(self):
+        c = self.__dict__.get('_pfx_learn_c')
+        if c is None:
+            try: c = list(json.loads(self._pfx_learn_path().read_text(encoding='utf-8')) or [])
+            except Exception: c = []
+            self.__dict__['_pfx_learn_c'] = c
+        return c
+
+    def _pfx_learn_add(self, d):
+        """每次在格子按 OK：記下這個禮物你調的前後秒數＋當時的情況（之後分析延遲原因、算預設）."""
+        L = self._pfx_learn()
+        try:
+            es = dict(getattr(self, 'engine_status', {}) or {})
+            L.append({'t': round(time.time()), 'sid': int(d.get('sid') or 0), 'rid': int(d.get('rid') or 0), 'g': str(d.get('g') or '')[:40], 'dia': int(d.get('dia') or 0),
+                      'pre': round(float(d.get('pre')), 1), 'post': round(float(d.get('post')), 1), 'd_pre': d.get('d_pre'), 'd_post': d.get('d_post'),
+                      'al': bool(d.get('al')), 'live_n': sum(1 for v in es.values() if v == 'LIVE'), 'u': str((self._web_db('SELECT username FROM sessions WHERE id=?', (int(d.get('sid') or 0),)) or [['']])[0][0] or '')})
+        except Exception as e: return {'ok': False, 'message': f'記不起來：{e}'}
+        del L[:-3000]
+        try:
+            p = self._pfx_learn_path(); tp = p.with_suffix('.tmp'); tp.write_text(json.dumps(L, ensure_ascii=False), encoding='utf-8'); os.replace(tp, p)
+        except Exception: pass
+        dp = self._pfx_gdef(d.get('g'))
+        return {'ok': True, 'message': '✔ 記住了' + (f'（{d.get("g")} 之後預設 前 {dp[0]:g}／後 {dp[1]:g} 秒，{dp[2]} 筆）' if dp else ''), 'def': dp}
+
+    def _pfx_gdef(self, g):
+        """學到的預設（前, 後, 筆數）：同一種禮物最近 10 筆（≥2 筆）→ 不然全部最近 20 筆（≥3 筆）；
+        取中位數，離中位數太遠的（差 > max(2 秒, 35%)）先不算，剩下的平均（剩不到 2 筆就再等資料）."""
+        L = self._pfx_learn(); g = str(g or '')
+        S_ = [x for x in L if x.get('g') == g][-10:]
+        if len(S_) < 2: S_ = L[-20:] if len(L) >= 3 else []
+        if len(S_) < 2: return None
+        res = []
+        for k in ('pre', 'post'):
+            v = sorted(float(x[k]) for x in S_); m = v[len(v) // 2] if len(v) % 2 else (v[len(v) // 2 - 1] + v[len(v) // 2]) / 2
+            keep = [x for x in v if abs(x - m) <= max(2.0, abs(m) * 0.35)]
+            if len(keep) < 2: return None
+            res.append(round(sum(keep) / len(keep) * 2) / 2)
+        return (res[0], res[1], len(S_))
 
     def _pfx_gdir(self): d = Path(self.video_root()) / 'TikLive_手機特效' / '_禮物剪輯'; d.mkdir(parents=True, exist_ok=True); return d
 
@@ -37290,19 +37348,24 @@ $r | ConvertTo-Json -Depth 4 -Compress
         mn = int(d.get('min', cfg.get('big', 2000) if mode == 'big' else cfg.get('min', 10)))
         for k_, v_ in (('pre', pre), ('post', post), ('big' if mode == 'big' else 'min', mn)): cfg[k_] = v_
         self._pfx_cfg_save(cfg)
-        if mode == 'user': rows = self._web_db('SELECT ts, gift_name, diamonds, nickname FROM gifts WHERE session_id=? AND username=? AND diamonds>=? ORDER BY ts', (sid, u, mn)) or []
-        else: rows = self._web_db('SELECT ts, gift_name, diamonds, nickname FROM gifts WHERE session_id=? AND diamonds>=? ORDER BY ts', (sid, mn)) or []
+        rows = self._pfx_grows(sid, mode, u, mn)
         segs = self._pfx_segs(sid)
         if not segs: return {'ok': False, 'message': '這場沒有手機特效版'}
-        W = []                                                                  # (檔案序, 開始, 結束)
-        for ts, g, dd, nk in rows:
-            for i, (p, e0, dur, _al) in enumerate(segs):
+        adj = d.get('adj') if isinstance(d.get('adj'), dict) else {}; use_def = bool(d.get('adj') is not None)
+        W0 = []                                                                 # V1.1.67 每個禮物自己的前後（格子調過的 → 學到的 → 面板的）
+        for rid, ts, g, dd, nk in rows:
+            a_ = adj.get(str(rid))
+            if a_: p0, p1 = max(0.0, min(60.0, float(a_[0]))), max(1.0, min(120.0, float(a_[1])))
+            elif use_def: dp = self._pfx_gdef(g); p0, p1 = (dp[0], dp[1]) if dp else (pre, post)
+            else: p0, p1 = pre, post
+            for i, (p, e0, dur, _al, _ix) in enumerate(segs):
                 pos = float(ts) - e0
-                if -pre <= pos <= dur + 1:
-                    a, b = max(0.0, pos - pre), min(dur, pos + post)
-                    if W and W[-1][0] == i and a <= W[-1][2] + 0.5: W[-1][2] = max(W[-1][2], b)   # 連在一起的併成一段
-                    else: W.append([i, a, b])
-                    break
+                if -p0 <= pos <= dur + 1: W0.append([i, max(0.0, pos - p0), min(dur, pos + p1)]); break
+        W = []                                                                  # (檔案序, 開始, 結束)：同一檔相連的併成一段
+        for i, a, b in sorted(W0):
+            if W and W[-1][0] == i and a <= W[-1][2] + 0.5: W[-1][2] = max(W[-1][2], b)
+            else: W.append([i, a, b])
+        rows = [r[1:] for r in rows]
         if not W: return {'ok': False, 'message': f'沒有符合的禮物落在手機錄到的時間裡（{len(rows)} 個禮物）'}
         u0 = str((self._web_db('SELECT username FROM sessions WHERE id=?', (sid,)) or [['']])[0][0] or ''); nick = self.streamer_names.get(u0, u0)
         who = (re.sub(r'[\\/:*?"<>|\s]+', '_', (rows[0][3] if rows else u) or u)[:20] if mode == 'user' else f'{mn}鑽以上')
@@ -37571,6 +37634,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         if op == 'tools':
             threading.Thread(target=self._pfx_tools_get, daemon=True, name='TikLivePhoneFxDl').start(); return {'ok': True, 'message': '開始下載 scrcpy（官方 GitHub）'}
         if op == 'gclip': return self._pfx_gclip(d)
+        if op == 'glearn': return self._pfx_learn_add(d)
         if op == 'reboot':
             T = self._pfx_tools(); dev = S.get('dev') or {}
             if not T or dev.get('st') != 'ok': return {'ok': False, 'message': '手機還沒連上'}
@@ -45987,7 +46051,7 @@ const RULES=[
   {t:"空間不夠時",d:"<ul><li>SSD 剩不到 <b>"+RU_V('rec.ssd_min_free','GB',60)+"</b>：新的錄影改成直接錄在影片庫硬碟。</li><li>影片硬碟剩不到 <b>"+RU_V('rec.video_min_free','GB',30)+"</b>：不開始新的錄影（<b>聲音照錄</b>）。</li><li>🛡 C 槽守門員每分鐘看 C 剩多少、減少多快：第 1 級先停不急的背景工作；第 2 級全速把東西搬走；第 3 級（剩不到 15 GB 或 20 分鐘內會滿）才會一位一位停掉正在錄到 C 的影片（F → E → 未分級先停）。</li></ul>"},
   {t:"同一場直播的判定（斷線、重開）",d:"<ul><li>主播斷線後 <b>"+RU_V('conn.grace_minutes','分鐘',10)+"內</b>連回同一個直播間＝<b>續寫同一場</b>（錄影會分成第 2 段、第 3 段…）。</li><li>直播中卻 <b>"+RU_V('monitor.silent_min','分鐘',30)+"</b>沒有任何留言、禮物、進場、人數也沒變（而且沒在錄影）→ 重新連一次確認：還在播就續寫，結束了就把結束時間改回最後有資料的時間。</li><li>程式重開、斷電、超過 10 分鐘才連回來 → 會變成<b>另一場</b>。這種被切開的，用「⧉ 合併重複場次」合回一場（見「場次合併」）。</li></ul>"},
   {t:"開程式、熱更新時的監控",d:"<ul><li>開程式 3 秒後自動開始監控（設定可以關）。正在錄的場次在熱更新、重開時會<b>接著錄同一場</b>。</li><li>搬硬碟切換後，如果找不到影片硬碟（例如 R 槽代號跑掉），程式<b>先不開始監控</b>，不會錄到別的地方，會提示你去磁碟管理改代號。</li></ul>"},
-  {t:"📲 手機錄特效",d:"<ul><li>一支安卓手機（紅米 10）用 USB 接電腦，裝好 scrcpy（工具頁可自動從官方 GitHub 下載）。</li><li>主播開播 → 手機自己亮起來、打開那個直播間 → 錄下手機畫面＋聲音（有禮物特效）。一支手機一次錄一場。</li><li>錄誰：<b>S 級</b>的主播，照「工具 → 📲 手機錄特效」裡拖好的順序；按「▶ 開始」後，排最前面、正在直播的那位先錄，他下播換下一位還在播的。要加人＝在審核改成 S。</li><li>改順序要按右下角「✔ 套用」才生效；套用後（或排更前面的開播了）正在錄的不是第一順位 → 倒數 10 秒停掉、換錄新的那位。</li><li>主播斷線／下播超過 90 秒才停；TikTok 被關掉或跳走會自己重新打開直播間；拔線再插回、scrcpy 中斷 → 接著錄下一段（_p2、_p3…）。</li><li>手機超過 46°C 先停錄，降到 41°C 再繼續。</li><li>先錄在 SSD（MKV，斷電也播得了），結束後不重新壓縮換成 MP4（idle），搬到影片資料夾 <b>TikLive_手機特效\\帳號\\</b>；不到 15 秒的段丟掉。</li><li>回放：同一場可以切換「原本／手機」版本（用聲音對齊；對不上用錄影時間，可能差幾秒）。剪輯器那場的來源最後多一個手機特效檔。</li><li>S 級：手機特效版也排進 YouTube（標題加「手機特效版」，跟原本的是不同一部）。容量預測也算進去。</li><li>🎁 禮物剪輯：「錄好的」那場按「禮物剪輯」→ 選一位大哥（不算 10 鑽以下），或不分是誰、單次 ≥ 2000 鑽的全部 → 每個禮物剪送禮前 2 秒～後 12 秒，連在一起的併成一段，接成一支 MP4（用顯示卡壓縮）。</li><li>自己處理：通知欄被拉下來、USB 用途選單、系統對話框 → 20 秒內自己收掉；離開 TikTok 會重新打開直播間；連不上 3 分鐘重新啟動 adb；處理不了的（找不到手機、電量低沒充電、在播卻沒在錄）會出現在狀態卡和這頁最上面。</li><li>每週二、週五凌晨 3～7 點（沒在錄、S 級都沒在播時）自動重開手機一次；每次連上都把亮度調到最低。</li><li>全部在背景執行緒：手機只把壓好的畫面傳過來，電腦不解碼、不開視窗。</li></ul>"},
+  {t:"📲 手機錄特效",d:"<ul><li>一支安卓手機（紅米 10）用 USB 接電腦，裝好 scrcpy（工具頁可自動從官方 GitHub 下載）。</li><li>主播開播 → 手機自己亮起來、打開那個直播間 → 錄下手機畫面＋聲音（有禮物特效）。一支手機一次錄一場。</li><li>錄誰：<b>S 級</b>的主播，照「工具 → 📲 手機錄特效」裡拖好的順序；按「▶ 開始」後，排最前面、正在直播的那位先錄，他下播換下一位還在播的。要加人＝在審核改成 S。</li><li>改順序要按右下角「✔ 套用」才生效；套用後（或排更前面的開播了）正在錄的不是第一順位 → 倒數 10 秒停掉、換錄新的那位。</li><li>主播斷線／下播超過 90 秒才停；TikTok 被關掉或跳走會自己重新打開直播間；拔線再插回、scrcpy 中斷 → 接著錄下一段（_p2、_p3…）。</li><li>手機超過 46°C 先停錄，降到 41°C 再繼續。</li><li>先錄在 SSD（MKV，斷電也播得了），結束後不重新壓縮換成 MP4（idle），搬到影片資料夾 <b>TikLive_手機特效\\帳號\\</b>；不到 15 秒的段丟掉。</li><li>回放：同一場可以切換「原本／手機」版本（用聲音對齊；對不上用錄影時間，可能差幾秒）。剪輯器那場的來源最後多一個手機特效檔。</li><li>S 級：手機特效版也排進 YouTube（標題加「手機特效版」，跟原本的是不同一部）。容量預測也算進去。</li><li>🎁 禮物剪輯：「錄好的」那場按「禮物剪輯」→ 選一位大哥（不算 10 鑽以下），或不分是誰、單次 ≥ 2000 鑽的全部 → 每個禮物一格（一次顯示 10 格，往右滑再載入）；點一格只載那一小段，用 ±1／±5 調送禮前、送禮後幾秒，按 OK 換下一格；沒調的用預設 → 全部接成一支 MP4（連在一起的併成一段，用顯示卡壓縮）。</li><li>學習時間差：每次按 OK 都記下來（禮物、你調的秒數、當時幾個人在播…）。同一種禮物有 2 筆以上就用它們當預設：取中位數、差太多的先不算、其他平均；之後資料夠了可以分析延遲原因。</li><li>回放切到「手機」版本時，程式自己畫的送禮動畫不顯示（手機畫面本來就有真的特效）。</li><li>✂ 剪輯：那場有手機特效版會先問要剪「原本錄的」還是「手機特效版」；沒有就直接開。</li><li>自己處理：通知欄被拉下來、USB 用途選單、系統對話框 → 20 秒內自己收掉；離開 TikTok 會重新打開直播間；連不上 3 分鐘重新啟動 adb；處理不了的（找不到手機、電量低沒充電、在播卻沒在錄）會出現在狀態卡和這頁最上面。</li><li>每週二、週五凌晨 3～7 點（沒在錄、S 級都沒在播時）自動重開手機一次；每次連上都把亮度調到最低。</li><li>全部在背景執行緒：手機只把壓好的畫面傳過來，電腦不解碼、不開視窗。</li></ul>"},
   {t:"⏸ 暫停監控並封存",d:"<ul><li>主播分類（或審核、檔案總管）<b>長按主播</b> → 主播選單 →「⏸ 暫停監控並封存」。</li><li>從那一刻起<b>不再連線、不錄新的</b>（直播中的話那一場停在那裡、照常收尾）；主播清單、等級、分類、<b>以前的場次全部留著</b>，照常轉檔、整理、照等級排隊上傳 YouTube、照保留天數刪原檔。</li><li>在主播分類移到最下面「⏸ 暫停監控（封存）」那區；<b>審核頁</b>也收到最下面同一欄「⏸ 封存」（保留原本的等級、照等級排、灰階，點進去一樣看以前的紀錄）。同一個選單按「▶ 恢復監控」就接回來。</li><li>封存中的主播又被<b>新增</b>（貼 TikTok 連結、@帳號、匯入）：會先問「目前封存中，要解封嗎？」— 解封＝移回來繼續監控；取消＝取消新增、維持封存。</li><li>每一次封存／解封都會記下來（時間、從哪裡按的），長按主播的小視窗最上面「🗄 封存紀錄」看得到。</li><li>跟「🗑 刪除主播」不一樣：刪除＝整位全部刪掉（等於標 F 再處置）。</li></ul>"},
   {t:"只錄聲音的主播（照審核等級 G）",d:"<ul><li><b>在「主播審核」標 G＝只錄聲音</b>；改成別的等級就恢復錄影片。以前另外的「只錄聲音的主播」清單已經拿掉，程式每分鐘照等級對一次，以審核等級為準。</li><li>G 的主播直播中照樣錄畫面（FLV 先放 C 槽），下播後截 60 張圖＋字幕，自動傳 YouTube，傳好才移走原檔。</li><li>直播中每 <b>"+RU_V('rec.snap_min','分鐘',2)+"</b>另外拍一張快照，回放時在影片的位置左右翻看。</li></ul>"}]},
  {k:"play",i:"📺",c:"#4dc9ff",t:"回放與直播中觀看：延遲、預載入",s:[
@@ -47188,7 +47252,7 @@ function paint(force){
   if(force||Math.abs(t-RP.lastPaint)>=0.25){RP.lastPaint=t;
     $("#tcur").textContent=hms(t);$("#treal").textContent=clock(d.live_start+t);drawTL();
     const ic=bs(d.chat,t),ig=bs(d.gifts,t),ij=bs(d.joins,t);
-    if(RP.playing)try{gfxReplay(d.gifts,t-rpJump(),r=>r[0],   /* V1.1.19 送禮動畫跟著「點了跳過去 +N 秒」的延遲（畫面比資料晚 N 秒）一起延後 */r=>({k:gfxKey(r[5],r[2]),gid:r[5],name:r[2],nick:r[1],count:+r[3]||1,dia:+r[4]||0}));}catch(x){}   // V0.6.46
+    if(RP.playing&&RP.mode!=="phone")try{gfxReplay(d.gifts,t-rpJump(),r=>r[0],   /* V1.1.19 送禮動畫跟著「點了跳過去 +N 秒」的延遲（畫面比資料晚 N 秒）一起延後 */r=>({k:gfxKey(r[5],r[2]),gid:r[5],name:r[2],nick:r[1],count:+r[3]||1,dia:+r[4]||0}));}catch(x){}   // V0.6.46
     if(RP.cum.length<=d.gifts.length&&!RP.cumDone){let a=0;RP.cum=d.gifts.map(g=>a+=g[4]);RP.cumDone=true;}
     const dia=ig?RP.cum[ig-1]:0;let vw=0;const iv=bs(d.vs,t);if(iv)vw=d.vs[iv-1][1];
     const at=(L)=>{const i=bs(L,t);return i?L[i-1][1]:0;},cnt=L=>{let lo=0,hi=L.length;while(lo<hi){const m=(lo+hi)>>1;if(L[m]<=t)lo=m+1;else hi=m;}return lo;};
@@ -48781,7 +48845,18 @@ function edRestore(j){const o=JSON.parse(j);ED.cuts=o.c||{};ED.del=o.d||{};ED.se
 function edPauseOthers(){try{if(typeof HP!=="undefined"&&HP&&typeof HP.pause==="function"&&HP.sid)HP.pause();}catch(e){}
   document.querySelectorAll("video,audio").forEach(m=>{if(ED.ov&&ED.ov.contains(m))return;try{if(!m.paused)m.pause();}catch(e){}});
   try{if(typeof RP!=="undefined"&&RP){RP.playing=false;if(typeof btns==="function")btns();}}catch(e){}}
-async function edOpen(sid,at){sid=+sid;if(!sid)return;edClose();edPauseOthers();Object.assign(ED,{sid,k:0,cuts:{},del:{},sel:-1,undo:[],redo:[],E:0,pps:0,th:{},thBusy:0,subDirty:false,pendS:null,trimLab:null});
+/* V1.1.67 剪刀：這場有手機特效版 → 先選要剪哪一種；沒有就照原本直接開 */
+const EDPF=new Map();
+async function edOpen(sid,at){sid=+sid;if(!sid)return;if(at&&typeof at==="object")return edOpen0(sid,at);
+  let fs=null;const c=EDPF.get(sid);if(c&&Date.now()-c.t<60000)fs=c.f;else{try{const j=await (await fetch(rvB()+"/api/pc/pfx/has?sid="+sid)).json();fs=(j&&j.files)||[];}catch(e){fs=[];}EDPF.set(sid,{t:Date.now(),f:fs});}
+  if(!fs.length)return edOpen0(sid,at);
+  const o=document.createElement("div");o.style.cssText="position:fixed;inset:0;z-index:10070;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px";
+  o.innerHTML=`<div style="background:var(--card,#1b2230);color:var(--fg,#e8edf5);border-radius:16px;padding:18px;max-width:420px;width:100%;display:flex;flex-direction:column;gap:10px;box-shadow:0 10px 40px rgba(0,0,0,.5)"><b style="font-size:16px">✂ 剪輯 #${String(sid).padStart(5,"0")}：要剪哪一種？</b>
+  <button data-e="o" style="padding:14px;border-radius:12px;border:1px solid rgba(140,150,165,.5);background:rgba(120,140,170,.12);color:inherit;font-size:15px;text-align:left">🎬 原本錄的<br><small style="opacity:.7">乾淨的畫面（沒有留言區、禮物特效）</small></button>
+  <button data-e="p" style="padding:14px;border-radius:12px;border:1px solid #f0ad4e;background:rgba(240,173,78,.15);color:inherit;font-size:15px;text-align:left">📲 手機特效版<br><small style="opacity:.7">手機畫面，有禮物動畫（${fs.length} 段）</small></button>
+  <button data-e="x" style="padding:10px;border-radius:10px;border:0;background:transparent;color:inherit;opacity:.7">取消</button></div>`;
+  document.body.appendChild(o);o.addEventListener("click",e=>{const b=e.target.closest("[data-e]");if(!b&&e.target!==o)return;o.remove();if(!b)return;if(b.dataset.e==="o")edOpen0(sid,at);else if(b.dataset.e==="p")edOpen0(sid,{n:fs[0],t:0});});}
+async function edOpen0(sid,at){sid=+sid;if(!sid)return;edClose();edPauseOthers();Object.assign(ED,{sid,k:0,cuts:{},del:{},sel:-1,undo:[],redo:[],E:0,pps:0,th:{},thBusy:0,subDirty:false,pendS:null,trimLab:null});
   const atK=(at&&typeof at==="object")?at:null,atL=(!atK&&at!=null&&isFinite(+at)&&+at>0)?+at:null;   /* atK＝影片快速瀏覽：{k:第幾個檔, t:檔內秒數} */   /* 從回放進來：時間軸直接跳到剛剛看到的地方（開播第幾秒） */
   try{const c=JSON.parse(localStorage.getItem("tlm_ed2_"+sid)||"null");if(c){ED.cuts=c.cuts||{};ED.del=c.del||{};ED.k=+c.k||0;}}catch(e){}
   ED.px=true;ED.pxUse=false;ED.pxSt=null;try{const u=JSON.parse(localStorage.getItem("tlm_edui")||"{}");if(u.chat!=null)ED.chatOn=!!u.chat;if(u.sub!=null)ED.subOn=!!u.sub;if(u.px!=null)ED.px=!!u.px;}catch(e){}
@@ -50552,7 +50627,7 @@ function pfxDragWire(root){let st=null;
   ["pointerup","pointercancel"].forEach(k=>root.addEventListener(k,end));
   root.addEventListener("contextmenu",e=>{if(e.target.closest("[data-su]"))e.preventDefault();});}
 function pfxGiftHtml(j){const G=PFX.gd,gj=j.gj||{},gl=j.gl||[];let h="";
-  if(PFX.gsid){const c=(G&&G.cfg)||{};h+=`<div class="pfC" id="pfxGift" style="border-color:#f0ad4e"><h4>🎁 禮物剪輯 #${rvE(PFX.gsid)} <button class="pfB" data-pa="gx" style="float:right">✕</button></h4>
+  if(false){const c=(G&&G.cfg)||{};h+=`<div class="pfC" id="pfxGift" style="border-color:#f0ad4e"><h4>🎁 禮物剪輯 #${rvE(PFX.gsid)} <button class="pfB" data-pa="gx" style="float:right">✕</button></h4>
     ${!G?'<div class="pfSub">讀取中…</div>':`<div class="pfSub">從手機特效版剪（有禮物動畫）。每個禮物剪「送禮前 N 秒～後 M 秒」，連在一起的併成一段，最後接成一支 MP4。${G.segs?`這場手機版 ${G.segs} 段，${G.aligned} 段用聲音對齊。`:"這場沒有手機特效版。"}</div>
     <div class="pfR" style="margin:8px 0"><label>前 <input class="pfN" type="number" min="0" max="30" step="0.5" id="pgPre" value="${c.pre??2}"> 秒</label><label>後 <input class="pfN" type="number" min="2" max="60" id="pgPost" value="${c.post??12}"> 秒</label></div>
     <div class="pfR" style="margin-bottom:8px"><label>💎 不分是誰，單次 ≥ <input class="pfN" type="number" min="1" id="pgBig" value="${c.big??2000}"> 鑽的全部（這場 ${G.big} 個）</label><button class="pfB go" data-pa="gbig" ${gj.run?"disabled":""}>剪成一支</button></div>
@@ -50561,6 +50636,77 @@ function pfxGiftHtml(j){const G=PFX.gd,gj=j.gj||{},gl=j.gl||[];let h="";
   if(gj.name||gl.length)h+=`<div class="pfC"><h4>🎁 剪好的禮物影片</h4>${gj.name?`<div class="${gj.run?"pfW":String(gj.msg||"").startsWith("✖")?"pfBad":"pfOk"}" style="margin-bottom:6px">${gj.run?`⏳ ${rvE(gj.name)}：${rvE(gj.msg||"")}（${gj.done||0}/${gj.total||0}）`:rvE(gj.msg||"")}</div>`:""}<div class="pfL">${gl.map(x=>`<div class="pfI"><b>${rvE(x.f)}</b><span class="pfSub">${((x.sz||0)/1e6).toFixed(1)} MB · ${pfxT(x.t)}</span><a class="pfB" style="text-decoration:none;border:1px solid rgba(140,150,165,.5);border-radius:9px;padding:6px 10px" href="${rvB()}/api/pc/pfx/gfile?f=${encodeURIComponent(x.f)}" target="_blank" rel="noopener">▶</a><a class="pfB" style="text-decoration:none;border:1px solid rgba(140,150,165,.5);border-radius:9px;padding:6px 10px" href="${rvB()}/api/pc/pfx/gfile?f=${encodeURIComponent(x.f)}" download="${rvE(x.f)}">⬇</a></div>`).join("")}</div></div>`;
   return h;}
 async function pfxGiftLoad(root){if(!PFX.gsid)return;const mn=PFX.gmin??"";try{PFX.gd=await rvGet(`/api/pc/pfx/gifts?sid=${PFX.gsid}`+(mn!==""?`&min=${mn}`:""));}catch(e){PFX.gd={rows:[],big:0,segs:0,aligned:0,cfg:{}};}pfxLoad(root);}
+/* V1.1.67 🎁 禮物剪輯（格子）：每個禮物一格，點一格只載那一小段來調前後，OK 就記住（學習）；全部調完接成一支 */
+const GE={};
+function geCss(){if(document.getElementById("geCss"))return;const s=document.createElement("style");s.id="geCss";s.textContent=`#pfxGE{position:fixed;inset:0;z-index:10060;background:var(--bg,#0f141c);color:var(--fg,#e8edf5);display:flex;flex-direction:column;overflow:hidden}
+#pfxGE .geH{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid rgba(140,150,165,.25)}#pfxGE .geH b{flex:1;font-size:16px}
+#pfxGE .geB{flex:1;overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:10px}#pfxGE .geB>*{flex-shrink:0}#pfxGE .geT{min-height:96px}
+#pfxGE button.gb{border:1px solid rgba(140,150,165,.5);background:rgba(120,140,170,.12);color:inherit;border-radius:9px;padding:7px 11px;font-size:13.5px;cursor:pointer;white-space:nowrap}#pfxGE button.gb.go{background:#2e7df6;border-color:#2e7df6;color:#fff}#pfxGE button.gb.on{background:#f0ad4e;border-color:#f0ad4e;color:#111}
+#pfxGE .geR{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:13.5px}#pfxGE input.gn{width:72px;padding:5px 6px;border-radius:7px;border:1px solid rgba(140,150,165,.5);background:transparent;color:inherit;font-size:14px}
+#pfxGE .geS{opacity:.75;font-size:12px}#pfxGE .geU{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}#pfxGE .geU button{flex:0 0 auto}
+#pfxGE .geStrip{display:flex;gap:8px;overflow-x:auto;padding:4px 2px 8px;scroll-snap-type:x proximity}
+#pfxGE .geT{flex:0 0 128px;scroll-snap-align:start;border:1px solid rgba(140,150,165,.35);border-radius:12px;padding:8px;background:rgba(120,140,170,.08);cursor:pointer;display:flex;flex-direction:column;gap:2px;font-size:12.5px;user-select:none}
+#pfxGE .geT b{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#pfxGE .geT.sel{border-color:#2e7df6;box-shadow:0 0 0 2px #2e7df655}#pfxGE .geT.ok{border-color:#3ecf8e}#pfxGE .geT .ok{color:#3ecf8e;font-weight:800}
+#pfxGE .geMore{flex:0 0 90px;display:flex;align-items:center;justify-content:center;opacity:.7;font-size:12px}
+#pfxGE .geEd{border:1px solid rgba(140,150,165,.35);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px}
+#pfxGE video{width:100%;max-height:52vh;background:#000;border-radius:10px}
+#pfxGE .geBar{position:relative;height:30px;border-radius:8px;background:rgba(120,140,170,.18);overflow:hidden}#pfxGE .geBar i{position:absolute;top:0;bottom:0;background:#2e7df655;border-left:3px solid #2e7df6;border-right:3px solid #2e7df6}#pfxGE .geBar em{position:absolute;top:0;bottom:0;width:2px;background:#f5c542}#pfxGE .geBar u{position:absolute;top:0;bottom:0;width:2px;background:#ff4d6d}
+#pfxGE .geF{display:flex;gap:8px;align-items:center;padding:10px 96px 10px 12px;border-top:1px solid rgba(140,150,165,.25)}#pfxGE .geF span{flex:1;font-size:13px}`;document.head.appendChild(s);}
+function geF(t){t=Math.max(0,t);const h=Math.floor(t/3600),m=Math.floor(t%3600/60),x=Math.floor(t%60);return (h?h+":"+String(m).padStart(2,"0"):m)+":"+String(x).padStart(2,"0");}
+async function pfxGEOpen(sid){geCss();geClose();Object.assign(GE,{sid:+sid,mode:null,u:"",nick:"",rows:[],shown:10,sel:-1,adj:{},G:null,min:10,big:2000,pre:2,post:12});
+  const o=document.createElement("div");o.id="pfxGE";o.innerHTML=`<div class="geH"><b>🎁 禮物剪輯 #${String(sid).padStart(5,"0")}</b><button class="gb" data-g="x">✕ 關閉</button></div><div class="geB" id="geB"><div class="geS">讀取中…</div></div><div class="geF" id="geF"></div>`;document.body.appendChild(o);
+  o.addEventListener("click",geClick);o.addEventListener("change",e=>{const x=e.target;if(x.id==="geMin")GE.min=+x.value||0;if(x.id==="geBig")GE.big=+x.value||0;});
+  try{GE.G=await rvGet(`/api/pc/pfx/gifts?sid=${sid}&min=${GE.min}`);const c=GE.G.cfg||{};GE.min=c.min??10;GE.big=c.big??2000;GE.pre=c.pre??2;GE.post=c.post??12;}catch(e){GE.G={rows:[],big:0};}
+  geDraw();}
+function geClose(){const o=document.getElementById("pfxGE");if(o){try{const v=o.querySelector("video");if(v){v.pause();v.removeAttribute("src");v.load();}}catch(e){}o.remove();}}
+async function geLoad(mode,u,nick){GE.mode=mode;GE.u=u||"";GE.nick=nick||"";GE.sel=-1;GE.shown=10;GE.adj={};
+  const mn=mode==="big"?GE.big:GE.min;let j=null;try{j=await rvGet(`/api/pc/pfx/gtiles?sid=${GE.sid}&mode=${mode}&u=${encodeURIComponent(GE.u)}&min=${mn}`);}catch(e){}
+  GE.rows=(j&&j.rows)||[];geDraw();}
+function geTile(r,i){const a=GE.adj[r.rid];const pre=a?a[0]:r.pre,post=a?a[1]:r.post;return `<div class="geT${GE.sel===i?" sel":""}${a?" ok":""}" data-gt="${i}"><span class="geS">#${i+1} · ${geF(r.pos)}</span><b>${rvE(r.g||"禮物")}</b><span>💎 ${r.dia.toLocaleString()}</span><span class="geS">${rvE(r.nick)}</span><span>${a?'<span class="ok">✔ </span>':""}前 ${pre} / 後 ${post}${!a&&r.dn?` <span class="geS">(學 ${r.dn})</span>`:""}</span></div>`;}
+function geDraw(){const B=document.getElementById("geB"),F=document.getElementById("geF");if(!B)return;const G=GE.G||{rows:[]};let h="";
+  h+=`<div class="geR"><button class="gb${GE.mode==="big"?" on":""}" data-g="big">💎 不分是誰：單次 ≥</button><input class="gn" type="number" id="geBig" min="1" value="${GE.big}"><span>鑽（這場 ${G.big||0} 個）</span></div>
+  <div class="geR"><span>👤 選一位大哥（不算 &lt;</span><input class="gn" type="number" id="geMin" min="0" value="${GE.min}"><span>鑽）</span><button class="gb" data-g="ref">重新列</button></div>
+  <div class="geU">${(G.rows||[]).map(r=>`<button class="gb${GE.mode==="user"&&GE.u===r[0]?" on":""}" data-g="user" data-u="${rvE(r[0])}" data-n="${rvE(r[1])}">${rvE(r[1])} · ${r[2]} 個 · ${r[3].toLocaleString()}💎</button>`).join("")||'<span class="geS">這場沒有符合的送禮</span>'}</div>`;
+  if(GE.mode){const R=GE.rows,n=Math.min(GE.shown,R.length);h+=`<div class="geS">${GE.mode==="big"?`單次 ≥ ${GE.big} 鑽`:rvE(GE.nick)}：${R.length} 個禮物落在手機錄到的時間。點一格調整那一段（只載那一小段），調好按 OK；沒調的用預設（學到的優先）。</div>`;
+    h+=`<div class="geStrip" id="geStrip">${R.slice(0,n).map(geTile).join("")}${n<R.length?`<div class="geMore" id="geMore">往右滑載入更多（${R.length-n}）</div>`:""}</div>`;
+    if(GE.sel>=0&&R[GE.sel])h+=geEdHtml(R[GE.sel]);}
+  B.innerHTML=h;
+  const done=Object.keys(GE.adj).length;F.innerHTML=GE.mode&&GE.rows.length?`<span>${done?`已調 ${done}／`:""}${GE.rows.length} 個禮物</span><button class="gb go" data-g="make">🎬 全部接成一支</button>`:`<span class="geS">先選一位大哥，或用「單次 ≥ N 鑽」</span>`;
+  const mo=document.getElementById("geMore");if(mo&&"IntersectionObserver" in window){const io=new IntersectionObserver(es=>{if(es.some(e=>e.isIntersecting)){io.disconnect();const sx=document.getElementById("geStrip").scrollLeft;GE.shown+=10;geDraw();const st=document.getElementById("geStrip");if(st)st.scrollLeft=sx;}},{root:document.getElementById("geStrip")});io.observe(mo);}
+  if(GE.sel>=0)geVidWire();}
+function geEdHtml(r){const a=GE.adj[r.rid]||[r.pre,r.post];GE.cur={pre:+a[0],post:+a[1]};
+  return `<div class="geEd" id="geEd"><div class="geR"><b>#${GE.sel+1} ${rvE(r.g)} 💎${r.dia.toLocaleString()}</b><span class="geS">${rvE(r.nick)} · 手機影片 ${geF(r.pos)}${r.al?"":" · ⏱ 時間對齊（可能差幾秒）"}</span></div>
+  <video id="geV" playsinline preload="metadata" src="${rvB()}/api/pc/pfx/file?i=${r.f}#t=${Math.max(0,r.pos-a[0]).toFixed(1)}"></video>
+  <div class="geBar" id="geBar"></div>
+  <div class="geR"><span>開始：送禮前</span><button class="gb" data-g="a" data-v="5">−5</button><button class="gb" data-g="a" data-v="1">−1</button><b id="gePre" style="min-width:44px;text-align:center"></b><button class="gb" data-g="a" data-v="-1">+1</button><button class="gb" data-g="a" data-v="-5">+5</button><span>秒</span></div>
+  <div class="geR"><span>結束：送禮後</span><button class="gb" data-g="b" data-v="-5">−5</button><button class="gb" data-g="b" data-v="-1">−1</button><b id="gePost" style="min-width:44px;text-align:center"></b><button class="gb" data-g="b" data-v="1">+1</button><button class="gb" data-g="b" data-v="5">+5</button><span>秒</span></div>
+  <div class="geR"><button class="gb" data-g="play">▶ 播這段</button><button class="gb" data-g="pa">⏮ 從開始</button><button class="gb" data-g="pg">🎁 從送禮</button><span style="flex:1"></span><button class="gb go" data-g="ok">✔ OK（下一個）</button></div></div>`;}
+function geBarDraw(){const r=GE.rows[GE.sel];if(!r)return;const L=Math.max(0,r.pos-30),H=r.pos+60,W=H-L,b=document.getElementById("geBar");if(!b)return;
+  const a=Math.max(0,r.pos-GE.cur.pre),e=r.pos+GE.cur.post;const v=document.getElementById("geV");const ct=v?v.currentTime:a;
+  b.innerHTML=`<i style="left:${(a-L)/W*100}%;width:${(e-a)/W*100}%"></i><em style="left:${(r.pos-L)/W*100}%"></em><u style="left:${Math.min(100,Math.max(0,(ct-L)/W*100))}%"></u>`;
+  const p=document.getElementById("gePre"),q=document.getElementById("gePost");if(p)p.textContent=GE.cur.pre;if(q)q.textContent=GE.cur.post;}
+function geVidWire(){const v=document.getElementById("geV");geBarDraw();if(!v)return;const r=GE.rows[GE.sel];
+  v.addEventListener("timeupdate",()=>{geBarDraw();if(GE.stopAt!=null&&v.currentTime>=GE.stopAt){v.pause();GE.stopAt=null;}});
+  const bar=document.getElementById("geBar");bar.addEventListener("click",e=>{const R=bar.getBoundingClientRect(),L=Math.max(0,r.pos-30);try{v.currentTime=L+(e.clientX-R.left)/R.width*(r.pos+60-L);}catch(x){}});}
+function gePlay(from){const v=document.getElementById("geV"),r=GE.rows[GE.sel];if(!v||!r)return;const a=Math.max(0,r.pos-GE.cur.pre);GE.stopAt=r.pos+GE.cur.post;try{v.currentTime=from==null?a:from;}catch(e){}v.play().catch(()=>{});}
+async function geClick(e){const b=e.target.closest("[data-g],[data-gt]");if(!b)return;
+  if(b.dataset.gt!=null){const i=+b.dataset.gt;GE.sel=GE.sel===i?-1:i;const sx=(document.getElementById("geStrip")||{}).scrollLeft||0;geDraw();const st=document.getElementById("geStrip");if(st)st.scrollLeft=sx;const ed=document.getElementById("geEd");if(ed)ed.scrollIntoView({behavior:"smooth",block:"nearest"});return;}
+  const g=b.dataset.g,r=GE.rows[GE.sel];
+  if(g==="x"){geClose();if(PFX.root)pfxLoad(PFX.root);return;}
+  if(g==="big"){GE.big=+(document.getElementById("geBig").value||2000);geLoad("big");return;}
+  if(g==="user"){GE.min=+(document.getElementById("geMin").value||0);geLoad("user",b.dataset.u,b.dataset.n);return;}
+  if(g==="ref"){GE.min=+(document.getElementById("geMin").value||0);try{GE.G=await rvGet(`/api/pc/pfx/gifts?sid=${GE.sid}&min=${GE.min}`);}catch(x){}GE.mode=null;geDraw();return;}
+  if(g==="a"&&r){GE.cur.pre=Math.max(0,Math.min(60,GE.cur.pre+(+b.dataset.v)));geBarDraw();const v=document.getElementById("geV");try{v.currentTime=Math.max(0,r.pos-GE.cur.pre);}catch(x){}return;}
+  if(g==="b"&&r){GE.cur.post=Math.max(1,Math.min(120,GE.cur.post+(+b.dataset.v)));geBarDraw();gePlay(Math.max(0,r.pos+GE.cur.post-3));return;}
+  if(g==="play"){gePlay();return;}if(g==="pa"){gePlay();return;}if(g==="pg"&&r){gePlay(r.pos);return;}
+  if(g==="ok"&&r){GE.adj[r.rid]=[GE.cur.pre,GE.cur.post];const x=await rvPost("/api/pc/pfx/set",{op:"glearn",sid:GE.sid,rid:r.rid,g:r.g,dia:r.dia,pre:GE.cur.pre,post:GE.cur.post,d_pre:r.pre,d_post:r.post,al:r.al});
+    if(x&&x.def){GE.rows.forEach(y=>{if(y.g===r.g&&!GE.adj[y.rid]){y.pre=x.def[0];y.post=x.def[1];y.dn=x.def[2];}});}
+    if(x&&x.message&&typeof toast==="function")toast(x.message);
+    const v=document.getElementById("geV");try{v.pause();}catch(z){}
+    let nx=GE.rows.findIndex((y,i)=>i>GE.sel&&!GE.adj[y.rid]);if(nx<0)nx=-1;if(nx>=GE.shown)GE.shown=nx+1;GE.sel=nx;const sx=(document.getElementById("geStrip")||{}).scrollLeft||0;geDraw();
+    const st=document.getElementById("geStrip");if(st){st.scrollLeft=sx;const t=st.querySelector(".geT.sel");if(t)t.scrollIntoView({behavior:"smooth",inline:"center",block:"nearest"});}return;}
+  if(g==="make"){const o={op:"gclip",sid:GE.sid,mode:GE.mode,u:GE.u,min:GE.mode==="big"?GE.big:GE.min,adj:GE.adj,pre:GE.pre,post:GE.post};const x=await rvPost("/api/pc/pfx/set",o);
+    if(x&&x.ok){if(typeof toast==="function")toast(x.message);geClose();if(PFX.root)pfxLoad(PFX.root);}else alert((x&&x.message)||"失敗");return;}}
 function pfxGuide(){return `<details class="pfC"><summary>📋 第一次設定（紅米 10，照順序做一次就好）</summary><ol>
 <li><b>不用回復原廠</b>。手機裡沒有你個人的資料、也不打算拿來做別的事就直接用；有個人資料、或登入的是你的主帳號，才建議回復原廠。</li>
 <li>TikTok（國際版，不是抖音）登入一個<b>小帳號</b>（帳號密碼你自己在手機上打，程式不碰）。</li>
@@ -50598,8 +50744,8 @@ function pfxHtml(j){const D=j.dev||{},c=j.cur,cf=j.cfg||{},gr=j.gr||{};const gC=
   return h;}
 async function pfxLoad(root){let j=null;try{j=await rvGet("/api/pc/pfx");}catch(e){}if(!root.isConnected)return;
   if(!j||!j.ok){root.querySelector(".pfx").innerHTML='<div class="pfC pfBad">讀不到（電腦端沒回應）</div>';return;}
-  if(PFX.drag)return;PFX.j=j;const box=root.querySelector(".pfx");const op=[...box.querySelectorAll("details")].map(d=>d.open);const ae=document.activeElement;if(ae&&box.contains(ae)&&ae.tagName==="INPUT")return;
-  box.innerHTML=pfxHtml(j);[...box.querySelectorAll("details")].forEach((d,i)=>{if(op[i]!=null)d.open=op[i];});}
+  if(PFX.drag)return;PFX.j=j;const box=root.querySelector(".pfx");const op=[...box.querySelectorAll("details")].map(d=>d.open);const ae=document.activeElement;if(ae&&box.contains(ae)&&(ae.tagName==="INPUT"||ae.tagName==="SELECT"))return;if(document.getElementById("pfxGE"))return;
+  box.innerHTML=pfxHtml(j);try{const D=PFX.draft||{};box.querySelectorAll("input[data-o],input[id]").forEach(x=>{const k=x.dataset.o||x.id;if(k in D&&x.type!=="checkbox")x.value=D[k];});}catch(e){}[...box.querySelectorAll("details")].forEach((d,i)=>{if(op[i]!=null)d.open=op[i];});}
 async function pfxAct(root,el){const a=el.dataset.pa,j=PFX.j||{},cf=j.cfg||{};let r=null;const U=[...(cf.users||[])];
   if(a==="rec"){if(j.cur&&j.cur.u!==el.dataset.u&&!confirm(`現在正在錄 @${j.cur.u}，要停掉改錄 @${el.dataset.u} 嗎？`))return;r=await rvPost("/api/pc/pfx/set",{op:"rec",u:el.dataset.u});}
   else if(a==="stop"){if(!confirm("停止手機錄影？（正在錄的會停、檔案在背景收尾）"))return;r=await rvPost("/api/pc/pfx/set",{op:"stop"});}
@@ -50608,7 +50754,7 @@ async function pfxAct(root,el){const a=el.dataset.pa,j=PFX.j||{},cf=j.cfg||{};le
   else if(a==="test"){r=await rvPost("/api/pc/pfx/set",{op:"test"});}
   else if(a==="reboot"){if(!confirm("現在重開手機？（約 1 分鐘，會自己連回來）"))return;r=await rvPost("/api/pc/pfx/set",{op:"reboot"});}
   else if(a==="rb_on"){r=await rvPost("/api/pc/pfx/set",{op:"rb_on",on:el.checked?1:0});}
-  else if(a==="gift"){PFX.gsid=el.dataset.sid;PFX.gd=null;PFX.gmin=undefined;pfxLoad(root);await pfxGiftLoad(root);setTimeout(()=>{const g=root.querySelector("#pfxGift");if(g)g.scrollIntoView({behavior:"smooth",block:"start"});},100);return;}
+  else if(a==="gift"){pfxGEOpen(el.dataset.sid);return;}
   else if(a==="gx"){PFX.gsid=null;PFX.gd=null;pfxLoad(root);return;}
   else if(a==="gref"){PFX.gmin=+(root.querySelector("#pgMin").value||0);await pfxGiftLoad(root);return;}
   else if(a==="guser"||a==="gbig"){const v=id=>+(root.querySelector(id)||{}).value;const o={op:"gclip",sid:PFX.gsid,mode:a==="gbig"?"big":"user",u:el.dataset.u||"",pre:v("#pgPre"),post:v("#pgPost")};o.min=a==="gbig"?v("#pgBig"):v("#pgMin");r=await rvPost("/api/pc/pfx/set",o);}
@@ -50616,11 +50762,11 @@ async function pfxAct(root,el){const a=el.dataset.pa,j=PFX.j||{},cf=j.cfg||{};le
   else if(a==="add"||a==="addu"){const u=(a==="add"?el.dataset.u:(root.querySelector("#pfxAddU").value||"")).trim().replace(/^@/,"");if(!u)return;if(!U.includes(u))U.push(u);r=await rvPost("/api/pc/pfx/set",{op:"users",users:U});}
   else if(a==="mv"){const i=+el.dataset.i,k=i+(+el.dataset.d);[U[i],U[k]]=[U[k],U[i]];r=await rvPost("/api/pc/pfx/set",{op:"users",users:U});}
   else if(a==="rm"){U.splice(+el.dataset.i,1);r=await rvPost("/api/pc/pfx/set",{op:"users",users:U});}
-  else if(a==="opt"){const o={op:"opt"};root.querySelectorAll("[data-o]").forEach(x=>o[x.dataset.o]=+x.value);r=await rvPost("/api/pc/pfx/set",o);}
+  else if(a==="opt"){PFX.draft={};const o={op:"opt"};root.querySelectorAll("[data-o]").forEach(x=>o[x.dataset.o]=+x.value);r=await rvPost("/api/pc/pfx/set",o);}
   if(r&&r.message&&typeof toast==="function")toast((r.ok?"":"✖ ")+r.message);else if(r&&!r.ok&&r.message)alert(r.message);
   if(document.activeElement)try{document.activeElement.blur();}catch(e){}
   pfxLoad(root);}
-function pfxMount(root){pfxCss();PFX.root=root;PFX.dirty=false;PFX.drag=false;pfxApplyBar();pfxDragWire(root);root.innerHTML='<div class="pfx"><div class="pfC">讀取中…</div></div>';
+function pfxMount(root){pfxCss();PFX.root=root;PFX.draft={};root.addEventListener("input",e=>{const x=e.target;if(x.tagName==="INPUT"&&x.type!=="checkbox"){const k=x.dataset.o||x.id;if(k)PFX.draft[k]=x.value;}});PFX.dirty=false;PFX.drag=false;pfxApplyBar();pfxDragWire(root);root.innerHTML='<div class="pfx"><div class="pfC">讀取中…</div></div>';
   root.addEventListener("click",e=>{const b=e.target.closest("[data-pa]");if(!b||b.dataset.pa==="auto"||b.dataset.pa==="rb_on"||b.disabled)return;pfxAct(root,b);});
   root.addEventListener("change",e=>{const b=e.target.closest("[data-pa=auto],[data-pa=rb_on]");if(b)pfxAct(root,b);});
   pfxLoad(root);clearInterval(PFX.t);PFX.t=setInterval(()=>{if(!root.isConnected){clearInterval(PFX.t);const b=document.getElementById("pfxAp");if(b)b.remove();return;}const sl=root.querySelector("[data-swl]");if(sl&&+sl.textContent>0)sl.textContent=Math.max(0,+sl.textContent-3);if(!document.hidden)pfxLoad(root);},3000);}
