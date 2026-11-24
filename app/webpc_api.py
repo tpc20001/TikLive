@@ -921,6 +921,11 @@ def route(win, sock, method, rest, q, body):
         d_ = q.get('days', '14'); _bg(win, sock, lambda: win._gsd_info(d_)); return True
     if name == 'health' and method == 'GET':                             # TK_V1.0.69 一頁健檢（只讀）
         _bg(win, sock, win._health_page); return True
+    if name == 'pfx' and method == 'GET': J(win._pfx_info_web()); return True          # V1.1.63 手機錄特效狀態（只讀）
+    if name == 'pfx/file' and method == 'GET':
+        p_ = win._pfx_file(q.get('i', '-1'))
+        if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True
+        win._web_send_file(sock, p_, 'video/mp4' if p_.suffix.lower() == '.mp4' else 'video/x-matroska'); return True
     if name == 'livenow' and method == 'GET':                            # TK_V1.0.38 開播提醒（只讀，很小）
         J(win._live_now()); return True
     if name == 'sttq' and method == 'GET':                               # TK_V1.0.46 字幕全文搜尋（只讀）
@@ -1133,6 +1138,7 @@ def route(win, sock, method, rest, q, body):
     if name == 'cloud/set': J(win._cu_set(d)); return True
     if name == 'merge/run': J(win._web_merge_run(d)); return True
     if name == 'capsim/apply': J(win._capsim_apply(d)); return True
+    if name == 'pfx/set': J(win._pfx_set(d)); return True                      # V1.1.63 手機錄特效（要密碼）
     if name == 'host/pause': J(win._host_pause(d.get('u'), bool(d.get('on')), src=str(d.get('src') or '網頁')[:20])); return True     # V1.1.45 ⏸ 暫停監控並封存／恢復（要密碼）                  # V1.1.42 容量預測套用（要密碼）
     if name == 'rules/set': J(win._rules_set(d)); return True                        # V1.1.35 規則頁改數字（要密碼）                    # V1.1.25 合併重複場次（要密碼）                      # V1.1.13 ☁ 雲端更新：檢查／更新／略過（要密碼）                      # V1.1.07 搬硬碟（要密碼）
     if name == 'th/alert':                                                         # TK_V1.0.100 解除斷電警報（要密碼）

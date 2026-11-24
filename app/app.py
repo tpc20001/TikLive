@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.62"
+APP_VERSION = "1.1.63"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -3010,6 +3010,7 @@ class MainWindow(QMainWindow):
         except Exception: pass
         try:                                                                  # V1.1.41 轉檔排隊先看哪些可以直接合併（背景一條）；熱更新後舊版排的交給這一版重新排
             QTimer.singleShot(8000, self._mqc_start)
+            QTimer.singleShot(15000, lambda: self._pfx_start() if (self._pfx_cfg().get('auto') or self._pfx_tools() or self._pfx_S().get('cur') or self._pfx_S().get('man')) else None)   # V1.1.63 手機錄特效（有裝 scrcpy 才開；熱更新換新版接手）
             QTimer.singleShot(3000, lambda: threading.Thread(target=self._fast_srv_start, name='TikLiveFastStart', daemon=True).start())
             QTimer.singleShot(5000, self._snapw_bg)                           # V1.1.56 回放截圖縮小版先做好                    # V1.1.49 圖片快速通道
             app_ = QApplication.instance()
@@ -36919,6 +36920,413 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 'cal': cal, 'notes': NT, 'n_all': len(S), 'n14': len(S14), 'h14': round(sum(int(x.get('secs') or 0) for x in S14) / 3600, 1), 'n60': len(S60), 'h60': round(sum(int(x.get('secs') or 0) for x in S60) / 3600, 1),
                 'pct14': round(sum(P) / len(P)) if P else None, 'hm': hm, 'next': nxt, 'top': [[d, h, n] for n, d, h in top], 'lv': lv, 'phone': ph, 'yt': yt, 'gb': gb, 'last': last}
 
+    # ===================== V1.1.63 📱 手機錄特效（實體安卓手機＋scrcpy） =====================
+    # 主播開播 → 手機打開那個直播間 → scrcpy 錄手機畫面＋聲音（有禮物特效）→ 下播停、收尾、存檔。
+    # 全部在背景執行緒（TikLivePhoneFx）：adb／scrcpy 都不在畫面執行緒跑；scrcpy 只收手機已經壓好的畫面（不解碼、不開視窗），電腦幾乎不花力氣。
+    # 先錄成 MKV（斷電、拔線也播得了）→ 下播後 FFmpeg 不重新壓縮換成 MP4（idle）→ 搬到影片資料夾 TikLive_手機特效\帳號\。
+    PFX_PKG = 'com.zhiliaoapp.musically'
+
+    def _pfx_S(self):
+        app = QApplication.instance(); S = getattr(app, '_tlm_pfx', None) if app is not None else None
+        if not isinstance(S, dict):
+            S = {'gen': 0, 'log': [], 'dev': {'st': 'none'}, 'cur': None, 'proc': None, 'man': None}
+            try: app._tlm_pfx = S
+            except Exception: self.__dict__['_tlm_pfx_local'] = S
+        return S
+
+    def _pfx_cfg_path(self): return Path(PACKAGE_ROOT) / '_DB_SSD' / 'phone_fx.json'
+
+    def _pfx_cfg(self):
+        d = {'auto': False, 'users': [], 'temp_stop': 46, 'temp_ok': 41, 'mbps': 8, 'max_size': 1920, 'off_grace': 90}
+        try: d.update(json.loads(self._pfx_cfg_path().read_text(encoding='utf-8')) or {})
+        except Exception: pass
+        return d
+
+    def _pfx_cfg_save(self, d):
+        try:
+            p = self._pfx_cfg_path(); p.parent.mkdir(parents=True, exist_ok=True); tp = p.with_suffix('.tmp')
+            tp.write_text(json.dumps(d, ensure_ascii=False), encoding='utf-8'); os.replace(tp, p)
+        except Exception: pass
+
+    def _pfx_log(self, msg):
+        S = self._pfx_S(); L = S.setdefault('log', []); L.append([round(time.time()), str(msg)[:300]]); del L[:-80]
+        try:
+            with open(LOG_DIR / 'update_log.txt', 'a', encoding='utf-8') as fh: fh.write(f'[{time.strftime("%Y-%m-%d %H:%M:%S")}] 📱 手機錄特效：{str(msg)[:300]}\n')
+        except Exception: pass
+
+    def _pfx_tdir(self): return Path(PACKAGE_ROOT) / 'tools' / 'scrcpy'
+
+    def _pfx_tools(self):
+        """找 adb.exe／scrcpy.exe（程式資料夾\\tools\\scrcpy\\，整包解壓縮進去也找得到；30 秒快取）."""
+        S = self._pfx_S(); c = S.get('tools_c'); now = time.time()
+        if c and now - c[0] < 30: return c[1]
+        res = None; d = self._pfx_tdir()
+        try:
+            if d.is_dir():
+                a = s = None
+                for p in [d] + [x for x in d.iterdir() if x.is_dir()]:
+                    if a is None and (p / 'adb.exe').is_file(): a = p / 'adb.exe'
+                    if s is None and (p / 'scrcpy.exe').is_file(): s = p / 'scrcpy.exe'
+                if a and s: res = (str(a), str(s))
+        except Exception: res = None
+        S['tools_c'] = (now, res); return res
+
+    def _pfx_run(self, args, timeout=15):
+        try:
+            r = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, **_no_window_kwargs())
+            return r.returncode, (r.stdout or b'').decode('utf-8', 'replace')
+        except subprocess.TimeoutExpired: return -9, 'timeout'
+        except Exception as e: return -1, repr(e)
+
+    def _pfx_sh(self, adb, ser, cmd, timeout=15): return self._pfx_run([adb, '-s', ser, 'shell', cmd], timeout)
+
+    def _pfx_scan(self, adb):
+        rc, out = self._pfx_run([adb, 'devices', '-l'], 20)
+        if rc != 0: return {'st': 'err', 'msg': out.strip()[-200:]}
+        devs = []
+        for ln in out.splitlines()[1:]:
+            ps = ln.split()
+            if len(ps) >= 2 and not ln.startswith('*'):
+                m_ = re.search(r'model:(\S+)', ln); devs.append({'serial': ps[0], 'st': ps[1], 'model': (m_.group(1).replace('_', ' ') if m_ else '')})
+        ok = [x for x in devs if x['st'] == 'device']
+        if ok: return dict(ok[0], st='ok', n=len(devs))
+        if any(x['st'] == 'unauthorized' for x in devs): return {'st': 'unauth', 'n': len(devs)}
+        if devs: return {'st': devs[0]['st'], 'n': len(devs)}
+        return {'st': 'none'}
+
+    def _pfx_fg(self, adb, ser):
+        rc, out = self._pfx_sh(adb, ser, 'dumpsys window | grep -E "mCurrentFocus|mFocusedApp"', 10)
+        m_ = re.search(r'mCurrentFocus=Window\{[^}]*?\s([\w.]+)/([\w.$]+)\}', out) or re.search(r'\s([\w.]+)/([\w.$]+)', out)
+        return (m_.group(1), m_.group(2)) if m_ else ('', '')
+
+    def _pfx_info(self, adb, ser):
+        o = {}
+        rc, out = self._pfx_sh(adb, ser, 'dumpsys battery', 10)
+        for k, rx in (('bat', r'\blevel:\s*(\d+)'), ('temp', r'\btemperature:\s*(\d+)'), ('plug', r'\bAC powered:\s*(\w+)'), ('usb', r'\bUSB powered:\s*(\w+)')):
+            m_ = re.search(rx, out)
+            if m_: o[k] = m_.group(1)
+        try: o['bat'] = int(o['bat'])
+        except Exception: o.pop('bat', None)
+        try: o['temp'] = int(o['temp']) / 10.0
+        except Exception: o.pop('temp', None)
+        rc, out = self._pfx_sh(adb, ser, 'dumpsys power | grep -E "mWakefulness="', 10)
+        m_ = re.search(r'mWakefulness=(\w+)', out); o['awake'] = (m_.group(1) == 'Awake') if m_ else None
+        o['fg'], o['act'] = self._pfx_fg(adb, ser)
+        return o
+
+    def _pfx_props(self, adb, ser):
+        o = {}
+        for k, p in (('model', 'ro.product.model'), ('andv', 'ro.build.version.release'), ('miui', 'ro.miui.ui.version.name')):
+            rc, out = self._pfx_sh(adb, ser, 'getprop ' + p, 8); o[k] = out.strip()[:40] if rc == 0 else ''
+        rc, out = self._pfx_sh(adb, ser, 'pm path ' + self.PFX_PKG, 10); o['tiktok'] = 'package:' in out
+        rc, out = self._pfx_sh(adb, ser, 'input keyevent 0', 10)                     # 小米沒開「USB 調試（安全設置）」會不准程式按手機
+        o['inject'] = not ('INJECT_EVENTS' in out or 'SecurityException' in out)
+        return o
+
+    def _pfx_scr_ver(self, scr):
+        S = self._pfx_S()
+        if S.get('scrv_for') != scr:
+            rc, out = self._pfx_run([scr, '--version'], 20); m_ = re.search(r'scrcpy\s+v?([\d.]+)', out)
+            S['scrv'] = m_.group(1) if m_ else ''; S['scrv_for'] = scr
+        return S.get('scrv') or ''
+
+    def _pfx_target(self, S, cfg):
+        es = dict(getattr(self, 'engine_status', {}) or {}); now = time.time()
+        def live(u): return es.get(u) == 'LIVE'
+        cur = S.get('cur'); grace = float(cfg.get('off_grace') or 90)
+        if cur and not live(cur['u']):                                          # 斷線沒多久的先等（10 分鐘內接回會續寫同一場）
+            cur.setdefault('off_t', now)
+            if now - cur['off_t'] < grace and (S.get('man') or {}).get('u', cur['u']) == cur['u']: return {'u': cur['u']}
+        elif cur: cur.pop('off_t', None)
+        man = S.get('man')
+        if man:
+            if live(man['u']): man.pop('off_t', None); return {'u': man['u']}
+            man.setdefault('off_t', now)
+            if now - man['off_t'] < grace: return None
+            self._pfx_log(f'@{man["u"]} 下播了（測試錄製結束）'); S['man'] = None
+        if cfg.get('auto'):
+            pz = self._paused() if hasattr(self, '_paused') else {}
+            for u in cfg.get('users') or []:
+                if live(u) and u not in pz: return {'u': u}
+        return None
+
+    def _pfx_loop(self, g):
+        S = self._pfx_S(); self._pfx_log(f'背景開始（第 {g} 代）')
+        while S.get('gen') == g:
+            try: self._pfx_step(S)
+            except Exception as e: self._pfx_log(f'出錯：{e!r}')
+            time.sleep(3)
+
+    def _pfx_start(self):
+        S = self._pfx_S(); S['gen'] = int(S.get('gen') or 0) + 1
+        threading.Thread(target=self._pfx_loop, args=(S['gen'],), daemon=True, name='TikLivePhoneFx').start()
+        if not S.get('quit_hook'):
+            try: QApplication.instance().aboutToQuit.connect(lambda: self._pfx_kill(self._pfx_S())); S['quit_hook'] = True
+            except Exception: pass
+
+    def _pfx_step(self, S):
+        now = time.time(); cfg = self._pfx_cfg(); T = self._pfx_tools(); S['tools'] = bool(T)
+        if not T:
+            S['dev'] = {'st': 'notools'}; time.sleep(7); return
+        adb, scr = T
+        cur = S.get('cur'); busy = bool(cur) or bool(S.get('man')) or cfg.get('auto')
+        if now - float(S.get('dev_t') or 0) >= (5 if busy else 15):
+            S['dev_t'] = now; d0 = S.get('dev') or {}; d = self._pfx_scan(adb)
+            if d.get('st') == 'ok':
+                if d0.get('serial') != d.get('serial') or d0.get('st') != 'ok':
+                    d.update(self._pfx_props(adb, d['serial'])); S['info_t'] = 0
+                    self._pfx_log(f'手機連上：{d.get("model") or d["serial"]}（Android {d.get("andv","?")}）' + ('' if d.get('tiktok') else '；⚠ 沒裝 TikTok') + ('' if d.get('inject') else '；⚠ 小米要開「USB 調試（安全設置）」'))
+                else:
+                    for k in ('model', 'andv', 'miui', 'tiktok', 'inject', 'bat', 'temp', 'awake', 'fg', 'act', 'info_t'): 
+                        if k in d0: d.setdefault(k, d0[k])
+            elif d0.get('st') == 'ok': self._pfx_log('手機斷線（' + {'unauth': '要在手機上按允許', 'none': '找不到手機', 'offline': '離線'}.get(d.get('st'), d.get('st', '')) + '）')
+            S['dev'] = d
+        dev = S.get('dev') or {}; ok = dev.get('st') == 'ok'; ser = dev.get('serial')
+        if ok and now - float(S.get('info_t') or 0) >= (20 if cur else 60):
+            S['info_t'] = now; dev.update(self._pfx_info(adb, ser))
+        t_ = dev.get('temp')
+        if t_ is not None:
+            if t_ >= float(cfg.get('temp_stop') or 46) and not S.get('hot'):
+                S['hot'] = True; self._pfx_log(f'🌡 手機 {t_:.1f}°C 太熱，先停錄（降到 {cfg.get("temp_ok")}°C 再繼續）')
+                try: self._ui_call.emit(lambda t=t_: self.statusBar().showMessage(f'📱 手機 {t:.1f}°C 太熱，手機錄特效先停'))
+                except Exception: pass
+            elif t_ <= float(cfg.get('temp_ok') or 41) and S.get('hot'): S['hot'] = False; self._pfx_log(f'🌡 手機降到 {t_:.1f}°C，可以繼續錄')
+        tgt = self._pfx_target(S, cfg); p = S.get('proc')
+        if cur and (not tgt or tgt['u'] != cur['u'] or S.get('hot')):
+            self._pfx_stop(S, adb, ser if ok else None, ('下播' if (getattr(self, 'engine_status', {}) or {}).get(cur['u']) != 'LIVE' else '按了停止') if not tgt else ('太熱' if S.get('hot') else '換錄另一位')); return
+        if not tgt or S.get('hot'): S['wait'] = ''; return
+        if p is not None and p.poll() is not None:                                # scrcpy 自己結束了（拔線、手機重開…）→ 這段收尾，等一下開下一段
+            self._pfx_log(f'錄影程式結束了（代碼 {p.returncode}），這段先收尾'); S['proc'] = None; self._pfx_seg_done(cur); p = None
+            S['dev_t'] = 0; cur['next_t'] = max(float(cur.get('next_t') or 0), now + 6); return      # 先重新看手機還在不在，再開下一段
+        if not ok:
+            S['wait'] = {'unauth': '手機上要按「允許 USB 調試」', 'none': '找不到手機（USB 有插好嗎？）'}.get(dev.get('st'), '手機沒連上'); return
+        if p is None:
+            self._pfx_begin(S, adb, scr, ser, tgt['u'], cfg); return
+        if now - float(cur.get('chk') or 0) >= 20:                               # 錄影中：TikTok 被關掉／跳走 → 重新打開直播間（畫面一直在錄）
+            cur['chk'] = now
+            if dev.get('awake') is False: self._pfx_sh(adb, ser, 'input keyevent KEYCODE_WAKEUP', 8)
+            fg, act = dev.get('fg') or '', dev.get('act') or ''; cur['act'] = act
+            if fg and fg != self.PFX_PKG:
+                cur['bad'] = int(cur.get('bad') or 0) + 1
+                if cur['bad'] >= 2:
+                    self._pfx_log(f'前景不是 TikTok（{fg}），重新打開 @{cur["u"]} 的直播間'); cur['bad'] = 0; cur['reopen'] = int(cur.get('reopen') or 0) + 1
+                    self._pfx_open(adb, ser, cur['u'])
+            else: cur['bad'] = 0
+
+    def _pfx_open(self, adb, ser, u):
+        sh = lambda c, t=12: self._pfx_sh(adb, ser, c, t)
+        sh('input keyevent KEYCODE_WAKEUP'); time.sleep(0.7); sh('wm dismiss-keyguard'); time.sleep(0.5)
+        sh('svc power stayon usb')                                               # 插著 USB 不關螢幕
+        sh(f'am start -a android.intent.action.VIEW -d "https://www.tiktok.com/@{u}/live" -p {self.PFX_PKG}', 20)
+        for _ in range(8):
+            time.sleep(1.5); fg, act = self._pfx_fg(adb, ser)
+            if fg == self.PFX_PKG: return act or '?'
+        return ''
+
+    def _pfx_tmp(self):
+        d = self._ssd_dir() / 'phone_fx'; d.mkdir(parents=True, exist_ok=True); return d
+
+    def _pfx_begin(self, S, adb, scr, ser, u, cfg):
+        cur = S.get('cur')
+        if not cur or cur.get('u') != u:
+            sid = (getattr(self, 'engine_sessions', {}) or {}).get(u); ls = float((getattr(self, 'stream_live_start', {}) or {}).get(u) or time.time())
+            cur = {'u': u, 'name': self.streamer_names.get(u, u), 'sid': sid, 'ls': ls, 'seg': 0, 'segs': [], 't_start': time.time(), 'reopen': 0}
+            S['cur'] = cur; self._pfx_log(f'開始錄 @{u}（{cur["name"]}）' + (f' #場次 {sid}' if sid else ''))
+        if float(cur.get('next_t') or 0) > time.time(): return
+        act = self._pfx_open(adb, ser, u)
+        if not act: self._pfx_log('等 12 秒還沒看到 TikTok 在前面（照樣開始錄，之後會再試著打開）')
+        else: time.sleep(3)                                                      # 等直播間畫面出來
+        cur['seg'] = int(cur.get('seg') or 0) + 1
+        ts = time.strftime('%Y%m%d_%H%M%S', time.localtime(cur['ls']))
+        nice = re.sub(r'[\\/:*?"<>|\s]+', '_', f'{cur["name"]}_{ts}_#{cur["sid"] or "x"}_手機特效')   # 最後的檔名（暱稱_開播時間_#場次）
+        asc = re.sub(r'[^A-Za-z0-9_.-]+', '_', f'pfx_{u}_{ts}_{cur["sid"] or "x"}')                   # 錄影中的暫存檔名只用英數（scrcpy／FFmpeg 不怕路徑編碼）
+        def nm_(k): return (nice + (f'_p{k}' if k > 1 else ''), f'{asc}_p{k}.mkv')
+        while True:                                                              # 同一場停過又錄（太熱、換人又換回來）→ 往下編號，不蓋掉
+            cur['base'], fn_ = nm_(cur['seg']); f = self._pfx_tmp() / fn_
+            if not (f.exists() or f.with_suffix('.mp4').exists() or (self._pfx_vdir(u) / (cur['base'] + '.mp4')).exists() or (self._pfx_vdir(u) / (cur['base'] + '.mkv')).exists()): break
+            cur['seg'] += 1
+        lg = f.with_suffix('.log')
+        mb = max(2, min(20, int(cfg.get('mbps') or 8))); ms = max(720, min(2400, int(cfg.get('max_size') or 1920)))
+        v = [int(x) for x in re.findall(r'\d+', self._pfx_scr_ver(scr))[:2]] or [0, 0]
+        args = [scr, '-s', ser, '--no-control', f'--record={f}', '--record-format=mkv', '--audio-source=output', f'--video-bit-rate={mb}M', f'--max-size={ms}', '--max-fps=30']
+        args.insert(3, '--no-window' if v >= [2, 5] else '--no-playback')
+        try:
+            fh = open(lg, 'ab'); p = subprocess.Popen(args, stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **_no_window_kwargs()); fh.close()
+        except Exception as e:
+            self._pfx_log(f'開不了錄影程式：{e!r}'); cur['next_t'] = time.time() + 60; return
+        S['proc'] = p; cur.update(file=str(f), t0=time.time(), chk=time.time(), bad=0, next_t=time.time() + 30)
+        self._pfx_log(f'第 {cur["seg"]} 段開始錄：{cur["base"]}（{mb} Mbps、長邊 {ms}）')
+
+    def _pfx_kill(self, S):
+        p = S.get('proc'); S['proc'] = None
+        if p is None: return
+        try:
+            if p.poll() is None:
+                p.terminate()
+                try: p.wait(8)
+                except Exception: p.kill()
+        except Exception: pass
+
+    def _pfx_stop(self, S, adb, ser, why):
+        cur = S.get('cur'); self._pfx_kill(S)
+        if cur: self._pfx_seg_done(cur); self._pfx_log(f'停止錄 @{cur["u"]}（{why}）')
+        S['cur'] = None
+        if adb and ser:
+            for c in ('input keyevent KEYCODE_HOME', 'svc power stayon false', 'input keyevent KEYCODE_SLEEP'): self._pfx_sh(adb, ser, c, 8)
+
+    def _pfx_seg_done(self, cur):
+        f = (cur or {}).get('file')
+        if not f: return
+        cur['file'] = None; meta = {k: cur.get(k) for k in ('u', 'name', 'sid', 'ls', 'seg', 't0', 'base')}; meta['t1'] = time.time()
+        threading.Thread(target=self._pfx_finish, args=(f, meta), daemon=True, name='TikLivePhoneFxFin').start()
+
+    def _pfx_vdir(self, u):
+        d = Path(self.video_root()) / 'TikLive_手機特效' / re.sub(r'[\\/:*?"<>|]+', '_', str(u)); d.mkdir(parents=True, exist_ok=True); return d
+
+    def _pfx_idx_path(self): return Path(PACKAGE_ROOT) / '_DB_SSD' / 'phone_fx_index.json'
+
+    def _pfx_idx(self):
+        try: return list(json.loads(self._pfx_idx_path().read_text(encoding='utf-8')) or [])
+        except Exception: return []
+
+    def _pfx_finish(self, f, meta):
+        """背景：MKV → MP4（不重新壓縮、idle）→ 搬到影片資料夾 → 記到 phone_fx_index.json. 太短（<15 秒）的丟掉."""
+        src = Path(f); time.sleep(2)
+        try:
+            if not src.is_file():
+                try: src.with_suffix('.log').unlink()
+                except Exception: pass
+                return
+            if meta['t1'] - float(meta.get('t0') or meta['t1']) < 15 or src.stat().st_size < 300 * 1024:
+                src.unlink(); self._pfx_log(f'第 {meta.get("seg")} 段太短，不留')
+                try: src.with_suffix('.log').unlink()
+                except Exception: pass
+                return
+            out = src.with_suffix('.mp4'); ff = self._experiment_ffmpeg(); ok = False
+            if ff:
+                try:
+                    r = subprocess.run([ff, '-y', '-v', 'error', '-i', str(src), '-map', '0', '-c', 'copy', '-movflags', '+faststart', str(out)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=3600, **_no_window_kwargs(idle=True))
+                    ok = r.returncode == 0 and out.is_file() and out.stat().st_size > src.stat().st_size * 0.8
+                except Exception: ok = False
+            fin = out if ok else src
+            if ok: src.unlink()
+            else:
+                try: out.unlink()
+                except Exception: pass
+            stem = meta.get('base') or fin.stem; dst = self._pfx_vdir(meta['u']) / (stem + fin.suffix); k_ = 2
+            while dst.exists(): dst = dst.with_name(f'{stem}_{k_}{fin.suffix}'); k_ += 1
+            shutil.move(str(fin), str(dst))
+            try: fin.with_suffix('.log').unlink()
+            except Exception: pass
+            L = self._pfx_idx(); L.append(dict(meta, f=str(dst), sz=dst.stat().st_size, mp4=ok)); L = L[-2000:]
+            p = self._pfx_idx_path(); tp = p.with_suffix('.tmp'); tp.write_text(json.dumps(L, ensure_ascii=False), encoding='utf-8'); os.replace(tp, p)
+            self._pfx_log(f'✔ 存好：{dst}（{dst.stat().st_size/1e9:.2f} GB' + ('' if ok else '，MKV 沒換成 MP4') + '）')
+        except Exception as e: self._pfx_log(f'收尾出錯：{e!r}（檔案留在 {src}）')
+
+    def _pfx_tools_get(self):
+        """背景：從 scrcpy 官方 GitHub 下載最新 Windows 版（內含 adb），比對 GitHub 給的 SHA-256，解壓到 tools\\scrcpy."""
+        S = self._pfx_S()
+        if S.get('dl_run'): return
+        S['dl_run'] = True; S['dl'] = '查最新版…'
+        try:
+            import hashlib, zipfile
+            J_ = json.load(self._cu_open('https://api.github.com/repos/Genymobile/scrcpy/releases/latest', 30))
+            a = next((x for x in J_.get('assets') or [] if re.fullmatch(r'scrcpy-win64-v[\d.]+\.zip', str(x.get('name') or ''))), None)
+            if not a: raise RuntimeError('找不到 Windows 版檔案')
+            dg = str(a.get('digest') or ''); tot = int(a.get('size') or 0)
+            tmp = Path(PACKAGE_ROOT) / 'tools' / (a['name'] + '.part'); tmp.parent.mkdir(parents=True, exist_ok=True)
+            h = hashlib.sha256(); n = 0
+            with self._cu_open(a['browser_download_url'], 60) as r, open(tmp, 'wb') as fh:
+                while True:
+                    b = r.read(256 * 1024)
+                    if not b: break
+                    fh.write(b); h.update(b); n += len(b); S['dl'] = f'下載 {a["name"]} {n/1e6:.1f}/{tot/1e6:.1f} MB'
+            if dg.startswith('sha256:') and dg[7:].lower() != h.hexdigest(): raise RuntimeError('SHA-256 對不上，不用這個檔')
+            dst = self._pfx_tdir(); new = dst.with_name('scrcpy.new')
+            shutil.rmtree(new, ignore_errors=True); new.mkdir(parents=True)
+            with zipfile.ZipFile(tmp) as z:
+                for m in z.infolist():
+                    nm = m.filename.replace('\\', '/'); ps = [x for x in nm.split('/') if x]
+                    if len(ps) > 1: ps = ps[1:]                                  # 拿掉最上層資料夾
+                    if not ps or m.is_dir() or '..' in ps: continue
+                    o = new.joinpath(*ps); o.parent.mkdir(parents=True, exist_ok=True)
+                    with z.open(m) as zi, open(o, 'wb') as fo: shutil.copyfileobj(zi, fo)
+            if not (new / 'scrcpy.exe').is_file() or not (new / 'adb.exe').is_file(): raise RuntimeError('壓縮檔裡沒有 scrcpy.exe／adb.exe')
+            if dst.exists():
+                try: self._pfx_run([str(dst / 'adb.exe'), 'kill-server'], 10)
+                except Exception: pass
+                shutil.rmtree(dst, ignore_errors=True)
+            os.replace(new, dst); tmp.unlink(); S['tools_c'] = None
+            S['dl'] = f'✔ 裝好 {a["name"]}' + ('（SHA-256 比對過）' if dg.startswith('sha256:') else ''); self._pfx_log(S['dl'])
+        except Exception as e:
+            S['dl'] = f'✖ 下載失敗：{e}'; self._pfx_log(S['dl'])
+        finally: S['dl_run'] = False
+
+    def _pfx_info_web(self):
+        S = self._pfx_S(); cfg = self._pfx_cfg(); cur = dict(S.get('cur') or {}) if S.get('cur') else None; now = time.time()
+        if not S.get('gen') and self._pfx_tools(): self._pfx_start()               # 打開這頁（或剛裝好 scrcpy）→ 背景開始看手機
+        if cur:
+            try: cur['size'] = os.path.getsize(cur['file']) if cur.get('file') else 0
+            except Exception: cur['size'] = 0
+            cur['rec'] = S.get('proc') is not None and S['proc'].poll() is None
+            cur.pop('segs', None)
+        es = dict(getattr(self, 'engine_status', {}) or {}); st = dict(getattr(self, 'stream_live_start', {}) or {})
+        live = sorted([[u, self.streamer_names.get(u, u), float(st.get(u) or 0)] for u, v in es.items() if v == 'LIVE'], key=lambda x: -x[2])
+        T = self._pfx_tools()
+        rec = [dict(x, f=Path(x['f']).name, i=i) for i, x in enumerate(self._pfx_idx())][-30:][::-1]
+        return {'ok': True, 'now': now, 'tools': bool(T), 'tdir': str(self._pfx_tdir()), 'scrv': (self._pfx_scr_ver(T[1]) if T else ''), 'dl': S.get('dl') or '', 'dl_run': bool(S.get('dl_run')),
+                'dev': dict(S.get('dev') or {}), 'cur': cur, 'man': S.get('man'), 'hot': bool(S.get('hot')), 'wait': S.get('wait') or '', 'run': bool(S.get('gen')),
+                'cfg': cfg, 'live': live, 'log': list(S.get('log') or [])[-40:][::-1], 'rec': rec,
+                'gr': {u: self._rv_grade_of(u) for u in [x[0] for x in live] + list(cfg.get('users') or [])}}
+
+    def _pfx_set(self, d):
+        S = self._pfx_S(); op = str(d.get('op') or ''); cfg = self._pfx_cfg()
+        if op == 'rec':
+            u = str(d.get('u') or '').strip().lstrip('@')
+            if (getattr(self, 'engine_status', {}) or {}).get(u) != 'LIVE': return {'ok': False, 'message': f'@{u} 現在不在直播中（程式要先偵測到他開播）'}
+            S['man'] = {'u': u, 't': time.time()}; self._pfx_log(f'手動指定錄 @{u}（測試）')
+            if not S.get('gen'): self._pfx_start()
+            return {'ok': True, 'message': f'📱 開始準備錄 @{u}：手機會自己打開直播間（約 20 秒）'}
+        if op == 'stop':
+            S['man'] = None                                                     # 背景那條 3 秒內看到沒有目標 → 停、收尾（只讓它一條處理，不會收尾兩次）
+            if S.get('cur'): S['cur']['off_t'] = 0
+            if cfg.get('auto'): cfg['auto'] = False; self._pfx_cfg_save(cfg); self._pfx_log('自動錄關掉（按了停止）')
+            return {'ok': True, 'message': '⏹ 停止錄影，檔案在背景收尾'}
+        if op == 'auto':
+            cfg['auto'] = bool(d.get('on')); self._pfx_cfg_save(cfg); self._pfx_log('自動錄 ' + ('打開' if cfg['auto'] else '關掉'))
+            if cfg['auto'] and not S.get('gen'): self._pfx_start()
+            return {'ok': True, 'message': '已' + ('打開' if cfg['auto'] else '關掉') + '自動錄'}
+        if op == 'users':
+            L = []
+            for u in d.get('users') or []:
+                u = str(u).strip().lstrip('@')
+                if u and u not in L: L.append(u)
+            cfg['users'] = L[:50]; self._pfx_cfg_save(cfg); return {'ok': True, 'message': f'名單 {len(L)} 位'}
+        if op == 'opt':
+            for k, lo, hi in (('mbps', 2, 20), ('max_size', 720, 2400), ('temp_stop', 38, 60), ('temp_ok', 30, 55), ('off_grace', 30, 900)):
+                if k in d:
+                    try: cfg[k] = max(lo, min(hi, int(d[k])))
+                    except Exception: pass
+            self._pfx_cfg_save(cfg); return {'ok': True, 'message': '已存'}
+        if op == 'tools':
+            threading.Thread(target=self._pfx_tools_get, daemon=True, name='TikLivePhoneFxDl').start(); return {'ok': True, 'message': '開始下載 scrcpy（官方 GitHub）'}
+        if op == 'test':
+            T = self._pfx_tools(); dev = S.get('dev') or {}
+            if not T or dev.get('st') != 'ok': return {'ok': False, 'message': '手機還沒連上'}
+            def run_(T=T, ser=dev['serial']):
+                self._pfx_sh(T[0], ser, 'input keyevent KEYCODE_WAKEUP', 8); time.sleep(0.6); self._pfx_sh(T[0], ser, 'wm dismiss-keyguard', 8)
+                self._pfx_sh(T[0], ser, 'monkey -p ' + self.PFX_PKG + ' -c android.intent.category.LAUNCHER 1', 15); time.sleep(5)
+                fg, act = self._pfx_fg(T[0], ser); self._pfx_log(f'測試：前景 {fg or "?"} / {act or "?"}' + ('（✔ TikTok 打開了）' if fg == self.PFX_PKG else '（✖ 沒看到 TikTok）'))
+                S['info_t'] = 0
+            threading.Thread(target=run_, daemon=True).start(); return {'ok': True, 'message': '叫醒手機、打開 TikTok…（5 秒後看下面紀錄）'}
+        return {'ok': False, 'message': '不認得的操作'}
+
+    def _pfx_file(self, i):
+        try:
+            L = self._pfx_idx(); x = L[int(i)]; p = Path(x['f'])
+            return p if p.is_file() else None
+        except Exception: return None
+
     def _live_now(self):
         """TK_V1.0.38 開播提醒用的小清單（只讀、只看記憶體，不碰資料庫）：[[帳號, 名字, 重點主播, 開播時間]]."""
         out = []
@@ -45176,7 +45584,7 @@ function drawSetSearch(){const q=(S.setQ||"").trim().toLowerCase(),sb=$("#sbody"
   sb.onclick=e=>{const b=e.target.closest(".sres");if(!b)return;S.scat=b.dataset.cat;S.setQ="";const k=b.dataset.k;drawSetCat();
     setTimeout(()=>{const el=document.querySelector(`#sbody [data-k="${CSS.escape(k)}"]`);const row=el&&(el.closest(".si,.pi,.prow")||el);if(row){row.scrollIntoView({block:"center"});row.classList.add("sflash");setTimeout(()=>row.classList.remove("sflash"),1800);}},350);};}
 /* ---------------- V0.6.95 工具（主頁分頁）：原本放在設定左邊的工作流 ---------------- */
-const TOOLS=[["緊急事件",[["emg","🚨","緊急處理","C／I 槽堆積、轉檔與搬檔進度、速度、模式、顯示卡"]]],["🧪 實驗工作區",[["exp","🧪","實驗工作區","新想法先放這裡：同一件事的幾種做法並排，A／B 對照自動比較"]]],["資料",[["gift","🎁","送禮者","誰送了多少、送禮排行、每位的紀錄"],["hrank","🏆","主播收禮排行","每位主播收了多少鑽石、裡面誰送最多（送禮者反過來看）"]]],["影片工具",[["vg","▦","檔案總管（影片快速瀏覽 v2）","每幾秒一張圖排滿畫面，選起來初剪；上面分頁也可以直接進"],["tkd","📥","TKDownloader","新增主播頁貼影片網址下載的短影片：篩選、播放、存到手機"],["igd","📸","IGDownloader","新增主播頁貼 IG 網址下載的照片／影片：篩選、看、存到手機"],["feat","⏯","精選／審核 開關","暫停省效能（功能保留），之後在這裡再打開"],["sp","✂","批量剪輯","選主播＋禮物，一次剪很多段"],["org","🗂","整理 MP4","依保存等級／已剪輯過的，一次刪 MP4"],["shp","📸","批量截 20 張","歷史場次先截好 20 張圖（不用等刪 MP4）"],["yt","▶","YouTube 上傳","自動上傳（不公開）、拿到網址後移到暫放"],["phr","📱","手機錄屏","從外接硬碟限速匯入手機錄的畫面，用聲音自動對上是哪一場，回放可以切換版本"],["cul","🌐","Chrome 上傳限速","看 K 槽忙不忙自動調 Chrome 的上傳速度"],["stt","🎙","語音轉字幕","下播後自動轉；進度、效能上限"]]],
+const TOOLS=[["緊急事件",[["emg","🚨","緊急處理","C／I 槽堆積、轉檔與搬檔進度、速度、模式、顯示卡"]]],["🧪 實驗工作區",[["exp","🧪","實驗工作區","新想法先放這裡：同一件事的幾種做法並排，A／B 對照自動比較"]]],["資料",[["gift","🎁","送禮者","誰送了多少、送禮排行、每位的紀錄"],["hrank","🏆","主播收禮排行","每位主播收了多少鑽石、裡面誰送最多（送禮者反過來看）"]]],["影片工具",[["vg","▦","檔案總管（影片快速瀏覽 v2）","每幾秒一張圖排滿畫面，選起來初剪；上面分頁也可以直接進"],["tkd","📥","TKDownloader","新增主播頁貼影片網址下載的短影片：篩選、播放、存到手機"],["igd","📸","IGDownloader","新增主播頁貼 IG 網址下載的照片／影片：篩選、看、存到手機"],["feat","⏯","精選／審核 開關","暫停省效能（功能保留），之後在這裡再打開"],["sp","✂","批量剪輯","選主播＋禮物，一次剪很多段"],["org","🗂","整理 MP4","依保存等級／已剪輯過的，一次刪 MP4"],["shp","📸","批量截 20 張","歷史場次先截好 20 張圖（不用等刪 MP4）"],["yt","▶","YouTube 上傳","自動上傳（不公開）、拿到網址後移到暫放"],["pfx","📲","手機錄特效","一支安卓手機接電腦：主播開播自動打開直播間、錄下有禮物特效的手機畫面（scrcpy）"],["phr","📱","手機錄屏","從外接硬碟限速匯入手機錄的畫面，用聲音自動對上是哪一場，回放可以切換版本"],["cul","🌐","Chrome 上傳限速","看 K 槽忙不忙自動調 Chrome 的上傳速度"],["stt","🎙","語音轉字幕","下播後自動轉；進度、效能上限"]]],
   ["電腦與連線",[["bg","🖥","後台狀態","現在在跑什麼、排隊什麼，可以取消"],["stat","📈","開播統計","主播什麼時候開播、播多久"],["prof","🧭","主播特性","習慣、PK 比例、你標的等級、錄到幾成 → 建議"],["csv","📤","匯出場次表（Excel）","最近 7／30／90 天或一年的場次，或只匯出某位主播，CSV 直接用 Excel 開"],["dtl","📅","一天的時間軸","今天（或任一天）每位主播幾點播到幾點、錄到哪裡、漏了開頭沒有"],["ythold","🗑","YouTube 已上傳-刪除隔離區","傳好 YouTube 的原檔都在這：逐項抽查 YouTube／原檔，沒問題就一次全部刪"],["mig","💽","E → R 搬硬碟","把 E 槽整顆慢慢複製到 R 槽（斷電安全），最後一次切換"],["merge","⧉","合併重複場次","程式重開、斷電切成好幾段的同一場直播，合成一場（影片照時間接著播）"],["gsd","🎛","顯示卡供需","顯示卡每天閒多久、忙多久；字幕每天錄到的量轉不轉得完（要不要換顯示卡看這裡）"],["hp","🩺","一頁健檢","所有要處理／要留意的事一次看，加上記憶體、熱更新、備份、字幕搜尋庫等數字"],["host","👤","主播總覽","選一位主播：開播時段、下次可能開播、等級、禮物、筆記、最近場次"],["dhh","🩺","硬碟健康紀錄","每顆硬碟 30 天的溫度、讀寫錯誤趨勢；錯誤一直變多就該換了"],["hevc","🧪","HEVC 壓縮試算","拿一分鐘影片用顯示卡壓成 H.265，看能省多少空間、畫質比較（只試，不動原檔）"],["act","🕘","自動處理紀錄","程式自己做了什麼：刪除、YouTube、手機錄屏、自動分級、備份、重開"],["sbk","🗂","小檔備份","每天自動備份設定／分級／YouTube 排隊／手機錄屏紀錄，可以下載"],["chv","🆕","版本與更新","這次更新了什麼：可以搜尋、依版本收合，新的標 🆕"],["wkr","📰","每週報告","上週錄了多少、錄到幾成、最精彩的 5 段"],["cg","🚦","連線管控","排隊、被限制時自動放慢"],["conn","🩺","連線狀況","每位主播的連線情形"],["logx","📋","LOG 與問題","錯誤紀錄、異常、自動處理結果"],["rules","📖","規則說明","程式實際怎麼做：等級、刪除、YouTube、回放延遲、控溫…"]]],
   ["主播與畫面",[["cats","🗂","主播分類","分類顏色、資料夾"],["gfx","🎁","送禮動畫","直播畫面上的送禮動畫"]]]];
 function toolName(k){if(k==="host")return "👤 主播總覽";if(k==="gifs")return "🎞 GIF 製作";for(const [,L] of TOOLS)for(const x of L)if(x[0]===k)return x[1]+" "+x[2];return "工具";}
@@ -45311,6 +45719,7 @@ const RULES=[
   {t:"空間不夠時",d:"<ul><li>SSD 剩不到 <b>"+RU_V('rec.ssd_min_free','GB',60)+"</b>：新的錄影改成直接錄在影片庫硬碟。</li><li>影片硬碟剩不到 <b>"+RU_V('rec.video_min_free','GB',30)+"</b>：不開始新的錄影（<b>聲音照錄</b>）。</li><li>🛡 C 槽守門員每分鐘看 C 剩多少、減少多快：第 1 級先停不急的背景工作；第 2 級全速把東西搬走；第 3 級（剩不到 15 GB 或 20 分鐘內會滿）才會一位一位停掉正在錄到 C 的影片（F → E → 未分級先停）。</li></ul>"},
   {t:"同一場直播的判定（斷線、重開）",d:"<ul><li>主播斷線後 <b>"+RU_V('conn.grace_minutes','分鐘',10)+"內</b>連回同一個直播間＝<b>續寫同一場</b>（錄影會分成第 2 段、第 3 段…）。</li><li>直播中卻 <b>"+RU_V('monitor.silent_min','分鐘',30)+"</b>沒有任何留言、禮物、進場、人數也沒變（而且沒在錄影）→ 重新連一次確認：還在播就續寫，結束了就把結束時間改回最後有資料的時間。</li><li>程式重開、斷電、超過 10 分鐘才連回來 → 會變成<b>另一場</b>。這種被切開的，用「⧉ 合併重複場次」合回一場（見「場次合併」）。</li></ul>"},
   {t:"開程式、熱更新時的監控",d:"<ul><li>開程式 3 秒後自動開始監控（設定可以關）。正在錄的場次在熱更新、重開時會<b>接著錄同一場</b>。</li><li>搬硬碟切換後，如果找不到影片硬碟（例如 R 槽代號跑掉），程式<b>先不開始監控</b>，不會錄到別的地方，會提示你去磁碟管理改代號。</li></ul>"},
+  {t:"📲 手機錄特效（測試中）",d:"<ul><li>一支安卓手機（紅米 10）用 USB 接電腦，裝好 scrcpy（工具頁可自動從官方 GitHub 下載）。</li><li>主播開播 → 手機自己亮起來、打開那個直播間 → 錄下手機畫面＋聲音（有禮物特效）。一支手機一次錄一場。</li><li>測試期間：在「工具 → 📲 手機錄特效」挑一位直播中的按「錄這位」；之後正式用：名單裡排前面、正在直播的先錄，他下播換下一位。</li><li>主播斷線／下播超過 90 秒才停；TikTok 被關掉或跳走會自己重新打開直播間；拔線再插回、scrcpy 中斷 → 接著錄下一段（_p2、_p3…）。</li><li>手機超過 46°C 先停錄，降到 41°C 再繼續。</li><li>先錄在 SSD（MKV，斷電也播得了），結束後不重新壓縮換成 MP4（idle），搬到影片資料夾 <b>TikLive_手機特效\\帳號\\</b>；不到 15 秒的段丟掉。</li><li>全部在背景執行緒：手機只把壓好的畫面傳過來，電腦不解碼、不開視窗。</li></ul>"},
   {t:"⏸ 暫停監控並封存",d:"<ul><li>主播分類（或審核、檔案總管）<b>長按主播</b> → 主播選單 →「⏸ 暫停監控並封存」。</li><li>從那一刻起<b>不再連線、不錄新的</b>（直播中的話那一場停在那裡、照常收尾）；主播清單、等級、分類、<b>以前的場次全部留著</b>，照常轉檔、整理、照等級排隊上傳 YouTube、照保留天數刪原檔。</li><li>在主播分類移到最下面「⏸ 暫停監控（封存）」那區；<b>審核頁</b>也收到最下面同一欄「⏸ 封存」（保留原本的等級、照等級排、灰階，點進去一樣看以前的紀錄）。同一個選單按「▶ 恢復監控」就接回來。</li><li>封存中的主播又被<b>新增</b>（貼 TikTok 連結、@帳號、匯入）：會先問「目前封存中，要解封嗎？」— 解封＝移回來繼續監控；取消＝取消新增、維持封存。</li><li>每一次封存／解封都會記下來（時間、從哪裡按的），長按主播的小視窗最上面「🗄 封存紀錄」看得到。</li><li>跟「🗑 刪除主播」不一樣：刪除＝整位全部刪掉（等於標 F 再處置）。</li></ul>"},
   {t:"只錄聲音的主播（照審核等級 G）",d:"<ul><li><b>在「主播審核」標 G＝只錄聲音</b>；改成別的等級就恢復錄影片。以前另外的「只錄聲音的主播」清單已經拿掉，程式每分鐘照等級對一次，以審核等級為準。</li><li>G 的主播直播中照樣錄畫面（FLV 先放 C 槽），下播後截 60 張圖＋字幕，自動傳 YouTube，傳好才移走原檔。</li><li>直播中每 <b>"+RU_V('rec.snap_min','分鐘',2)+"</b>另外拍一張快照，回放時在影片的位置左右翻看。</li></ul>"}]},
  {k:"play",i:"📺",c:"#4dc9ff",t:"回放與直播中觀看：延遲、預載入",s:[
@@ -45578,7 +45987,8 @@ function viewTool(k){$("#clk").textContent="";V().onclick=null;
   if(k==="gsd"){gsdMount($("#sbody"));return;}   /* TK_V1.0.84 */
   if(k==="mig"){migMount($("#sbody"));return;}   /* V1.1.07 */
   if(k==="merge"){mrgMount($("#sbody"));return;}   /* V1.1.25 */
-  if(k==="rules"){rulesMount($("#sbody"));return;}   /* V1.1.32 */
+  if(k==="rules"){rulesMount($("#sbody"));return;}
+  if(k==="pfx"){pfxMount($("#sbody"));return;}   /* V1.1.63 */   /* V1.1.32 */
   if(k==="ythold"){yhcMount($("#sbody"));return;}   /* TK_V1.0.97 */
   if(k==="gifs"){gfsMount($("#sbody"));return;}   /* TK_V1.0.75 */
   if(k==="host"){hostMount($("#sbody"));return;}   /* TK_V1.0.42 主播總覽（從快速找進來） */
@@ -49847,6 +50257,63 @@ const rvPhone=()=>typeof PAGES==="undefined";
 const rvToast=(m,ms)=>{if(typeof toast==="function")toast(m,ms);};
 async function rvGet(p){const r=await fetch(rvB()+p,{cache:"no-store"});return r.json();}
 async function rvPost(p,d){try{if(typeof kPost==="function")return await kPost(p,d);if(typeof post==="function")return await post(p,d);if(typeof deepPost==="function")return await deepPost(p,d);}catch(e){}return null;}
+/* V1.1.63 📱 手機錄特效（實體安卓手機＋scrcpy）：狀態、手動挑一位錄（測試）、自動名單、引導 */
+const PFX={t:0,j:null};
+function pfxCss(){if(document.getElementById("pfxCss"))return;const s=document.createElement("style");s.id="pfxCss";s.textContent=`.pfx{display:flex;flex-direction:column;gap:12px;max-width:820px}.pfx .pfC{border:1px solid rgba(140,150,165,.35);border-radius:12px;padding:12px 14px}.pfx h4{margin:0 0 8px;font-size:15px}.pfx .pfR{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:13.5px;line-height:1.6}.pfx .pfOk{color:#3ecf8e;font-weight:700}.pfx .pfBad{color:#ff6b6b;font-weight:700}.pfx .pfW{color:#f0ad4e;font-weight:700}.pfx button.pfB{border:1px solid rgba(140,150,165,.5);background:rgba(120,140,170,.12);color:inherit;border-radius:9px;padding:7px 12px;font-size:13.5px;cursor:pointer;white-space:nowrap}.pfx button.pfB.go{background:#2e7df6;border-color:#2e7df6;color:#fff}.pfx button.pfB.st{background:#d9534f;border-color:#d9534f;color:#fff}.pfx .pfL{display:flex;flex-direction:column;gap:6px}.pfx .pfI{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:9px;background:rgba(120,140,170,.08);font-size:13.5px}.pfx .pfI b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pfx .pfG{font-size:11px;font-weight:800;border-radius:6px;padding:1px 6px;background:rgba(140,150,165,.25)}.pfx .pfRec{border-color:#ff4d6d;box-shadow:0 0 0 1px #ff4d6d55 inset}.pfx .pfDot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff4d6d;animation:pfBl 1s infinite;margin-right:6px}@keyframes pfBl{50%{opacity:.25}}.pfx .pfLog{font-size:12px;opacity:.85;max-height:240px;overflow:auto;line-height:1.55}.pfx .pfLog div{border-bottom:1px dashed rgba(140,150,165,.2);padding:2px 0}.pfx details summary{cursor:pointer;font-weight:700}.pfx ol{margin:6px 0 0 0;padding-left:22px;font-size:13.5px;line-height:1.7}.pfx input.pfN{width:70px;padding:4px 6px;border-radius:7px;border:1px solid rgba(140,150,165,.5);background:transparent;color:inherit}.pfx input.pfU{flex:1;min-width:120px;padding:6px 8px;border-radius:8px;border:1px solid rgba(140,150,165,.5);background:transparent;color:inherit}.pfx .pfSub{font-size:12px;opacity:.75}`;document.head.appendChild(s);}
+function pfxT(t){const d=new Date(t*1000);return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;}
+function pfxDur(s){s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return (h?h+":":"")+String(m).padStart(h?2:1,"0")+":"+String(x).padStart(2,"0");}
+function pfxGuide(){return `<details class="pfC"><summary>📋 第一次設定（紅米 10，照順序做一次就好）</summary><ol>
+<li><b>不用回復原廠</b>。手機裡沒有你個人的資料、也不打算拿來做別的事就直接用；有個人資料、或登入的是你的主帳號，才建議回復原廠。</li>
+<li>TikTok（國際版，不是抖音）登入一個<b>小帳號</b>（帳號密碼你自己在手機上打，程式不碰）。</li>
+<li>設定 → 密碼與安全 → 螢幕鎖定：<b>無</b>（程式才能自己叫醒進直播間）。</li>
+<li>設定 → 我的手機 → 全部參數 → 連按「MIUI 版本」7 下 → 開啟開發者選項。</li>
+<li>設定 → 更多設定 → 開發者選項：打開 <b>USB 偵錯</b>、<b>USB 偵錯（安全設定）</b>（小米會要你登入小米帳號、可能要插 SIM 卡；沒開這個程式不能幫你按手機）、<b>不鎖定螢幕（充電時）</b>。</li>
+<li>設定 → 應用程式 → TikTok → 省電策略：<b>無限制</b>；自動啟動打開。系統更新：關閉自動下載更新。</li>
+<li>通知：打開「勿擾」或把其他 App 的懸浮通知關掉，不然會錄進畫面。</li>
+<li>用<b>資料傳輸線</b>插電腦（有些線只能充電）。手機跳出「允許 USB 偵錯嗎？」→ 勾<b>一律允許這台電腦</b> → 允許。</li>
+<li>這頁上面「手機」那格變綠色、TikTok ✔、安全設定 ✔ 就好了。按「🔔 測試手機」看手機會不會自己亮起來、打開 TikTok。</li>
+<li>長期插電：電池設定裡有「最佳化充電／保護電池」就打開（最多充到 80%）。</li></ol></details>`;}
+function pfxHtml(j){const D=j.dev||{},c=j.cur,cf=j.cfg||{},gr=j.gr||{};const gC=u=>gr[u]?`<span class="pfG">${rvE(gr[u])}</span>`:"";
+  const devS={ok:`<span class="pfOk">✔ 連上</span> ${rvE(D.model||D.serial||"")} · Android ${rvE(D.andv||"?")}${D.miui?" · "+rvE(D.miui):""}`,notools:`<span class="pfW">還沒裝 scrcpy</span>`,none:`<span class="pfBad">找不到手機</span>（USB 插好了嗎？開發者選項的 USB 偵錯有開嗎？）`,unauth:`<span class="pfW">手機上要按「允許 USB 偵錯」</span>（勾一律允許）`,offline:`<span class="pfBad">手機離線</span>（拔掉重插）`}[D.st]||`<span class="pfBad">${rvE(D.st||"?")}</span> ${rvE(D.msg||"")}`;
+  let h=`<div class="pfC"><h4>🔌 狀態</h4><div class="pfR">${j.tools?`<span>scrcpy <span class="pfOk">✔ v${rvE(j.scrv||"?")}</span></span>`:`<span>scrcpy <span class="pfBad">✖ 沒裝</span></span> <button class="pfB go" data-pa="tools" ${j.dl_run?"disabled":""}>⬇ 自動下載（官方 GitHub）</button>`}${j.dl?`<span class="pfSub">${rvE(j.dl)}</span>`:""}</div>
+  <div class="pfR" style="margin-top:4px">📱 ${devS}</div>`;
+  if(D.st==="ok")h+=`<div class="pfR">${D.bat!=null?`🔋 ${D.bat}%`:""} ${D.temp!=null?`<span class="${D.temp>=(cf.temp_stop||46)?"pfBad":D.temp>=40?"pfW":""}">🌡 ${D.temp.toFixed(1)}°C</span>`:""} <span>TikTok ${D.tiktok?'<span class="pfOk">✔</span>':'<span class="pfBad">✖ 沒裝（要國際版）</span>'}</span> <span>安全設定 ${D.inject===false?'<span class="pfBad">✖ 要開「USB 偵錯（安全設定）」</span>':'<span class="pfOk">✔</span>'}</span> ${D.fg?`<span class="pfSub">前景：${rvE(D.fg)}${D.act?" / "+rvE(String(D.act).split(".").pop()):""}</span>`:""} <button class="pfB" data-pa="test">🔔 測試手機</button></div>`;
+  if(!j.tools)h+=`<div class="pfSub" style="margin-top:6px">也可以自己到 github.com/Genymobile/scrcpy 的 Releases 下載 scrcpy-win64 的 zip，解壓到 ${rvE(j.tdir)}</div>`;
+  h+=`</div>`;
+  if(c)h+=`<div class="pfC pfRec"><h4>${c.rec?'<span class="pfDot"></span>':"⏳ "}正在錄：${rvE(c.name||c.u)} @${rvE(c.u)} ${gC(c.u)}</h4><div class="pfR"><span>已錄 ${pfxDur(j.now-(c.t_start||j.now))}</span><span>第 ${c.seg||0} 段</span><span>這段 ${((c.size||0)/1e6).toFixed(0)} MB</span>${c.sid?`<span>#${rvE(c.sid)}</span>`:""}${c.reopen?`<span class="pfW">重新打開直播間 ${c.reopen} 次</span>`:""}${c.off_t?`<span class="pfW">主播斷線中（等 ${cf.off_grace||90} 秒）</span>`:""}<button class="pfB st" data-pa="stop">⏹ 停止</button></div>${j.wait?`<div class="pfW" style="margin-top:4px">${rvE(j.wait)}</div>`:""}</div>`;
+  else if(j.man)h+=`<div class="pfC"><h4>⏳ 準備錄 @${rvE(j.man.u)}</h4><div class="pfR">${rvE(j.wait||"等手機…")} <button class="pfB st" data-pa="stop">✕ 取消</button></div></div>`;
+  if(j.hot)h+=`<div class="pfC pfBad">🌡 手機太熱，先停錄（降到 ${cf.temp_ok}°C 會自己繼續）</div>`;
+  h+=`<div class="pfC"><h4>🔴 現在直播中（測試：挑一位按「錄這位」）</h4>${(j.live||[]).length?`<div class="pfL">`+j.live.map(x=>`<div class="pfI"><b>${rvE(x[1])} <span class="pfSub">@${rvE(x[0])}</span></b>${gC(x[0])}<span class="pfSub">${x[2]?pfxDur(j.now-x[2]):""}</span>${c&&c.u===x[0]?'<span class="pfOk">錄影中</span>':`<button class="pfB go" data-pa="rec" data-u="${rvE(x[0])}" ${D.st!=="ok"?"disabled":""}>📱 錄這位</button>`}<button class="pfB" data-pa="add" data-u="${rvE(x[0])}" title="加進自動錄名單">＋</button></div>`).join("")+`</div>`:`<div class="pfSub">目前沒有偵測到直播中的主播</div>`}<div class="pfSub" style="margin-top:6px">一支手機一次只能錄一場；按另一位會先停掉現在這位。主播下播 ${cf.off_grace||90} 秒後自動停、檔案收尾。</div></div>`;
+  const U=cf.users||[];
+  h+=`<div class="pfC"><h4>🤖 自動錄（之後正式用）</h4><div class="pfR"><label><input type="checkbox" data-pa="auto" ${cf.auto?"checked":""}> 名單裡的主播開播就自動錄（排前面的先錄；他下播換下一位還在播的）</label></div>
+  <div class="pfL" style="margin-top:6px">${U.map((u,i)=>`<div class="pfI"><span class="pfSub">${i+1}</span><b>${rvE(u)}</b>${gC(u)}<button class="pfB" data-pa="mv" data-i="${i}" data-d="-1" ${i?"":"disabled"}>↑</button><button class="pfB" data-pa="mv" data-i="${i}" data-d="1" ${i<U.length-1?"":"disabled"}>↓</button><button class="pfB" data-pa="rm" data-i="${i}">✕</button></div>`).join("")||'<div class="pfSub">名單是空的（測試期間不用設）</div>'}</div>
+  <div class="pfR" style="margin-top:6px"><input class="pfU" placeholder="@帳號" id="pfxAddU"><button class="pfB" data-pa="addu">＋ 加入</button></div></div>`;
+  h+=`<details class="pfC"><summary>⚙ 錄影設定</summary><div class="pfR" style="margin-top:8px"><label>畫質 <input class="pfN" type="number" min="2" max="20" data-o="mbps" value="${cf.mbps}"> Mbps</label><label>長邊 <input class="pfN" type="number" min="720" max="2400" step="10" data-o="max_size" value="${cf.max_size}"></label><label>手機超過 <input class="pfN" type="number" min="38" max="60" data-o="temp_stop" value="${cf.temp_stop}"> °C 停錄</label><label>降到 <input class="pfN" type="number" min="30" max="55" data-o="temp_ok" value="${cf.temp_ok}"> °C 繼續</label><label>下播等 <input class="pfN" type="number" min="30" max="900" data-o="off_grace" value="${cf.off_grace}"> 秒才停</label><button class="pfB" data-pa="opt">存</button></div><div class="pfSub" style="margin-top:6px">8 Mbps 一小時約 3.6 GB。先錄在 SSD（MKV，斷電也播得了），下播後不重新壓縮換成 MP4，再搬到影片資料夾的 TikLive_手機特效\\帳號\\。</div></details>`;
+  h+=pfxGuide();
+  h+=`<div class="pfC"><h4>🎬 錄好的</h4>${(j.rec||[]).length?`<div class="pfL">`+j.rec.map(x=>`<div class="pfI"><b>${rvE(x.name||x.u)} <span class="pfSub">${rvE(x.f)}</span></b><span class="pfSub">${pfxDur((x.t1||0)-(x.t0||0))} · ${((x.sz||0)/1e9).toFixed(2)} GB · ${pfxT(x.t1||0)}</span><a class="pfB" style="text-decoration:none;border:1px solid rgba(140,150,165,.5);border-radius:9px;padding:6px 10px" href="${rvB()}/api/pc/pfx/file?i=${x.i}" target="_blank" rel="noopener">▶</a></div>`).join("")+`</div>`:'<div class="pfSub">還沒有</div>'}</div>`;
+  h+=`<details class="pfC" open><summary>📝 紀錄</summary><div class="pfLog">${(j.log||[]).map(e=>`<div>${pfxT(e[0])} ${rvE(e[1])}</div>`).join("")||"—"}</div></details>`;
+  return h;}
+async function pfxLoad(root){let j=null;try{j=await rvGet("/api/pc/pfx");}catch(e){}if(!root.isConnected)return;
+  if(!j||!j.ok){root.querySelector(".pfx").innerHTML='<div class="pfC pfBad">讀不到（電腦端沒回應）</div>';return;}
+  PFX.j=j;const box=root.querySelector(".pfx");const op=[...box.querySelectorAll("details")].map(d=>d.open);const ae=document.activeElement;if(ae&&box.contains(ae)&&ae.tagName==="INPUT")return;
+  box.innerHTML=pfxHtml(j);[...box.querySelectorAll("details")].forEach((d,i)=>{if(op[i]!=null)d.open=op[i];});}
+async function pfxAct(root,el){const a=el.dataset.pa,j=PFX.j||{},cf=j.cfg||{};let r=null;const U=[...(cf.users||[])];
+  if(a==="rec"){if(j.cur&&j.cur.u!==el.dataset.u&&!confirm(`現在正在錄 @${j.cur.u}，要停掉改錄 @${el.dataset.u} 嗎？`))return;r=await rvPost("/api/pc/pfx/set",{op:"rec",u:el.dataset.u});}
+  else if(a==="stop"){if(!confirm("停止手機錄影？（檔案會在背景收尾；自動錄也會關掉）"))return;r=await rvPost("/api/pc/pfx/set",{op:"stop"});}
+  else if(a==="tools"){r=await rvPost("/api/pc/pfx/set",{op:"tools"});}
+  else if(a==="test"){r=await rvPost("/api/pc/pfx/set",{op:"test"});}
+  else if(a==="auto"){r=await rvPost("/api/pc/pfx/set",{op:"auto",on:el.checked?1:0});}
+  else if(a==="add"||a==="addu"){const u=(a==="add"?el.dataset.u:(root.querySelector("#pfxAddU").value||"")).trim().replace(/^@/,"");if(!u)return;if(!U.includes(u))U.push(u);r=await rvPost("/api/pc/pfx/set",{op:"users",users:U});}
+  else if(a==="mv"){const i=+el.dataset.i,k=i+(+el.dataset.d);[U[i],U[k]]=[U[k],U[i]];r=await rvPost("/api/pc/pfx/set",{op:"users",users:U});}
+  else if(a==="rm"){U.splice(+el.dataset.i,1);r=await rvPost("/api/pc/pfx/set",{op:"users",users:U});}
+  else if(a==="opt"){const o={op:"opt"};root.querySelectorAll("[data-o]").forEach(x=>o[x.dataset.o]=+x.value);r=await rvPost("/api/pc/pfx/set",o);}
+  if(r&&r.message&&typeof toast==="function")toast((r.ok?"":"✖ ")+r.message);else if(r&&!r.ok&&r.message)alert(r.message);
+  if(document.activeElement)try{document.activeElement.blur();}catch(e){}
+  pfxLoad(root);}
+function pfxMount(root){pfxCss();root.innerHTML='<div class="pfx"><div class="pfC">讀取中…</div></div>';
+  root.addEventListener("click",e=>{const b=e.target.closest("[data-pa]");if(!b||b.dataset.pa==="auto"||b.disabled)return;pfxAct(root,b);});
+  root.addEventListener("change",e=>{const b=e.target.closest("[data-pa=auto]");if(b)pfxAct(root,b);});
+  pfxLoad(root);clearInterval(PFX.t);PFX.t=setInterval(()=>{if(!root.isConnected){clearInterval(PFX.t);return;}if(!document.hidden)pfxLoad(root);},3000);}
 function rvMount(root,u){RV.root=root;root.classList.add("rv");rvLpBind(root);root.onclick=e=>{if(RV.lpSw&&Date.now()-RV.lpSw<800){RV.lpSw=0;e.preventDefault();e.stopPropagation();return;}rvClick(e);};root.onchange=rvChange;root.oninput=rvInput;
   if(!RV.kb){RV.kb=true;document.addEventListener("keydown",rvKey);}
   if(u)rvOpen(u);else rvList();}
