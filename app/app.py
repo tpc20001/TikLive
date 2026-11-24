@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.64"
+APP_VERSION = "1.1.65"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -37038,6 +37038,20 @@ $r | ConvertTo-Json -Depth 4 -Compress
             S['scrv'] = m_.group(1) if m_ else ''; S['scrv_for'] = scr
         return S.get('scrv') or ''
 
+    def _pfx_order(self, cfg=None):
+        """V1.1.65 手機錄的順序＝S 級主播：照你拖好、套用過的順序（cfg users），還沒排過的新 S 接在後面（照名單編號）."""
+        cfg = cfg or self._pfx_cfg(); S = self._pfx_S()
+        try: G = dict(self._rv_grades())
+        except Exception: G = {}
+        sset = [u for u, x in G.items() if isinstance(x, dict) and x.get('g') == 'S' and not x.get('done')]
+        low = {u.casefold(): u for u in sset}; out = []
+        for u in cfg.get('users') or []:
+            k = low.pop(str(u).casefold(), None)
+            if k and k not in out: out.append(k)
+        rno = S.get('rno') or {}
+        out += sorted(low.values(), key=lambda u: (rno.get(u, 99999), u.casefold()))
+        return out
+
     def _pfx_target(self, S, cfg):
         es = dict(getattr(self, 'engine_status', {}) or {}); now = time.time()
         def live(u): return es.get(u) == 'LIVE'
@@ -37054,7 +37068,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             self._pfx_log(f'@{man["u"]} 下播了（測試錄製結束）'); S['man'] = None
         if cfg.get('auto'):
             pz = self._paused() if hasattr(self, '_paused') else {}
-            for u in cfg.get('users') or []:
+            for u in self._pfx_order(cfg):
                 if live(u) and u not in pz: return {'u': u}
         return None
 
@@ -37100,7 +37114,14 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 except Exception: pass
             elif t_ <= float(cfg.get('temp_ok') or 41) and S.get('hot'): S['hot'] = False; self._pfx_log(f'🌡 手機降到 {t_:.1f}°C，可以繼續錄')
         tgt = self._pfx_target(S, cfg); p = S.get('proc')
+        if cur and tgt and tgt['u'] != cur['u'] and not S.get('hot') and (getattr(self, 'engine_status', {}) or {}).get(cur['u']) == 'LIVE':
+            sw = S.get('sw')                                                     # V1.1.65 換人前倒數 10 秒（套用新順序、排前面的開播了）
+            if not sw or sw.get('to') != tgt['u'] or sw.get('from') != cur['u']:
+                S['sw'] = {'to': tgt['u'], 'from': cur['u'], 'at': now + 10}; self._pfx_log(f'⏱ 10 秒後停掉 @{cur["u"]}，換錄 @{tgt["u"]}'); return
+            if now < float(sw['at']): return
+        if not (cur and tgt and tgt['u'] != cur['u']): S.pop('sw', None)
         if cur and (not tgt or tgt['u'] != cur['u'] or S.get('hot')):
+            S.pop('sw', None)
             self._pfx_stop(S, adb, ser if ok else None, ('下播' if (getattr(self, 'engine_status', {}) or {}).get(cur['u']) != 'LIVE' else '按了停止') if not tgt else ('太熱' if S.get('hot') else '換錄另一位')); return
         if not tgt or S.get('hot'): S['wait'] = ''; return
         if p is not None and p.poll() is not None:                                # scrcpy 自己結束了（拔線、手機重開…）→ 這段收尾，等一下開下一段
@@ -37282,9 +37303,14 @@ $r | ConvertTo-Json -Depth 4 -Compress
         live = sorted([[u, self.streamer_names.get(u, u), float(st.get(u) or 0)] for u, v in es.items() if v == 'LIVE'], key=lambda x: -x[2])
         T = self._pfx_tools()
         rec = [dict(x, f=Path(x['f']).name, i=i) for i, x in enumerate(self._pfx_idx())][-30:][::-1]
+        try: S['rno'] = {u: i for i, u in enumerate(self._roster_ids(), 1)}
+        except Exception: pass
+        pz = self._paused() if hasattr(self, '_paused') else {}
+        sl = [{'u': u, 'name': self.streamer_names.get(u, u), 'live': es.get(u) == 'LIVE', 'lt': float(st.get(u) or 0), 'pz': u in pz} for u in self._pfx_order(cfg)]
+        sw = dict(S['sw'], left=max(0, round(float(S['sw']['at']) - now))) if S.get('sw') else None
         return {'ok': True, 'now': now, 'tools': bool(T), 'tdir': str(self._pfx_tdir()), 'scrv': (self._pfx_scr_ver(T[1]) if T else ''), 'dl': S.get('dl') or '', 'dl_run': bool(S.get('dl_run')),
                 'dev': dict(S.get('dev') or {}), 'cur': cur, 'man': S.get('man'), 'hot': bool(S.get('hot')), 'wait': S.get('wait') or '', 'run': bool(S.get('gen')),
-                'cfg': cfg, 'live': live, 'log': list(S.get('log') or [])[-40:][::-1], 'rec': rec,
+                'cfg': cfg, 'live': live, 'sl': sl, 'sw': sw, 'log': list(S.get('log') or [])[-40:][::-1], 'rec': rec,
                 'gr': {u: self._rv_grade_of(u) for u in [x[0] for x in live] + list(cfg.get('users') or [])}}
 
     def _pfx_set(self, d):
@@ -37304,6 +37330,14 @@ $r | ConvertTo-Json -Depth 4 -Compress
             cfg['auto'] = bool(d.get('on')); self._pfx_cfg_save(cfg); self._pfx_log('自動錄 ' + ('打開' if cfg['auto'] else '關掉'))
             if cfg['auto'] and not S.get('gen'): self._pfx_start()
             return {'ok': True, 'message': '已' + ('打開' if cfg['auto'] else '關掉') + '自動錄'}
+        if op == 'apply':                                                       # V1.1.65 拖好順序按「套用」
+            L = []
+            for u in d.get('users') or []:
+                u = str(u).strip().lstrip('@')
+                if u and u not in L: L.append(u)
+            cfg['users'] = L[:300]; self._pfx_cfg_save(cfg); self._pfx_log('套用新順序：' + '、'.join(L[:5]) + ('…' if len(L) > 5 else ''))
+            if not S.get('gen') and self._pfx_tools(): self._pfx_start()
+            return {'ok': True, 'message': '✔ 已套用' + ('（正在錄的不是新的第一順位會倒數 10 秒換人）' if cfg.get('auto') and S.get('cur') else '')}
         if op == 'users':
             L = []
             for u in d.get('users') or []:
@@ -45727,7 +45761,7 @@ const RULES=[
   {t:"空間不夠時",d:"<ul><li>SSD 剩不到 <b>"+RU_V('rec.ssd_min_free','GB',60)+"</b>：新的錄影改成直接錄在影片庫硬碟。</li><li>影片硬碟剩不到 <b>"+RU_V('rec.video_min_free','GB',30)+"</b>：不開始新的錄影（<b>聲音照錄</b>）。</li><li>🛡 C 槽守門員每分鐘看 C 剩多少、減少多快：第 1 級先停不急的背景工作；第 2 級全速把東西搬走；第 3 級（剩不到 15 GB 或 20 分鐘內會滿）才會一位一位停掉正在錄到 C 的影片（F → E → 未分級先停）。</li></ul>"},
   {t:"同一場直播的判定（斷線、重開）",d:"<ul><li>主播斷線後 <b>"+RU_V('conn.grace_minutes','分鐘',10)+"內</b>連回同一個直播間＝<b>續寫同一場</b>（錄影會分成第 2 段、第 3 段…）。</li><li>直播中卻 <b>"+RU_V('monitor.silent_min','分鐘',30)+"</b>沒有任何留言、禮物、進場、人數也沒變（而且沒在錄影）→ 重新連一次確認：還在播就續寫，結束了就把結束時間改回最後有資料的時間。</li><li>程式重開、斷電、超過 10 分鐘才連回來 → 會變成<b>另一場</b>。這種被切開的，用「⧉ 合併重複場次」合回一場（見「場次合併」）。</li></ul>"},
   {t:"開程式、熱更新時的監控",d:"<ul><li>開程式 3 秒後自動開始監控（設定可以關）。正在錄的場次在熱更新、重開時會<b>接著錄同一場</b>。</li><li>搬硬碟切換後，如果找不到影片硬碟（例如 R 槽代號跑掉），程式<b>先不開始監控</b>，不會錄到別的地方，會提示你去磁碟管理改代號。</li></ul>"},
-  {t:"📲 手機錄特效（測試中）",d:"<ul><li>一支安卓手機（紅米 10）用 USB 接電腦，裝好 scrcpy（工具頁可自動從官方 GitHub 下載）。</li><li>主播開播 → 手機自己亮起來、打開那個直播間 → 錄下手機畫面＋聲音（有禮物特效）。一支手機一次錄一場。</li><li>測試期間：在「工具 → 📲 手機錄特效」挑一位直播中的按「錄這位」；之後正式用：名單裡排前面、正在直播的先錄，他下播換下一位。</li><li>主播斷線／下播超過 90 秒才停；TikTok 被關掉或跳走會自己重新打開直播間；拔線再插回、scrcpy 中斷 → 接著錄下一段（_p2、_p3…）。</li><li>手機超過 46°C 先停錄，降到 41°C 再繼續。</li><li>先錄在 SSD（MKV，斷電也播得了），結束後不重新壓縮換成 MP4（idle），搬到影片資料夾 <b>TikLive_手機特效\\帳號\\</b>；不到 15 秒的段丟掉。</li><li>全部在背景執行緒：手機只把壓好的畫面傳過來，電腦不解碼、不開視窗。</li></ul>"},
+  {t:"📲 手機錄特效",d:"<ul><li>一支安卓手機（紅米 10）用 USB 接電腦，裝好 scrcpy（工具頁可自動從官方 GitHub 下載）。</li><li>主播開播 → 手機自己亮起來、打開那個直播間 → 錄下手機畫面＋聲音（有禮物特效）。一支手機一次錄一場。</li><li>錄誰：<b>S 級</b>的主播，照「工具 → 📲 手機錄特效」裡拖好的順序；按「▶ 開始」後，排最前面、正在直播的那位先錄，他下播換下一位還在播的。要加人＝在審核改成 S。</li><li>改順序要按右下角「✔ 套用」才生效；套用後（或排更前面的開播了）正在錄的不是第一順位 → 倒數 10 秒停掉、換錄新的那位。</li><li>主播斷線／下播超過 90 秒才停；TikTok 被關掉或跳走會自己重新打開直播間；拔線再插回、scrcpy 中斷 → 接著錄下一段（_p2、_p3…）。</li><li>手機超過 46°C 先停錄，降到 41°C 再繼續。</li><li>先錄在 SSD（MKV，斷電也播得了），結束後不重新壓縮換成 MP4（idle），搬到影片資料夾 <b>TikLive_手機特效\\帳號\\</b>；不到 15 秒的段丟掉。</li><li>全部在背景執行緒：手機只把壓好的畫面傳過來，電腦不解碼、不開視窗。</li></ul>"},
   {t:"⏸ 暫停監控並封存",d:"<ul><li>主播分類（或審核、檔案總管）<b>長按主播</b> → 主播選單 →「⏸ 暫停監控並封存」。</li><li>從那一刻起<b>不再連線、不錄新的</b>（直播中的話那一場停在那裡、照常收尾）；主播清單、等級、分類、<b>以前的場次全部留著</b>，照常轉檔、整理、照等級排隊上傳 YouTube、照保留天數刪原檔。</li><li>在主播分類移到最下面「⏸ 暫停監控（封存）」那區；<b>審核頁</b>也收到最下面同一欄「⏸ 封存」（保留原本的等級、照等級排、灰階，點進去一樣看以前的紀錄）。同一個選單按「▶ 恢復監控」就接回來。</li><li>封存中的主播又被<b>新增</b>（貼 TikTok 連結、@帳號、匯入）：會先問「目前封存中，要解封嗎？」— 解封＝移回來繼續監控；取消＝取消新增、維持封存。</li><li>每一次封存／解封都會記下來（時間、從哪裡按的），長按主播的小視窗最上面「🗄 封存紀錄」看得到。</li><li>跟「🗑 刪除主播」不一樣：刪除＝整位全部刪掉（等於標 F 再處置）。</li></ul>"},
   {t:"只錄聲音的主播（照審核等級 G）",d:"<ul><li><b>在「主播審核」標 G＝只錄聲音</b>；改成別的等級就恢復錄影片。以前另外的「只錄聲音的主播」清單已經拿掉，程式每分鐘照等級對一次，以審核等級為準。</li><li>G 的主播直播中照樣錄畫面（FLV 先放 C 槽），下播後截 60 張圖＋字幕，自動傳 YouTube，傳好才移走原檔。</li><li>直播中每 <b>"+RU_V('rec.snap_min','分鐘',2)+"</b>另外拍一張快照，回放時在影片的位置左右翻看。</li></ul>"}]},
  {k:"play",i:"📺",c:"#4dc9ff",t:"回放與直播中觀看：延遲、預載入",s:[
@@ -50267,9 +50301,30 @@ async function rvGet(p){const r=await fetch(rvB()+p,{cache:"no-store"});return r
 async function rvPost(p,d){try{if(typeof kPost==="function")return await kPost(p,d);if(typeof post==="function")return await post(p,d);if(typeof deepPost==="function")return await deepPost(p,d);}catch(e){}return null;}
 /* V1.1.63 📱 手機錄特效（實體安卓手機＋scrcpy）：狀態、手動挑一位錄（測試）、自動名單、引導 */
 const PFX={t:0,j:null};
-function pfxCss(){if(document.getElementById("pfxCss"))return;const s=document.createElement("style");s.id="pfxCss";s.textContent=`.pfx{display:flex;flex-direction:column;gap:12px;max-width:820px}.pfx .pfC{border:1px solid rgba(140,150,165,.35);border-radius:12px;padding:12px 14px}.pfx h4{margin:0 0 8px;font-size:15px}.pfx .pfR{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:13.5px;line-height:1.6}.pfx .pfOk{color:#3ecf8e;font-weight:700}.pfx .pfBad{color:#ff6b6b;font-weight:700}.pfx .pfW{color:#f0ad4e;font-weight:700}.pfx button.pfB{border:1px solid rgba(140,150,165,.5);background:rgba(120,140,170,.12);color:inherit;border-radius:9px;padding:7px 12px;font-size:13.5px;cursor:pointer;white-space:nowrap}.pfx button.pfB.go{background:#2e7df6;border-color:#2e7df6;color:#fff}.pfx button.pfB.st{background:#d9534f;border-color:#d9534f;color:#fff}.pfx .pfL{display:flex;flex-direction:column;gap:6px}.pfx .pfI{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:9px;background:rgba(120,140,170,.08);font-size:13.5px}.pfx .pfI b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pfx .pfG{font-size:11px;font-weight:800;border-radius:6px;padding:1px 6px;background:rgba(140,150,165,.25)}.pfx .pfRec{border-color:#ff4d6d;box-shadow:0 0 0 1px #ff4d6d55 inset}.pfx .pfDot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff4d6d;animation:pfBl 1s infinite;margin-right:6px}@keyframes pfBl{50%{opacity:.25}}.pfx .pfLog{font-size:12px;opacity:.85;max-height:240px;overflow:auto;line-height:1.55}.pfx .pfLog div{border-bottom:1px dashed rgba(140,150,165,.2);padding:2px 0}.pfx details summary{cursor:pointer;font-weight:700}.pfx ol{margin:6px 0 0 0;padding-left:22px;font-size:13.5px;line-height:1.7}.pfx input.pfN{width:70px;padding:4px 6px;border-radius:7px;border:1px solid rgba(140,150,165,.5);background:transparent;color:inherit}.pfx input.pfU{flex:1;min-width:120px;padding:6px 8px;border-radius:8px;border:1px solid rgba(140,150,165,.5);background:transparent;color:inherit}.pfx .pfSub{font-size:12px;opacity:.75}`;document.head.appendChild(s);}
+function pfxCss(){if(document.getElementById("pfxCss"))return;const s=document.createElement("style");s.id="pfxCss";s.textContent=`.pfx{display:flex;flex-direction:column;gap:12px;max-width:820px}.pfx .pfC{border:1px solid rgba(140,150,165,.35);border-radius:12px;padding:12px 14px}.pfx h4{margin:0 0 8px;font-size:15px}.pfx .pfR{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:13.5px;line-height:1.6}.pfx .pfOk{color:#3ecf8e;font-weight:700}.pfx .pfBad{color:#ff6b6b;font-weight:700}.pfx .pfW{color:#f0ad4e;font-weight:700}.pfx button.pfB{border:1px solid rgba(140,150,165,.5);background:rgba(120,140,170,.12);color:inherit;border-radius:9px;padding:7px 12px;font-size:13.5px;cursor:pointer;white-space:nowrap}.pfx button.pfB.go{background:#2e7df6;border-color:#2e7df6;color:#fff}.pfx button.pfB.st{background:#d9534f;border-color:#d9534f;color:#fff}.pfx .pfL{display:flex;flex-direction:column;gap:6px}.pfx .pfI{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:9px;background:rgba(120,140,170,.08);font-size:13.5px}.pfx .pfI b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pfx .pfG{font-size:11px;font-weight:800;border-radius:6px;padding:1px 6px;background:rgba(140,150,165,.25)}.pfx .pfRec{border-color:#ff4d6d;box-shadow:0 0 0 1px #ff4d6d55 inset}.pfx .pfDot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff4d6d;animation:pfBl 1s infinite;margin-right:6px}@keyframes pfBl{50%{opacity:.25}}.pfx .pfLog{font-size:12px;opacity:.85;max-height:240px;overflow:auto;line-height:1.55}.pfx .pfLog div{border-bottom:1px dashed rgba(140,150,165,.2);padding:2px 0}.pfx details summary{cursor:pointer;font-weight:700}.pfx ol{margin:6px 0 0 0;padding-left:22px;font-size:13.5px;line-height:1.7}.pfx input.pfN{width:70px;padding:4px 6px;border-radius:7px;border:1px solid rgba(140,150,165,.5);background:transparent;color:inherit}.pfx input.pfU{flex:1;min-width:120px;padding:6px 8px;border-radius:8px;border:1px solid rgba(140,150,165,.5);background:transparent;color:inherit}.pfx .pfSub{font-size:12px;opacity:.75}.pfx .pfSG{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}.pfx .pfSc{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 4px 6px;border-radius:12px;background:rgba(120,140,170,.08);border:1px solid rgba(140,150,165,.25);cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:pan-y}.pfx .pfSc em{position:absolute;left:6px;top:4px;font-style:normal;font-weight:800;font-size:12px;opacity:.8}.pfx .pfSc:first-child em{color:#f5c542;opacity:1}.pfx .pfSa{position:relative;width:52px;height:52px;border-radius:50%;overflow:hidden;background:rgba(140,150,165,.3);display:flex;align-items:center;justify-content:center;font-weight:800}.pfx .pfSa img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none}.pfx .pfSc b{font-size:12.5px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pfx .pfSc small{font-size:11px;opacity:.85;white-space:nowrap}.pfx .pfSc.lv{border-color:#ff4d6d88}.pfx .pfSc.rc{border-color:#ff4d6d;box-shadow:0 0 0 2px #ff4d6d55}.pfx .pfSc.pz{filter:grayscale(1);opacity:.55}.pfx .pfSc.dg{opacity:.55;outline:2px dashed #2e7df6;cursor:grabbing;touch-action:none}.pfxAp{position:fixed;right:16px;bottom:84px;z-index:10050;display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:14px;background:#1d2533;color:#fff;box-shadow:0 6px 24px rgba(0,0,0,.35);font-size:14px}.pfxAp .pfB{border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.1);color:#fff;border-radius:9px;padding:8px 14px;font-size:14px;cursor:pointer}.pfxAp .pfB.go{background:#2e7df6;border-color:#2e7df6}`;document.head.appendChild(s);}
 function pfxT(t){const d=new Date(t*1000);return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;}
 function pfxDur(s){s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return (h?h+":":"")+String(m).padStart(h?2:1,"0")+":"+String(x).padStart(2,"0");}
+function pfxOrd(){const j=PFX.j||{};const sl=(j.sl||[]);if(!PFX.dirty)PFX.ord=sl.map(x=>x.u);return PFX.ord||[];}
+function pfxGrid(){const j=PFX.j||{},M={};(j.sl||[]).forEach(x=>M[x.u]=x);const c=j.cur;const L=pfxOrd();
+  if(!L.length)return '<div class="pfSub">還沒有 S 級主播（到審核把要用手機錄的主播改成 S）</div>';
+  return L.map((u,i)=>{const x=M[u]||{u,name:u};const rec=c&&c.u===u;return `<div class="pfSc${x.live?" lv":""}${rec?" rc":""}${x.pz?" pz":""}${PFX.dragU===u?" dg":""}" data-su="${rvE(u)}"><em>${i+1}</em><span class="pfSa"><i>${rvE((String(x.name||u).trim()||"?").slice(0,1))}</i><img loading="lazy" alt="" draggable="false" src="${imgB(rvB())}/avatar/${encodeURIComponent(u)}" onerror="this.remove()"></span><b>${rvE(x.name||u)}</b><small>${rec?'<span class="pfDot"></span>錄影中':x.live?"🔴 直播中":x.pz?"⏸ 封存":"@"+rvE(u)}</small></div>`;}).join("");}
+function pfxApplyBar(){let b=document.getElementById("pfxAp");if(!PFX.dirty){if(b)b.remove();return;}
+  if(!b){b=document.createElement("div");b.id="pfxAp";b.className="pfxAp";document.body.appendChild(b);
+    b.addEventListener("click",async e=>{const a=e.target.closest("[data-ap]");if(!a)return;if(a.dataset.ap==="undo"){PFX.dirty=false;pfxApplyBar();const g=document.getElementById("pfxSG");if(g)g.innerHTML=pfxGrid();return;}
+      a.disabled=true;const r=await rvPost("/api/pc/pfx/set",{op:"apply",users:PFX.ord});if(r&&r.ok){PFX.dirty=false;pfxApplyBar();if(typeof toast==="function")toast(r.message);if(PFX.root)pfxLoad(PFX.root);}else{a.disabled=false;alert((r&&r.message)||"套用失敗");}});}
+  b.innerHTML=`<span>順序改了，還沒套用</span><button class="pfB" data-ap="undo">還原</button><button class="pfB go" data-ap="ok">✔ 套用</button>`;}
+function pfxDragWire(root){let st=null;
+  const end=()=>{if(!st)return;clearTimeout(st.tm);if(st.on){st.el.classList.remove("dg");PFX.dragU=null;PFX.drag=false;document.body.style.userSelect="";if(st.moved){PFX.dirty=true;pfxApplyBar();}const g=document.getElementById("pfxSG");if(g)g.innerHTML=pfxGrid();}st=null;};
+  root.addEventListener("pointerdown",e=>{const el=e.target.closest("[data-su]");if(!el||e.button>0)return;st={el,u:el.dataset.su,x:e.clientX,y:e.clientY,on:false,moved:false,id:e.pointerId,touch:e.pointerType!=="mouse"};
+    st.tm=setTimeout(()=>{if(st&&!st.on){st.on=true;PFX.drag=true;PFX.dragU=st.u;el.classList.add("dg");if(navigator.vibrate)try{navigator.vibrate(15);}catch(_){}}},st.touch?280:120);});
+  root.addEventListener("pointermove",e=>{if(!st)return;const dx=e.clientX-st.x,dy=e.clientY-st.y;
+    if(!st.on){if(Math.hypot(dx,dy)>8){if(st.touch){clearTimeout(st.tm);st=null;return;}st.on=true;PFX.drag=true;PFX.dragU=st.u;st.el.classList.add("dg");}else return;}
+    e.preventDefault();const o=document.elementFromPoint(e.clientX,e.clientY);const tg=o&&o.closest&&o.closest("[data-su]");if(!tg||tg.dataset.su===st.u)return;
+    const L=pfxOrd().slice();const a=L.indexOf(st.u),b=L.indexOf(tg.dataset.su);if(a<0||b<0)return;L.splice(a,1);L.splice(b,0,st.u);PFX.ord=L;PFX.dirty=true;st.moved=true;
+    const g=document.getElementById("pfxSG");if(g){g.innerHTML=pfxGrid();st.el=g.querySelector(`[data-su="${CSS.escape(st.u)}"]`)||st.el;}});
+  root.addEventListener("touchmove",e=>{if(st&&st.on)e.preventDefault();},{passive:false});
+  ["pointerup","pointercancel"].forEach(k=>root.addEventListener(k,end));
+  root.addEventListener("contextmenu",e=>{if(e.target.closest("[data-su]"))e.preventDefault();});}
 function pfxGuide(){return `<details class="pfC"><summary>📋 第一次設定（紅米 10，照順序做一次就好）</summary><ol>
 <li><b>不用回復原廠</b>。手機裡沒有你個人的資料、也不打算拿來做別的事就直接用；有個人資料、或登入的是你的主帳號，才建議回復原廠。</li>
 <li>TikTok（國際版，不是抖音）登入一個<b>小帳號</b>（帳號密碼你自己在手機上打，程式不碰）。</li>
@@ -50291,11 +50346,11 @@ function pfxHtml(j){const D=j.dev||{},c=j.cur,cf=j.cfg||{},gr=j.gr||{};const gC=
   if(c)h+=`<div class="pfC pfRec"><h4>${c.rec?'<span class="pfDot"></span>':"⏳ "}正在錄：${rvE(c.name||c.u)} @${rvE(c.u)} ${gC(c.u)}</h4><div class="pfR"><span>已錄 ${pfxDur(j.now-(c.t_start||j.now))}</span><span>第 ${c.seg||0} 段</span><span>這段 ${((c.size||0)/1e6).toFixed(0)} MB</span>${c.sid?`<span>#${rvE(c.sid)}</span>`:""}${c.reopen?`<span class="pfW">重新打開直播間 ${c.reopen} 次</span>`:""}${c.off_t?`<span class="pfW">主播斷線中（等 ${cf.off_grace||90} 秒）</span>`:""}<button class="pfB st" data-pa="stop">⏹ 停止</button></div>${j.wait?`<div class="pfW" style="margin-top:4px">${rvE(j.wait)}</div>`:""}</div>`;
   else if(j.man)h+=`<div class="pfC"><h4>⏳ 準備錄 @${rvE(j.man.u)}</h4><div class="pfR">${rvE(j.wait||"等手機…")} <button class="pfB st" data-pa="stop">✕ 取消</button></div></div>`;
   if(j.hot)h+=`<div class="pfC pfBad">🌡 手機太熱，先停錄（降到 ${cf.temp_ok}°C 會自己繼續）</div>`;
-  h+=`<div class="pfC"><h4>🔴 現在直播中（測試：挑一位按「錄這位」）</h4>${(j.live||[]).length?`<div class="pfL">`+j.live.map(x=>`<div class="pfI"><b>${rvE(x[1])} <span class="pfSub">@${rvE(x[0])}</span></b>${gC(x[0])}<span class="pfSub">${x[2]?pfxDur(j.now-x[2]):""}</span>${c&&c.u===x[0]?'<span class="pfOk">錄影中</span>':`<button class="pfB go" data-pa="rec" data-u="${rvE(x[0])}" ${D.st!=="ok"?"disabled":""}>📱 錄這位</button>`}<button class="pfB" data-pa="add" data-u="${rvE(x[0])}" title="加進自動錄名單">＋</button></div>`).join("")+`</div>`:`<div class="pfSub">目前沒有偵測到直播中的主播</div>`}<div class="pfSub" style="margin-top:6px">一支手機一次只能錄一場；按另一位會先停掉現在這位。主播下播 ${cf.off_grace||90} 秒後自動停、檔案收尾。</div></div>`;
-  const U=cf.users||[];
-  h+=`<div class="pfC"><h4>🤖 自動錄（之後正式用）</h4><div class="pfR"><label><input type="checkbox" data-pa="auto" ${cf.auto?"checked":""}> 名單裡的主播開播就自動錄（排前面的先錄；他下播換下一位還在播的）</label></div>
-  <div class="pfL" style="margin-top:6px">${U.map((u,i)=>`<div class="pfI"><span class="pfSub">${i+1}</span><b>${rvE(u)}</b>${gC(u)}<button class="pfB" data-pa="mv" data-i="${i}" data-d="-1" ${i?"":"disabled"}>↑</button><button class="pfB" data-pa="mv" data-i="${i}" data-d="1" ${i<U.length-1?"":"disabled"}>↓</button><button class="pfB" data-pa="rm" data-i="${i}">✕</button></div>`).join("")||'<div class="pfSub">名單是空的（測試期間不用設）</div>'}</div>
-  <div class="pfR" style="margin-top:6px"><input class="pfU" placeholder="@帳號" id="pfxAddU"><button class="pfB" data-pa="addu">＋ 加入</button></div></div>`;
+  const on=!!cf.auto;
+  h+=`<div class="pfC"><h4>⭐ S 級：手機錄的順序</h4><div class="pfR"><span class="${on?"pfOk":"pfSub"}" style="font-size:14px">${on?"▶ 執行中：S 級排最前面、正在直播的那位會被錄":"⏹ 停止中"}</span><span style="flex:1"></span>${on?'<button class="pfB st" data-pa="stop">⏹ 停止</button>':`<button class="pfB go" data-pa="start" ${j.tools?"":"disabled"}>▶ 開始</button>`}</div>
+  ${j.sw?`<div class="pfW" style="margin-top:6px;font-size:15px">⏱ <b data-swl>${j.sw.left}</b> 秒後停掉 @${rvE(j.sw.from)}，換錄 @${rvE(j.sw.to)}</div>`:""}
+  <div class="pfSub" style="margin:6px 0 8px">按住卡片拖動排順序（越前面越優先），排好按右下角「✔ 套用」才生效。要加人＝到審核把他改成 S；改成別的等級就會從這裡消失。</div>
+  <div class="pfSG" id="pfxSG">${pfxGrid()}</div></div>`;
   h+=`<details class="pfC"><summary>⚙ 錄影設定</summary><div class="pfR" style="margin-top:8px"><label>畫質 <input class="pfN" type="number" min="2" max="20" data-o="mbps" value="${cf.mbps}"> Mbps</label><label>長邊 <input class="pfN" type="number" min="720" max="2400" step="10" data-o="max_size" value="${cf.max_size}"></label><label>手機超過 <input class="pfN" type="number" min="38" max="60" data-o="temp_stop" value="${cf.temp_stop}"> °C 停錄</label><label>降到 <input class="pfN" type="number" min="30" max="55" data-o="temp_ok" value="${cf.temp_ok}"> °C 繼續</label><label>下播等 <input class="pfN" type="number" min="30" max="900" data-o="off_grace" value="${cf.off_grace}"> 秒才停</label><button class="pfB" data-pa="opt">存</button></div><div class="pfSub" style="margin-top:6px">8 Mbps 一小時約 3.6 GB。先錄在 SSD（MKV，斷電也播得了），下播後不重新壓縮換成 MP4，再搬到影片資料夾的 TikLive_手機特效\\帳號\\。</div></details>`;
   h+=pfxGuide();
   h+=`<div class="pfC"><h4>🎬 錄好的</h4>${(j.rec||[]).length?`<div class="pfL">`+j.rec.map(x=>`<div class="pfI"><b>${rvE(x.name||x.u)} <span class="pfSub">${rvE(x.f)}</span></b><span class="pfSub">${pfxDur((x.t1||0)-(x.t0||0))} · ${((x.sz||0)/1e9).toFixed(2)} GB · ${pfxT(x.t1||0)}</span><a class="pfB" style="text-decoration:none;border:1px solid rgba(140,150,165,.5);border-radius:9px;padding:6px 10px" href="${rvB()}/api/pc/pfx/file?i=${x.i}" target="_blank" rel="noopener">▶</a></div>`).join("")+`</div>`:'<div class="pfSub">還沒有</div>'}</div>`;
@@ -50303,11 +50358,12 @@ function pfxHtml(j){const D=j.dev||{},c=j.cur,cf=j.cfg||{},gr=j.gr||{};const gC=
   return h;}
 async function pfxLoad(root){let j=null;try{j=await rvGet("/api/pc/pfx");}catch(e){}if(!root.isConnected)return;
   if(!j||!j.ok){root.querySelector(".pfx").innerHTML='<div class="pfC pfBad">讀不到（電腦端沒回應）</div>';return;}
-  PFX.j=j;const box=root.querySelector(".pfx");const op=[...box.querySelectorAll("details")].map(d=>d.open);const ae=document.activeElement;if(ae&&box.contains(ae)&&ae.tagName==="INPUT")return;
+  if(PFX.drag)return;PFX.j=j;const box=root.querySelector(".pfx");const op=[...box.querySelectorAll("details")].map(d=>d.open);const ae=document.activeElement;if(ae&&box.contains(ae)&&ae.tagName==="INPUT")return;
   box.innerHTML=pfxHtml(j);[...box.querySelectorAll("details")].forEach((d,i)=>{if(op[i]!=null)d.open=op[i];});}
 async function pfxAct(root,el){const a=el.dataset.pa,j=PFX.j||{},cf=j.cfg||{};let r=null;const U=[...(cf.users||[])];
   if(a==="rec"){if(j.cur&&j.cur.u!==el.dataset.u&&!confirm(`現在正在錄 @${j.cur.u}，要停掉改錄 @${el.dataset.u} 嗎？`))return;r=await rvPost("/api/pc/pfx/set",{op:"rec",u:el.dataset.u});}
-  else if(a==="stop"){if(!confirm("停止手機錄影？（檔案會在背景收尾；自動錄也會關掉）"))return;r=await rvPost("/api/pc/pfx/set",{op:"stop"});}
+  else if(a==="stop"){if(!confirm("停止手機錄影？（正在錄的會停、檔案在背景收尾）"))return;r=await rvPost("/api/pc/pfx/set",{op:"stop"});}
+  else if(a==="start"){if(PFX.dirty&&confirm("順序改了還沒套用，要先套用再開始嗎？")){await rvPost("/api/pc/pfx/set",{op:"apply",users:PFX.ord});PFX.dirty=false;pfxApplyBar();}r=await rvPost("/api/pc/pfx/set",{op:"auto",on:1});}
   else if(a==="tools"){r=await rvPost("/api/pc/pfx/set",{op:"tools"});}
   else if(a==="test"){r=await rvPost("/api/pc/pfx/set",{op:"test"});}
   else if(a==="auto"){r=await rvPost("/api/pc/pfx/set",{op:"auto",on:el.checked?1:0});}
@@ -50318,10 +50374,10 @@ async function pfxAct(root,el){const a=el.dataset.pa,j=PFX.j||{},cf=j.cfg||{};le
   if(r&&r.message&&typeof toast==="function")toast((r.ok?"":"✖ ")+r.message);else if(r&&!r.ok&&r.message)alert(r.message);
   if(document.activeElement)try{document.activeElement.blur();}catch(e){}
   pfxLoad(root);}
-function pfxMount(root){pfxCss();root.innerHTML='<div class="pfx"><div class="pfC">讀取中…</div></div>';
+function pfxMount(root){pfxCss();PFX.root=root;PFX.dirty=false;PFX.drag=false;pfxApplyBar();pfxDragWire(root);root.innerHTML='<div class="pfx"><div class="pfC">讀取中…</div></div>';
   root.addEventListener("click",e=>{const b=e.target.closest("[data-pa]");if(!b||b.dataset.pa==="auto"||b.disabled)return;pfxAct(root,b);});
   root.addEventListener("change",e=>{const b=e.target.closest("[data-pa=auto]");if(b)pfxAct(root,b);});
-  pfxLoad(root);clearInterval(PFX.t);PFX.t=setInterval(()=>{if(!root.isConnected){clearInterval(PFX.t);return;}if(!document.hidden)pfxLoad(root);},3000);}
+  pfxLoad(root);clearInterval(PFX.t);PFX.t=setInterval(()=>{if(!root.isConnected){clearInterval(PFX.t);const b=document.getElementById("pfxAp");if(b)b.remove();return;}const sl=root.querySelector("[data-swl]");if(sl&&+sl.textContent>0)sl.textContent=Math.max(0,+sl.textContent-3);if(!document.hidden)pfxLoad(root);},3000);}
 function rvMount(root,u){RV.root=root;root.classList.add("rv");rvLpBind(root);root.onclick=e=>{if(RV.lpSw&&Date.now()-RV.lpSw<800){RV.lpSw=0;e.preventDefault();e.stopPropagation();return;}rvClick(e);};root.onchange=rvChange;root.oninput=rvInput;
   if(!RV.kb){RV.kb=true;document.addEventListener("keydown",rvKey);}
   if(u)rvOpen(u);else rvList();}
