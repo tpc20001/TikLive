@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.72"
+APP_VERSION = "1.1.73"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -37110,6 +37110,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
             rc, out = self._pfx_sh(adb, ser, 'pm path ' + pk, 10)
             if 'package:' in out: o['pkg'] = pk; break
         o['tiktok'] = bool(o['pkg']) or None                                     # V1.1.72 沒查到＝不確定（剛開機），之後再查
+        o['clones'] = self._pfx_clones(adb, ser, o['pkg']) if o['pkg'] else []   # V1.1.73 小米分身
+        rc, out = self._pfx_sh(adb, ser, 'getprop gsm.sim.operator.iso-country', 8); o['sim'] = ','.join(x for x in re.split(r'[,\s]+', out.strip().lower()) if x)[:20]   # V1.1.73 SIM 卡國家（cn＝TikTok 整頁錯誤）
         rc, out = self._pfx_sh(adb, ser, 'input keyevent 0', 10)                     # 小米沒開「USB 調試（安全設置）」會不准程式按手機
         o['inject'] = not ('INJECT_EVENTS' in out or 'SecurityException' in out)
         return o
@@ -37183,9 +37185,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 if d0.get('serial') != d.get('serial') or d0.get('st') != 'ok':
                     d.update(self._pfx_props(adb, d['serial'])); S['info_t'] = 0
                     self._pfx_prep(adb, d['serial'])                                # V1.1.66 連上（含重開機後）：亮度最低、插 USB 不關螢幕
-                    self._pfx_log(f'手機連上：{d.get("model") or d["serial"]}（Android {d.get("andv","?")}）' + (f'；TikTok：{d.get("pkg")}' if d.get('tiktok') else '；還沒查到 TikTok（剛開機？之後每 20～60 秒再查）') + ('' if d.get('inject') else '；沒開「USB 偵錯（安全設定）」：程式不能按手機，螢幕要一直亮著才行'))
+                    self._pfx_log(f'手機連上：{d.get("model") or d["serial"]}（Android {d.get("andv","?")}）' + (f'；TikTok：{d.get("pkg")}' + (f'＋小米分身 {d.get("clones")}' if d.get('clones') else '') if d.get('tiktok') else '；還沒查到 TikTok（剛開機？之後每 20～60 秒再查）') + ('' if d.get('inject') else '；沒開「USB 偵錯（安全設定）」：程式不能按手機，螢幕要一直亮著才行'))
                 else:
-                    for k in ('model', 'andv', 'miui', 'tiktok', 'pkg', 'inject', 'bat', 'temp', 'awake', 'fg', 'act', 'focus', 'info_t'): 
+                    for k in ('model', 'andv', 'miui', 'tiktok', 'pkg', 'clones', 'sim', 'inject', 'bat', 'temp', 'awake', 'fg', 'act', 'focus', 'info_t'): 
                         if k in d0: d.setdefault(k, d0[k])
             elif d0.get('st') == 'ok': self._pfx_log('手機斷線（' + {'unauth': '要在手機上按允許', 'none': '找不到手機', 'offline': '離線'}.get(d.get('st'), d.get('st', '')) + '）')
             S['dev'] = d
@@ -37194,7 +37196,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
             S['info_t'] = now; dev.update(self._pfx_info(adb, ser))
             if not dev.get('pkg'):
                 pk_ = self._pfx_pkg()
-                if dev.get('pkg'): self._pfx_log(f'TikTok：{pk_}（剛開機時沒查到，現在查到了）')
+                if dev.get('pkg'):
+                    self._pfx_log(f'TikTok：{pk_}（剛開機時沒查到，現在查到了）'); dev['clones'] = self._pfx_clones(adb, ser, pk_)
         t_ = dev.get('temp')
         if t_ is not None:
             if t_ >= float(cfg.get('temp_stop') or 46) and not S.get('hot'):
@@ -37202,7 +37205,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 try: self._ui_call.emit(lambda t=t_: self.statusBar().showMessage(f'📱 手機 {t:.1f}°C 太熱，手機錄特效先停'))
                 except Exception: pass
             elif t_ <= float(cfg.get('temp_ok') or 41) and S.get('hot'): S['hot'] = False; self._pfx_log(f'🌡 手機降到 {t_:.1f}°C，可以繼續錄')
-        if ok: S['ok_t'] = now
+        if ok: S['ok_t'] = now; S['wait'] = ''                                    # V1.1.73 舊的「找不到手機」不要一直留著
         elif (cur or S.get('man') or cfg.get('auto')) and now - float(S.get('ok_t') or now) > 180 and now - float(S.get('fix_t') or 0) > 600:
             S['fix_t'] = now; self._pfx_log('手機連不上 3 分鐘：重新啟動 adb 再找一次')    # V1.1.66 自己先試著修
             self._pfx_run([adb, 'kill-server'], 15); self._pfx_run([adb, 'start-server'], 30); S['dev_t'] = 0
@@ -37353,14 +37356,14 @@ $r | ConvertTo-Json -Depth 4 -Compress
         S['shot'] = {'t': now, 'st': st, 'm': cur.get('w_m'), 'act': act_, 'etx': etx}
         if st == 'ok':
             if int(cur.get('w_lv') or 0): self._pfx_log(f'✔ 畫面恢復正常（救到第 {cur["w_lv"]} 步）')
-            cur['w_bad'] = 0; cur['w_lv'] = 0; return
+            cur['w_bad'] = 0; cur['w_lv'] = 0; cur['w_cyc'] = 0; S.pop('tk_bad', None); return
         if float(cur.get('w_hold') or 0) > now: return                            # 剛救完、或卡住類退避中
         lv = int(cur.get('w_lv') or 0) + 1; cur['w_lv'] = lv; cur['fix_n'] = int(cur.get('fix_n') or 0) + 1   # V1.1.72 每 30 秒看一次，不對就馬上動手，下一次還不對就換下一招
         why = {'black': '黑畫面', 'frozen': '畫面 30 秒完全沒動', 'stall': '錄影檔沒有在長', 'error': f'TikTok 顯示錯誤（{etx}）', 'notlive': f'不在直播間（{(act_ or "?").split(".")[-1]}）'}[st]; pkg = self._pfx_pkg()
         def reopen_(force=False):
             self._pfx_wake(adb, ser); self._pfx_bright(adb, ser)
             if fg_ and fg_ not in self.PFX_PKGS: self._pfx_sh(adb, ser, 'input keyevent KEYCODE_BACK', 8); self._pfx_sh(adb, ser, 'am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS', 8)
-            if force: self._pfx_sh(adb, ser, f'am force-stop {pkg}', 10); time.sleep(2)
+            if force: self._pfx_sh(adb, ser, f'am force-stop {self._pfx_uf()}{pkg}', 10); time.sleep(2)
             else:
                 self._pfx_sh(adb, ser, 'input keyevent KEYCODE_HOME', 8); self._pfx_sh(adb, ser, 'am start -a android.intent.action.MAIN -c android.intent.category.HOME', 10); time.sleep(1.5)
             self._pfx_open(adb, ser, cur['u'])
@@ -37374,7 +37377,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
             self._pfx_log(f'⚠ 還是{why} → 先進別人的直播間再回來')
             if not self._pfx_hop(adb, ser, cur['u']): self._pfx_log('（沒有別人在播）→ 關掉 TikTok 重新開'); reopen_(True)
         elif lv == 3:
-            self._pfx_log(f'⚠ 還是{why} → 關掉 TikTok 重新開'); reopen_(True)
+            if st in ('error', 'notlive') and self._pfx_switch(why):              # V1.1.73 TikTok 這個帳號可能被擋 → 換小米分身／主帳號
+                reopen_(True)
+            else:
+                self._pfx_log(f'⚠ 還是{why} → 關掉 TikTok 重新開'); reopen_(True)
         elif lv == 4:
             rc1, o1 = self._pfx_sh(adb, ser, 'ping -c 1 -W 3 8.8.8.8', 10); rc2, o2 = self._pfx_sh(adb, ser, 'ping -c 1 -W 3 www.tiktok.com', 10)
             net_ok = (' 0% packet loss' in o1) or (' 0% packet loss' in o2)
@@ -37385,6 +37391,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 self._pfx_sh(adb, ser, 'svc wifi disable', 10); time.sleep(3); self._pfx_sh(adb, ser, 'svc wifi enable', 10); time.sleep(10); reopen_(True)
         elif lv == 5:
             self._pfx_log(f'⚠ 還是{why} → 重開錄影＋關掉 TikTok 重開'); self._pfx_kill(S); self._pfx_seg_done(cur); cur['next_t'] = now + 3; reopen_(True)
+        elif st in ('error', 'notlive'):                                        # V1.1.73 TikTok 那邊的問題：重開手機沒用，也不要一直猛重開（越試越被擋）→ 等 5／10／20 分鐘
+            cyc = int(cur.get('w_cyc') or 0); wait_ = (300, 600, 1200)[min(cyc, 2)]; cur['w_cyc'] = cyc + 1; cur['w_lv'] = 0; cur['w_hold'] = now + wait_
+            S['tk_bad'] = {'t': now, 'until': now + wait_, 'why': why}
+            self._pfx_log(f'⚠ 救了一輪還是{why} → 先不要一直重開，{wait_ // 60} 分鐘後再試（TikTok 可能在擋這個帳號）')
         else:
             if now - float(S.get('rb_t') or 0) > 6 * 3600:
                 self._pfx_log(f'⚠ 救了 5 招還是{why} → 重開手機'); S['rb_t'] = now; self._pfx_kill(S); self._pfx_seg_done(cur); cur['next_t'] = now + 60
@@ -37421,6 +37431,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
             A.append(['bad', {'black': '手機錄到黑畫面', 'frozen': '手機畫面卡住', 'error': f'TikTok 一直顯示錯誤（{sh_.get("etx")}）', 'notlive': '手機一直沒進到直播間'}[sh_['st']] + f'，已經自己救了 {cur["fix_n"]} 次：看一下手機網路、TikTok 有沒有卡住'])
         if dev.get('st') == 'ok' and dev.get('awake') is False and cur: A.append(['warn', '手機螢幕關著（程式試著叫醒）'])
         if cur and now - float(S.get('net_bad_t') or 0) < 300: A.append(['bad', '手機連不到網路（已經關開 Wi-Fi 試過）：看一下手機的 Wi-Fi'])
+        if dev.get('st') == 'ok' and 'cn' in str(dev.get('sim') or '').split(','): A.append(['bad', '手機插著中國的 SIM 卡：TikTok 會把手機當成在中國，整頁「發生錯誤」、不能登入 → 請把 SIM 卡拔掉，只用 Wi-Fi'])
+        tb_ = S.get('tk_bad') or {}
+        if cur and tb_ and float(tb_.get('until') or 0) > now:
+            A.append(['bad', f'TikTok 一直{tb_.get("why")}，可能在擋帳號：先停 {int((float(tb_["until"]) - now) // 60) + 1} 分鐘再試' + ('' if (dev.get('clones')) else '（加一個小米分身登入另一個帳號，可以自動換著用）')])
         if tgt and not (cur and S.get('proc') is not None and S['proc'].poll() is None):
             S.setdefault('miss_t', now)
             if now - S['miss_t'] > 120 and not S.get('hot'): A.append(['bad', f'@{tgt["u"]} 在播，但手機 {int((now - S["miss_t"]) // 60)} 分鐘沒在錄'])
@@ -37637,22 +37651,56 @@ $r | ConvertTo-Json -Depth 4 -Compress
         if not re.fullmatch(r'[^\\/:*?"<>|]+\.mp4', str(f or '')) or '..' in str(f): return None
         p = self._pfx_gdir() / str(f); return p if p.is_file() else None
 
+    def _pfx_uid(self):
+        """V1.1.73 現在用哪個帳號：0＝主帳號，999 之類＝小米分身（雙開）."""
+        return int(self._pfx_S().get('acct') or 0)
+
+    def _pfx_uf(self):
+        u = self._pfx_uid(); return f'--user {u} ' if u else ''
+
+    def _pfx_acct_name(self, uid=None):
+        uid = self._pfx_uid() if uid is None else int(uid); return '主帳號' if not uid else f'小米分身（{uid}）'
+
+    def _pfx_clones(self, adb, ser, pkg):
+        """手機上其他使用者（小米分身＝999）有沒有同一個 TikTok."""
+        out_ = []
+        rc, out = self._pfx_sh(adb, ser, 'pm list users', 10)
+        for m_ in re.finditer(r'UserInfo\{(\d+):', out):
+            uid = int(m_.group(1))
+            if uid == 0: continue
+            rc2, o2 = self._pfx_sh(adb, ser, f'pm list packages --user {uid} {pkg}', 10)
+            if f'package:{pkg}' in o2: out_.append(uid)
+        return out_
+
+    def _pfx_switch(self, why=''):
+        """換另一個帳號；現在這個休息 30 分鐘（被 TikTok 擋了）。沒有可換的回 False."""
+        S = self._pfx_S(); now = time.time(); cl = list((S.get('dev') or {}).get('clones') or [])
+        if not cl: return False
+        cur_u = self._pfx_uid(); rest = S.setdefault('rest', {})
+        cands = [u for u in [0] + cl if u != cur_u and float(rest.get(str(u)) or 0) <= now]
+        if not cands: return False
+        rest[str(cur_u)] = now + 1800; S['acct'] = cands[0]
+        self._pfx_log(f'🔀 換帳號：{self._pfx_acct_name(cur_u)} 先休息 30 分鐘 → 改用 {self._pfx_acct_name(cands[0])}' + (f'（{why}）' if why else ''))
+        return True
+
     def _pfx_hop(self, adb, ser, u):
         """V1.1.72 TikTok 卡在上一場（已結束）的直播間：先進另一位正在播的直播間 6 秒，再進回這位."""
         es = dict(getattr(self, 'engine_status', {}) or {})
         oth = [x for x in es if es.get(x) == 'LIVE' and x != u]
         if not oth: return False
         o = oth[int(time.time()) % len(oth)]; pkg = self._pfx_pkg()
-        self._pfx_sh(adb, ser, f'am start -a android.intent.action.VIEW -d "https://www.tiktok.com/@{o}/live" -p {pkg}', 20); time.sleep(6)
-        self._pfx_sh(adb, ser, f'am start -a android.intent.action.VIEW -d "https://www.tiktok.com/@{u}/live" -p {pkg}', 20); time.sleep(4)
+        self._pfx_sh(adb, ser, f'am start {self._pfx_uf()}-a android.intent.action.VIEW -d "https://www.tiktok.com/@{o}/live" -p {pkg}', 20); time.sleep(6)
+        self._pfx_sh(adb, ser, f'am start {self._pfx_uf()}-a android.intent.action.VIEW -d "https://www.tiktok.com/@{u}/live" -p {pkg}', 20); time.sleep(4)
         self._pfx_log(f'先進 @{o} 的直播間再回來 @{u}'); return True
 
     def _pfx_open(self, adb, ser, u):
         sh = lambda c, t=12: self._pfx_sh(adb, ser, c, t)
         sh('input keyevent KEYCODE_WAKEUP'); time.sleep(0.7); sh('wm dismiss-keyguard'); time.sleep(0.5)   # 沒開「安全設定」時按鍵會被擋：沒關係，螢幕設成充電時不休眠就一直亮著
         sh('svc power stayon usb')                                               # 插著 USB 不關螢幕
-        sh(f'am force-stop {self._pfx_pkg()}'); time.sleep(1.5)                  # V1.1.72 先完全關掉 TikTok：不然會叫回上一場（已結束）的直播間
-        sh(f'am start -a android.intent.action.VIEW -d "https://www.tiktok.com/@{u}/live" -p {self._pfx_pkg()}', 20)
+        for uid_ in [0] + list((self._pfx_S().get('dev') or {}).get('clones') or []):   # V1.1.72 先完全關掉 TikTok（兩個帳號都關，畫面上只留要用的那個）
+            sh(f'am force-stop {"--user " + str(uid_) + " " if uid_ else ""}{self._pfx_pkg()}')
+        time.sleep(1.5)
+        sh(f'am start {self._pfx_uf()}-a android.intent.action.VIEW -d "https://www.tiktok.com/@{u}/live" -p {self._pfx_pkg()}', 20)
         for _ in range(12):
             time.sleep(1.5); fg, act = self._pfx_fg(adb, ser)
             if fg in self.PFX_PKGS: return act or '?'
@@ -37665,8 +37713,14 @@ $r | ConvertTo-Json -Depth 4 -Compress
         cur = S.get('cur')
         if not cur or cur.get('u') != u:
             sid = (getattr(self, 'engine_sessions', {}) or {}).get(u); ls = float((getattr(self, 'stream_live_start', {}) or {}).get(u) or time.time())
-            cur = {'u': u, 'name': self.streamer_names.get(u, u), 'sid': sid, 'ls': ls, 'seg': 0, 'segs': [], 't_start': time.time(), 'reopen': 0}
-            S['cur'] = cur; self._pfx_log(f'開始錄 @{u}（{cur["name"]}）' + (f' #場次 {sid}' if sid else ''))
+            cl_ = list((S.get('dev') or {}).get('clones') or [])
+            if cl_:                                                              # V1.1.73 主帳號、小米分身輪流（每一場換一個；在休息的跳過）
+                rest_ = S.setdefault('rest', {}); now_ = time.time(); order_ = [0] + cl_; ci_ = order_.index(self._pfx_uid()) if self._pfx_uid() in order_ else 0
+                for k_ in range(1, len(order_) + 1):
+                    c_ = order_[(ci_ + k_) % len(order_)]
+                    if float(rest_.get(str(c_)) or 0) <= now_: S['acct'] = c_; break
+            cur = {'u': u, 'name': self.streamer_names.get(u, u), 'sid': sid, 'ls': ls, 'seg': 0, 'segs': [], 't_start': time.time(), 'reopen': 0, 'acct': self._pfx_uid()}
+            S['cur'] = cur; self._pfx_log(f'開始錄 @{u}（{cur["name"]}）' + (f' #場次 {sid}' if sid else '') + f'・用{self._pfx_acct_name()}')
         if float(cur.get('next_t') or 0) > time.time(): return
         self._pfx_wake(adb, ser); bv = self._pfx_bright(adb, ser)                 # V1.1.70 開播：亮起來、亮度照設定（預設 50%）
         self._pfx_sh(adb, ser, 'input keyevent KEYCODE_HOME', 8); time.sleep(1)   # V1.1.71 先回桌面再進直播間
@@ -37849,6 +37903,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         sw = dict(S['sw'], left=max(0, round(float(S['sw']['at']) - now))) if S.get('sw') else None
         return {'ok': True, 'now': now, 'tools': bool(T), 'tdir': str(self._pfx_tdir()), 'scrv': (self._pfx_scr_ver(T[1]) if T else ''), 'dl': S.get('dl') or '', 'dl_run': bool(S.get('dl_run')),
                 'dev': dict(S.get('dev') or {}), 'cur': cur, 'man': S.get('man'), 'hot': bool(S.get('hot')), 'wait': S.get('wait') or '', 'run': bool(S.get('gen')),
+                'acct': self._pfx_uid(), 'rest': {k: v for k, v in (S.get('rest') or {}).items() if float(v) > now}, 'tk_bad': S.get('tk_bad'),
                 'shot': dict(S.get('shot') or {}), 'alerts': list(S.get('alerts') or []), 'gj': dict(S.get('gj') or {}), 'gl': self._pfx_glist(), 'rb_t': S.get('rb_t'),
                 'cfg': cfg, 'live': live, 'sl': sl, 'sw': sw, 'log': list(S.get('log') or [])[-40:][::-1], 'rec': rec,
                 'gr': {u: self._rv_grade_of(u) for u in [x[0] for x in live] + list(cfg.get('users') or [])}}
@@ -37910,7 +37965,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     if a == 'wake': self._pfx_wake(adb, ser)
                     elif a == 'sleep': self._pfx_sh(adb, ser, 'input keyevent KEYCODE_SLEEP', 8)
                     elif a == 'home': self._pfx_wake(adb, ser); self._pfx_sh(adb, ser, 'input keyevent KEYCODE_HOME', 8)
-                    elif a == 'tiktok': self._pfx_wake(adb, ser); self._pfx_sh(adb, ser, f'am start -a android.intent.action.VIEW -d "https://www.tiktok.com/" -p {self._pfx_pkg()}', 15)
+                    elif a == 'tiktok': self._pfx_wake(adb, ser); self._pfx_sh(adb, ser, f'am start {self._pfx_uf()}-a android.intent.action.VIEW -d "https://www.tiktok.com/" -p {self._pfx_pkg()}', 15)
+                    elif a == 'acct':
+                        if not self._pfx_switch('手動'): self._pfx_log('沒有另一個可以用的帳號（沒有小米分身，或在休息）')
                     elif a == 'bright': self._pfx_bright(adb, ser, int(v or 50))
                     time.sleep(1.5 if a != 'tiktok' else 4)
                     S['info_t'] = 0; S['dev_t'] = 0
@@ -37928,7 +37985,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             if not T or dev.get('st') != 'ok': return {'ok': False, 'message': '手機還沒連上'}
             def run_(T=T, ser=dev['serial']):
                 self._pfx_sh(T[0], ser, 'input keyevent KEYCODE_WAKEUP', 8); time.sleep(0.6); self._pfx_sh(T[0], ser, 'wm dismiss-keyguard', 8)
-                self._pfx_sh(T[0], ser, f'am start -a android.intent.action.VIEW -d "https://www.tiktok.com/" -p {self._pfx_pkg()}', 15); time.sleep(5)
+                self._pfx_sh(T[0], ser, f'am start {self._pfx_uf()}-a android.intent.action.VIEW -d "https://www.tiktok.com/" -p {self._pfx_pkg()}', 15); time.sleep(5)
                 fg, act = self._pfx_fg(T[0], ser); self._pfx_log(f'測試：前景 {fg or "?"} / {act or "?"}' + ('（✔ TikTok 打開了）' if fg in self.PFX_PKGS else '（✖ 沒看到 TikTok）'))
                 S['info_t'] = 0
             threading.Thread(target=run_, daemon=True).start(); return {'ok': True, 'message': '叫醒手機、打開 TikTok…（5 秒後看下面紀錄）'}
@@ -46351,7 +46408,7 @@ const RULES=[
   {t:"空間不夠時",d:"<ul><li>SSD 剩不到 <b>"+RU_V('rec.ssd_min_free','GB',60)+"</b>：新的錄影改成直接錄在影片庫硬碟。</li><li>影片硬碟剩不到 <b>"+RU_V('rec.video_min_free','GB',30)+"</b>：不開始新的錄影（<b>聲音照錄</b>）。</li><li>🛡 C 槽守門員每分鐘看 C 剩多少、減少多快：第 1 級先停不急的背景工作；第 2 級全速把東西搬走；第 3 級（剩不到 15 GB 或 20 分鐘內會滿）才會一位一位停掉正在錄到 C 的影片（F → E → 未分級先停）。</li></ul>"},
   {t:"同一場直播的判定（斷線、重開）",d:"<ul><li>主播斷線後 <b>"+RU_V('conn.grace_minutes','分鐘',10)+"內</b>連回同一個直播間＝<b>續寫同一場</b>（錄影會分成第 2 段、第 3 段…）。</li><li>直播中卻 <b>"+RU_V('monitor.silent_min','分鐘',30)+"</b>沒有任何留言、禮物、進場、人數也沒變（而且沒在錄影）→ 重新連一次確認：還在播就續寫，結束了就把結束時間改回最後有資料的時間。</li><li>程式重開、斷電、超過 10 分鐘才連回來 → 會變成<b>另一場</b>。這種被切開的，用「⧉ 合併重複場次」合回一場（見「場次合併」）。</li></ul>"},
   {t:"開程式、熱更新時的監控",d:"<ul><li>開程式 3 秒後自動開始監控（設定可以關）。正在錄的場次在熱更新、重開時會<b>接著錄同一場</b>。</li><li>搬硬碟切換後，如果找不到影片硬碟（例如 R 槽代號跑掉），程式<b>先不開始監控</b>，不會錄到別的地方，會提示你去磁碟管理改代號。</li></ul>"},
-  {t:"📲 手機錄特效",d:"<ul><li>一支安卓手機（紅米 10）用 USB 接電腦，裝好 scrcpy（工具頁可自動從官方 GitHub 下載）。</li><li>主播開播 → 手機自己亮起來、打開那個直播間 → 錄下手機畫面＋聲音（有禮物特效）。一支手機一次錄一場。</li><li>錄誰：<b>S 級</b>的主播，照「工具 → 📲 手機錄特效」裡拖好的順序；按「▶ 開始」後，排最前面、正在直播的那位先錄，他下播換下一位還在播的。要加人＝在審核改成 S。</li><li>改順序要按右下角「✔ 套用」才生效；套用後（或排更前面的開播了）正在錄的不是第一順位 → 倒數 10 秒停掉、換錄新的那位。</li><li>主播斷線／下播超過 90 秒才停；TikTok 被關掉或跳走會自己重新打開直播間；拔線再插回、scrcpy 中斷 → 接著錄下一段（_p2、_p3…）。</li><li>手機超過 46°C 先停錄，降到 41°C 再繼續。</li><li>先錄在 SSD（MKV，斷電也播得了），結束後不重新壓縮換成 MP4（idle），搬到影片資料夾 <b>TikLive_手機特效\\帳號\\</b>；不到 15 秒的段丟掉。</li><li>回放：同一場可以切換「原本／手機」版本（用聲音對齊；對不上用錄影時間，可能差幾秒）。剪輯器那場的來源最後多一個手機特效檔。</li><li>S 級：手機特效版也排進 YouTube（標題加「手機特效版」，跟原本的是不同一部）。容量預測也算進去。</li><li>🎁 禮物剪輯：「錄好的」那場按「禮物剪輯」→ 選一位大哥（不算 10 鑽以下），或不分是誰、單次 ≥ 2000 鑽的全部 → 每個禮物一格（一次顯示 10 格，往右滑再載入）；點一格只載那一小段，用 ±1／±5 調送禮前、送禮後幾秒，按 OK 換下一格；沒調的用預設 → 全部接成一支 MP4（連在一起的併成一段，用顯示卡壓縮）。</li><li>學習時間差：每次按 OK 都記下來（禮物、你調的秒數、當時幾個人在播…）。同一種禮物有 2 筆以上就用它們當預設：取中位數、差太多的先不算、其他平均；之後資料夠了可以分析延遲原因。</li><li>回放切到「手機」版本時，程式自己畫的送禮動畫不顯示（手機畫面本來就有真的特效）。</li><li>✂ 剪輯：那場有手機特效版會先問要剪「原本錄的」還是「手機特效版」；沒有就直接開。</li><li>看畫面：錄影中每 30 秒截一張手機畫面（頁面看得到），也讀畫面上的字、看現在是不是直播間。黑畫面（螢幕關了、直播間沒畫面）、TikTok 顯示「發生錯誤／請稍後再試」、跑到首頁不在直播間、一模一樣 2 分鐘（卡住）、錄影檔沒在長 → 看到就馬上動手，30 秒後還不對換下一招：①完全關掉 TikTok 重開直播間（每次開直播間都先這樣，避免叫回上一場已結束的）②先進另一位正在播的直播間 6 秒再回來 ③再關掉 TikTok 重開 ④檢查手機網路，不通就關掉 Wi-Fi 再打開 ⑤重開錄影 ⑥重開手機（6 小時最多一次）。小米「充電速度慢」這類跳出來的視窗按返回關掉。只是畫面沒動（主播可能停在同一畫面）救 3 招後改 3 分鐘再看。螢幕設成永遠不自己關。</li><li>自己處理：通知欄被拉下來、USB 用途選單、系統對話框 → 20 秒內自己收掉；離開 TikTok 會重新打開直播間；連不上 3 分鐘重新啟動 adb；處理不了的（找不到手機、電量低沒充電、在播卻沒在錄）會出現在狀態卡和這頁最上面。</li><li>螢幕：沒在錄、1 分鐘沒人操作 → 回桌面（不停在 TikTok）、亮度最低、關螢幕待機；開播時亮起來（亮度照設定，預設 50%）→ 回桌面 → 進直播間，開錄前先看一眼畫面，黑的就回桌面再開一次。頁面有手動按鈕：亮屏、熄屏、回桌面、開 TikTok、截一張、亮度拉桿（任何裝置都能按）。</li><li>手機畫面每 30 秒截一張顯示在頁面（螢幕關著不截）；錄影中的截圖另外存成那支影片的「預覽」（檔名＝影片第幾秒），在「錄好的」按 🖼 預覽看，點一張從那裡播。要先開小米「USB 偵錯（安全設定）」程式才能按電源鍵。</li><li>每週二、週五凌晨 3～7 點（沒在錄、S 級都沒在播時）自動重開手機一次；</li><li>全部在背景執行緒：手機只把壓好的畫面傳過來，電腦不解碼、不開視窗。</li></ul>"},
+  {t:"📲 手機錄特效",d:"<ul><li>一支安卓手機（紅米 10）用 USB 接電腦，裝好 scrcpy（工具頁可自動從官方 GitHub 下載）。</li><li>主播開播 → 手機自己亮起來、打開那個直播間 → 錄下手機畫面＋聲音（有禮物特效）。一支手機一次錄一場。</li><li>錄誰：<b>S 級</b>的主播，照「工具 → 📲 手機錄特效」裡拖好的順序；按「▶ 開始」後，排最前面、正在直播的那位先錄，他下播換下一位還在播的。要加人＝在審核改成 S。</li><li>改順序要按右下角「✔ 套用」才生效；套用後（或排更前面的開播了）正在錄的不是第一順位 → 倒數 10 秒停掉、換錄新的那位。</li><li>主播斷線／下播超過 90 秒才停；TikTok 被關掉或跳走會自己重新打開直播間；拔線再插回、scrcpy 中斷 → 接著錄下一段（_p2、_p3…）。</li><li>手機超過 46°C 先停錄，降到 41°C 再繼續。</li><li>先錄在 SSD（MKV，斷電也播得了），結束後不重新壓縮換成 MP4（idle），搬到影片資料夾 <b>TikLive_手機特效\\帳號\\</b>；不到 15 秒的段丟掉。</li><li>回放：同一場可以切換「原本／手機」版本（用聲音對齊；對不上用錄影時間，可能差幾秒）。剪輯器那場的來源最後多一個手機特效檔。</li><li>S 級：手機特效版也排進 YouTube（標題加「手機特效版」，跟原本的是不同一部）。容量預測也算進去。</li><li>🎁 禮物剪輯：「錄好的」那場按「禮物剪輯」→ 選一位大哥（不算 10 鑽以下），或不分是誰、單次 ≥ 2000 鑽的全部 → 每個禮物一格（一次顯示 10 格，往右滑再載入）；點一格只載那一小段，用 ±1／±5 調送禮前、送禮後幾秒，按 OK 換下一格；沒調的用預設 → 全部接成一支 MP4（連在一起的併成一段，用顯示卡壓縮）。</li><li>學習時間差：每次按 OK 都記下來（禮物、你調的秒數、當時幾個人在播…）。同一種禮物有 2 筆以上就用它們當預設：取中位數、差太多的先不算、其他平均；之後資料夠了可以分析延遲原因。</li><li>回放切到「手機」版本時，程式自己畫的送禮動畫不顯示（手機畫面本來就有真的特效）。</li><li>✂ 剪輯：那場有手機特效版會先問要剪「原本錄的」還是「手機特效版」；沒有就直接開。</li><li>看畫面：錄影中每 30 秒截一張手機畫面（頁面看得到），也讀畫面上的字、看現在是不是直播間。黑畫面（螢幕關了、直播間沒畫面）、TikTok 顯示「發生錯誤／請稍後再試」、跑到首頁不在直播間、一模一樣 2 分鐘（卡住）、錄影檔沒在長 → 看到就馬上動手，30 秒後還不對換下一招：①完全關掉 TikTok 重開直播間（每次開直播間都先這樣，避免叫回上一場已結束的）②先進另一位正在播的直播間 6 秒再回來 ③再關掉 TikTok 重開 ④檢查手機網路，不通就關掉 Wi-Fi 再打開 ⑤重開錄影 ⑥重開手機（6 小時最多一次）。小米「充電速度慢」這類跳出來的視窗按返回關掉。只是畫面沒動（主播可能停在同一畫面）救 3 招後改 3 分鐘再看。螢幕設成永遠不自己關。</li><li>自己處理：通知欄被拉下來、USB 用途選單、系統對話框 → 20 秒內自己收掉；離開 TikTok 會重新打開直播間；連不上 3 分鐘重新啟動 adb；處理不了的（找不到手機、電量低沒充電、在播卻沒在錄）會出現在狀態卡和這頁最上面。</li><li>螢幕：沒在錄、1 分鐘沒人操作 → 回桌面（不停在 TikTok）、亮度最低、關螢幕待機；開播時亮起來（亮度照設定，預設 50%）→ 回桌面 → 進直播間，開錄前先看一眼畫面，黑的就回桌面再開一次。頁面有手動按鈕：亮屏、熄屏、回桌面、開 TikTok、截一張、亮度拉桿（任何裝置都能按）。</li><li>SIM 卡：錄影手機不要插中國的 SIM 卡（TikTok 會把手機當成在中國，整頁「發生錯誤」、不能登入）；偵測到會在頁面最上面提醒。只用 Wi-Fi 就好。</li><li>帳號：有小米分身（雙開，系統使用者 999）登入另一個 TikTok 帳號時，每一場輪流用；一個帳號一直「發生錯誤」（可能被 TikTok 擋）就換另一個，被擋的休息 30 分鐘。兩個都不行就不再一直重開，改成等 5、10、20 分鐘再試，並提醒你（重開手機對這種沒用，只用在黑畫面）。</li><li>手機畫面每 30 秒截一張顯示在頁面（螢幕關著不截）；錄影中的截圖另外存成那支影片的「預覽」（檔名＝影片第幾秒），在「錄好的」按 🖼 預覽看，點一張從那裡播。要先開小米「USB 偵錯（安全設定）」程式才能按電源鍵。</li><li>每週二、週五凌晨 3～7 點（沒在錄、S 級都沒在播時）自動重開手機一次；</li><li>全部在背景執行緒：手機只把壓好的畫面傳過來，電腦不解碼、不開視窗。</li></ul>"},
   {t:"⏸ 暫停監控並封存",d:"<ul><li>主播分類（或審核、檔案總管）<b>長按主播</b> → 主播選單 →「⏸ 暫停監控並封存」。</li><li>從那一刻起<b>不再連線、不錄新的</b>（直播中的話那一場停在那裡、照常收尾）；主播清單、等級、分類、<b>以前的場次全部留著</b>，照常轉檔、整理、照等級排隊上傳 YouTube、照保留天數刪原檔。</li><li>在主播分類移到最下面「⏸ 暫停監控（封存）」那區；<b>審核頁</b>也收到最下面同一欄「⏸ 封存」（保留原本的等級、照等級排、灰階，點進去一樣看以前的紀錄）。同一個選單按「▶ 恢復監控」就接回來。</li><li>封存中的主播又被<b>新增</b>（貼 TikTok 連結、@帳號、匯入）：會先問「目前封存中，要解封嗎？」— 解封＝移回來繼續監控；取消＝取消新增、維持封存。</li><li>每一次封存／解封都會記下來（時間、從哪裡按的），長按主播的小視窗最上面「🗄 封存紀錄」看得到。</li><li>跟「🗑 刪除主播」不一樣：刪除＝整位全部刪掉（等於標 F 再處置）。</li></ul>"},
   {t:"只錄聲音的主播（照審核等級 G）",d:"<ul><li><b>在「主播審核」標 G＝只錄聲音</b>；改成別的等級就恢復錄影片。以前另外的「只錄聲音的主播」清單已經拿掉，程式每分鐘照等級對一次，以審核等級為準。</li><li>G 的主播直播中照樣錄畫面（FLV 先放 C 槽），下播後截 60 張圖＋字幕，自動傳 YouTube，傳好才移走原檔。</li><li>直播中每 <b>"+RU_V('rec.snap_min','分鐘',2)+"</b>另外拍一張快照，回放時在影片的位置左右翻看。</li></ul>"}]},
  {k:"play",i:"📺",c:"#4dc9ff",t:"回放與直播中觀看：延遲、預載入",s:[
@@ -51033,7 +51090,8 @@ function pfxHtml(j){const D=j.dev||{},c=j.cur,cf=j.cfg||{},gr=j.gr||{};const gC=
   if(D.st==="ok"){const sh=j.shot||{},ST={ok:'<span class="pfOk">✔ 直播畫面正常</span>',idle:'<span class="pfSub">待機中的畫面</span>',black:'<span class="pfBad">⚫ 黑畫面</span>',frozen:'<span class="pfBad">⏸ 畫面卡住</span>',stall:'<span class="pfBad">⚠ 錄影檔沒在長</span>',error:`<span class="pfBad">⚠ TikTok 顯示錯誤${sh.etx?"：「"+rvE(sh.etx)+"」":""}</span>`,notlive:`<span class="pfBad">⚠ 不在直播間${sh.act?"（"+rvE(String(sh.act).split(".").pop())+"）":""}</span>`,sleep:'<span class="pfSub">🌙 螢幕關著（待機）</span>'};
     h+=`<div class="pfR" style="margin-top:10px;align-items:flex-start;flex-wrap:nowrap;gap:12px">${sh.t&&sh.st!=="sleep"?`<img src="${rvB()}/api/pc/pfx/shot?t=${Math.round(sh.t)}" alt="" style="width:110px;border-radius:8px;border:1px solid rgba(140,150,165,.35);background:#000;flex:0 0 auto">`:`<div style="width:110px;height:200px;border-radius:8px;background:#000;display:flex;align-items:center;justify-content:center;flex:0 0 auto;opacity:.6">🌙</div>`}
     <div style="display:flex;flex-direction:column;gap:6px;min-width:0"><div>📷 手機畫面 ${sh.t?`<span class="pfSub">${pfxT(sh.t)}，每 30 秒更新</span>`:""}</div><div>${ST[sh.st]||""}</div>
-    <div class="pfR"><button class="pfB" data-pa="ctl" data-a="wake">☀ 亮屏</button><button class="pfB" data-pa="ctl" data-a="sleep">🌙 熄屏</button><button class="pfB" data-pa="ctl" data-a="home">🏠 回桌面</button><button class="pfB" data-pa="ctl" data-a="tiktok">▶ 開 TikTok</button><button class="pfB" data-pa="ctl" data-a="shot">📷 現在截一張</button></div>
+    <div class="pfR"><button class="pfB" data-pa="ctl" data-a="wake">☀ 亮屏</button><button class="pfB" data-pa="ctl" data-a="sleep">🌙 熄屏</button><button class="pfB" data-pa="ctl" data-a="home">🏠 回桌面</button><button class="pfB" data-pa="ctl" data-a="tiktok">▶ 開 TikTok</button><button class="pfB" data-pa="ctl" data-a="shot">📷 現在截一張</button>${D.clones&&D.clones.length?'<button class="pfB" data-pa="ctl" data-a="acct">🔀 換帳號</button>':""}</div>
+    <div class="pfSub">帳號：現在用 <b>${(j.acct||0)?"小米分身（"+j.acct+"）":"主帳號"}</b>${D.clones&&D.clones.length?`・小米分身 ✔（${D.clones.join("、")}）每一場輪流用、被擋就換`:"・沒抓到小米分身"}${Object.keys(j.rest||{}).length?"・休息中："+Object.entries(j.rest).map(([k,v])=>(+k?"分身":"主帳號")+" 到 "+pfxT(v).split(" ")[1]).join("、"):""}</div>
     <div class="pfR"><span>亮度</span><input type="range" min="1" max="100" value="${PFX.bri??(cf.bright??50)}" data-pa="bri" style="flex:1;min-width:120px"><b data-bv>${PFX.bri??(cf.bright??50)}%</b></div>
     <div class="pfSub">沒在錄、1 分鐘沒人操作：回桌面、亮度最低、關螢幕。開播：亮起來（亮度 ${cf.bright??50}%）→ 回桌面 → 進直播間。</div></div></div>`;}
   if(!j.tools)h+=`<div class="pfSub" style="margin-top:6px">也可以自己到 github.com/Genymobile/scrcpy 的 Releases 下載 scrcpy-win64 的 zip，解壓到 ${rvE(j.tdir)}</div>`;
