@@ -929,7 +929,12 @@ def route(win, sock, method, rest, q, body):
     if name == 'pfx/shot' and method == 'GET':                                   # V1.1.69 手機最近一張畫面（只讀）
         p_ = win._pfx_shot_file()
         if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True
-        win._web_send_file(sock, p_, 'image/png'); return True
+        win._web_send_file(sock, p_, 'image/jpeg' if p_.suffix == '.jpg' else 'image/png'); return True
+    if name == 'pfx/thumbs' and method == 'GET': J(win._pfx_thumbs(q.get('i', '-1'))); return True   # V1.1.71 手機特效預覽圖（只讀）
+    if name == 'pfx/thumb' and method == 'GET':
+        p_ = win._pfx_thumb(q.get('i', '-1'), q.get('t', '0'))
+        if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True
+        win._web_send_file(sock, p_, 'image/jpeg'); return True
     if name == 'pfx/gfile' and method == 'GET':
         p_ = win._pfx_gfile(q.get('f', ''))
         if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True
