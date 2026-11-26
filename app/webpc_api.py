@@ -926,6 +926,10 @@ def route(win, sock, method, rest, q, body):
     if name == 'pfx/gtiles' and method == 'GET': J(win._pfx_gtiles(int(q.get('sid', '0') or 0), 'big' if q.get('mode') == 'big' else 'user', q.get('u', ''), int(q.get('min', '10') or 10))); return True   # V1.1.67 禮物格子（只讀）
     if name == 'pfx/has' and method == 'GET':                                    # V1.1.67 這場有沒有手機特效版（剪刀先選版本用）
         J({'ok': True, 'files': [Path(x['f']).name for x in win._pfx_idx() if str(x.get('sid')) == str(q.get('sid', '')) and Path(x['f']).is_file()]}); return True
+    if name == 'pfx/shot' and method == 'GET':                                   # V1.1.69 手機最近一張畫面（只讀）
+        p_ = win._pfx_shot_file()
+        if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True
+        win._web_send_file(sock, p_, 'image/png'); return True
     if name == 'pfx/gfile' and method == 'GET':
         p_ = win._pfx_gfile(q.get('f', ''))
         if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True
