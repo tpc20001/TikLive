@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.76"
+APP_VERSION = "1.1.77"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -37719,6 +37719,244 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     break
         return {'ok': True, 'sid': int(sid), 'rows': out, 'n_all': len(out)}
 
+    # ---------- V1.1.77 🎛 禮物陣列影片（新工作區）：手機特效的禮物一格一格排成陣列，一起循環播、每格 ±0.1 秒對齊，輸出一支 MP4
+    GAV_PRE, GAV_POST = 10.0, 20.0                                              # 每格的小預覽影片：送禮前 10 秒～後 20 秒（調整範圍）
+
+    def _gav_sessions(self):
+        """有手機特效檔的場次（新的在前）：[{sid,u,name,t,n}]."""
+        M = {}
+        for x in self._pfx_idx():
+            if x.get('mix') or not x.get('sid'): continue
+            try:
+                if not Path(x['f']).is_file(): continue
+            except Exception: continue
+            k = int(x['sid']); m = M.setdefault(k, {'sid': k, 'u': str(x.get('u') or ''), 'name': str(x.get('name') or x.get('u') or ''), 't': float(x.get('t0') or 0), 'n': 0})
+            m['n'] += 1; m['t'] = min(m['t'], float(x.get('t0') or m['t']))
+        try: G = {str(k).lower(): v for k, v in (self._rv_grades() or {}).items()}
+        except Exception: G = {}
+        out = sorted(M.values(), key=lambda m: -m['t'])
+        for m in out:
+            g = G.get(m['u'].lower()); m['g'] = (g.get('g') if isinstance(g, dict) else g) or ''
+        return {'ok': True, 'L': out[:300]}
+
+    def _gav_rows(self, sid):
+        """這場在手機特效裡看得到的每一個禮物：[{rid,ts,g,dia,cnt,u,nick,f,pos,al}]＋學到的每種禮物預設開始秒數＋存過的工作區."""
+        sid = int(sid); segs = self._pfx_segs(sid); out = []
+        rows = self._web_db('SELECT rowid, ts, gift_name, diamonds, COALESCE(count,1), username, COALESCE(NULLIF(nickname,""),username) FROM gifts WHERE session_id=? ORDER BY ts', (sid,)) or []
+        for rid, ts, g, dd, cnt, u, nk in rows:
+            for p, e0, dur, al, ix in segs:
+                pos = float(ts) - e0
+                if -2 <= pos <= dur + 1:
+                    out.append({'rid': int(rid), 'ts': float(ts), 'g': str(g or ''), 'dia': int(dd or 0), 'cnt': int(cnt or 1), 'u': str(u or ''), 'nick': str(nk or ''), 'f': ix, 'pos': round(pos, 2), 'fdur': round(dur, 1), 'al': al})
+                    break
+        try: live = float(self._history_live_epoch(sid))
+        except Exception: live = 0.0
+        return {'ok': True, 'sid': sid, 'live': live, 'rows': out, 'segs': len(segs), 'def': self._gav_defs(), 'saved': self._gav_load(sid),
+                'job': {k: v for k, v in (self._pfx_S().get('gv') or {}).items() if k != 'cells'}}
+
+    def _gav_dir(self, sub):
+        d = self._pfx_tmp() / sub; d.mkdir(parents=True, exist_ok=True); return d
+
+    def _gav_sem(self):
+        return self.__dict__.setdefault('_gav_sem_', threading.BoundedSemaphore(2))     # 預覽圖／小影片：同時最多 2 個 FFmpeg
+
+    def _gav_src(self, f):
+        try:
+            x = self._pfx_idx()[int(f)]; p = Path(x['f'])
+            return p if p.is_file() and not x.get('mix') else None
+        except Exception: return None
+
+    def _gav_sheet(self, f, t, d):
+        """一個禮物 5 張預覽圖拼成一排（從 t 開始 d 秒平均取 5 張），存 SSD 快取."""
+        p = self._gav_src(f)
+        if p is None: return None
+        t = max(0.0, round(float(t), 1)); d = max(1.0, min(30.0, round(float(d), 1)))
+        import hashlib
+        out = self._gav_dir('gav_th') / (hashlib.md5(f'{p}|{p.stat().st_size}|{t}|{d}'.encode()).hexdigest()[:20] + '.jpg')
+        if out.is_file(): return out
+        with self._gav_sem():
+            if out.is_file(): return out
+            try: bz = self._busy_guard()[0]
+            except Exception: bz = False
+            if bz: time.sleep(1.5)
+            ff = self._experiment_ffmpeg()
+            if not ff: return None
+            tmp = out.with_suffix('.part.jpg')
+            subprocess.run([ff, '-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-ss', f'{t:.2f}', '-i', str(p), '-t', f'{d:.2f}', '-an', '-sn',
+                            '-vf', f'fps={5 / d:.4f},scale=144:-2,tile=5x1', '-frames:v', '1', '-q:v', '5', str(tmp)],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, **_no_window_kwargs(idle=True))
+            if tmp.is_file() and tmp.stat().st_size > 500: os.replace(tmp, out); return out
+        return None
+
+    def _gav_px(self, f, pos):
+        """每格的小預覽影片（送禮前 10 秒～後 20 秒、240 寬、15 張／秒、沒聲音），顯示卡壓縮，存 SSD 快取. 回傳 {n, t0}."""
+        p = self._gav_src(f)
+        if p is None: return {'ok': False, 'message': '找不到手機特效檔'}
+        t0 = max(0.0, round(float(pos) - self.GAV_PRE, 1)); dur = self.GAV_PRE + self.GAV_POST
+        import hashlib
+        n = hashlib.md5(f'{p}|{p.stat().st_size}|{t0}'.encode()).hexdigest()[:20] + '.mp4'; out = self._gav_dir('gav_px') / n
+        if out.is_file(): return {'ok': True, 'n': n, 't0': t0}
+        with self._gav_sem():
+            if out.is_file(): return {'ok': True, 'n': n, 't0': t0}
+            for _w in range(20):
+                try: bz = self._busy_guard()[0]
+                except Exception: bz = False
+                if not bz: break
+                time.sleep(1.5)
+            ff, enc = self._pfx_ffenc()
+            if not ff: return {'ok': False, 'message': '找不到 ffmpeg'}
+            tmp = out.with_suffix('.part.mp4'); r = None
+            for e_ in ([enc, 'libx264'] if enc != 'libx264' else ['libx264']):
+                va = self._video_encoder_args(e_) if e_ != 'libx264' else ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28', '-pix_fmt', 'yuv420p', '-threads', '2']
+                r = subprocess.run([ff, '-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-ss', f'{t0:.2f}', '-i', str(p), '-t', f'{dur:.2f}', '-an', '-sn',
+                                    '-vf', 'scale=240:-2,fps=15'] + va + ['-g', '15', '-movflags', '+faststart', str(tmp)],
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120, **_no_window_kwargs(idle=True))
+                if r.returncode == 0 and tmp.is_file() and tmp.stat().st_size > 1000: break
+            if not (tmp.is_file() and tmp.stat().st_size > 1000): return {'ok': False, 'message': '小預覽影片做不出來'}
+            os.replace(tmp, out)
+        try:                                                                    # 快取超過 3000 個：刪最舊的
+            L = sorted(self._gav_dir('gav_px').glob('*.mp4'), key=lambda q: q.stat().st_mtime)
+            for q in L[:max(0, len(L) - 3000)]: q.unlink()
+        except Exception: pass
+        return {'ok': True, 'n': n, 't0': t0}
+
+    def _gav_pxfile(self, n):
+        if not re.fullmatch(r'[0-9a-f]{20}\.mp4', str(n or '')): return None
+        p = self._gav_dir('gav_px') / n; return p if p.is_file() else None
+
+    def _gav_path(self, sid): return Path(PACKAGE_ROOT) / '_DB_SSD' / 'gav' / f'{int(sid)}.json'
+
+    def _gav_load(self, sid):
+        try: return json.loads(self._gav_path(sid).read_text(encoding='utf-8'))
+        except Exception: return None
+
+    def _gav_log_path(self): return Path(PACKAGE_ROOT) / '_DB_SSD' / 'pfx_gav_log.jsonl'
+
+    def _gav_save(self, d):
+        """存工作區（哪些格、每格開始秒數、長度、排法）＋把這次的每一個調整記下來（之後當大數據分析／算預設）."""
+        sid = int(d.get('sid') or 0)
+        if not sid: return {'ok': False, 'message': '沒有場次'}
+        W = {'D': float(d.get('D') or 8), 'C': int(d.get('C') or 0), 'R': int(d.get('R') or 0), 'cells': [{'rid': int(c['rid']), 'o': round(float(c['o']), 2)} for c in (d.get('cells') or [])][:400], 't': time.time()}
+        try:
+            p = self._gav_path(sid); p.parent.mkdir(parents=True, exist_ok=True); tp = p.with_suffix('.tmp'); tp.write_text(json.dumps(W, ensure_ascii=False), encoding='utf-8'); os.replace(tp, p)
+        except Exception as e: return {'ok': False, 'message': f'存不起來：{e}'}
+        log = d.get('log') or []
+        if log:
+            try:
+                es = dict(getattr(self, 'engine_status', {}) or {}); ln = sum(1 for v in es.values() if v == 'LIVE')
+                hu = str((self._web_db('SELECT username FROM sessions WHERE id=?', (sid,)) or [['']])[0][0] or '')
+                lp = self._gav_log_path()
+                if lp.is_file() and lp.stat().st_size > 8 * 1024 * 1024:
+                    os.replace(lp, lp.with_name('pfx_gav_log_old.jsonl'))
+                with open(lp, 'a', encoding='utf-8') as fh:
+                    for x in log[:500]:
+                        fh.write(json.dumps({'t': round(time.time(), 1), 'sid': sid, 'host': hu, 'rid': int(x.get('rid') or 0), 'g': str(x.get('g') or '')[:40], 'dia': int(x.get('dia') or 0),
+                                             'giver': str(x.get('u') or '')[:60], 'from': x.get('from'), 'to': x.get('to'), 'D': W['D'], 'al': bool(x.get('al')), 'live_n': ln, 'n': len(W['cells'])}, ensure_ascii=False) + '\n')
+                self.__dict__.pop('_gav_def_c', None)
+            except Exception: pass
+        return {'ok': True}
+
+    def _gav_defs(self):
+        """學到的「每種禮物從送禮後第幾秒開始」：同一種禮物每格最後調到的值，最近 20 格取中位數（≥2 格才算）；全部 ≥5 格時另給一個總預設."""
+        c = self.__dict__.get('_gav_def_c')
+        if c and time.time() - c[0] < 300: return c[1]
+        last = {}
+        try:
+            lp = self._gav_log_path()
+            if lp.is_file():
+                with open(lp, 'rb') as fh:
+                    sz = lp.stat().st_size; fh.seek(max(0, sz - 3 * 1024 * 1024)); raw = fh.read().decode('utf-8', 'ignore').splitlines()
+                for ln in raw:
+                    try: x = json.loads(ln)
+                    except Exception: continue
+                    if x.get('to') is None: continue
+                    last[(x.get('sid'), x.get('rid'))] = (str(x.get('g') or ''), float(x['to']), x.get('t') or 0)
+        except Exception: pass
+        med = lambda v: sorted(v)[len(v) // 2] if len(v) % 2 else (sorted(v)[len(v) // 2 - 1] + sorted(v)[len(v) // 2]) / 2
+        byg = {}
+        for g, o, t in sorted(last.values(), key=lambda z: z[2]): byg.setdefault(g, []).append(o)
+        res = {g: [round(med(v[-20:]) * 10) / 10, len(v)] for g, v in byg.items() if len(v) >= 2}
+        allv = [o for v in byg.values() for o in v]
+        if len(allv) >= 5: res['*'] = [round(med(allv[-40:]) * 10) / 10, len(allv)]
+        self.__dict__['_gav_def_c'] = (time.time(), res); return res
+
+    def _gav_out(self, d):
+        S = self._pfx_S()
+        if (S.get('gv') or {}).get('run'): return {'ok': False, 'message': '上一支陣列還在做'}
+        try:
+            sid = int(d.get('sid') or 0); C = max(1, min(20, int(d['C']))); R = max(1, min(40, int(d['R']))); D = max(1.0, min(30.0, float(d.get('D') or 8)))
+            long_ = max(480, min(3840, int(d.get('long') or 1920))); aud = bool(d.get('aud'))
+            cells = [{'f': int(c['f']), 'pos': float(c['pos']), 'o': float(c['o'])} for c in (d.get('cells') or [])][:C * R]
+        except Exception as e: return {'ok': False, 'message': f'參數不對：{e}'}
+        if not cells: return {'ok': False, 'message': '沒有格子'}
+        S['gv'] = {'run': True, 'sid': sid, 'msg': f'準備 {len(cells)} 格', 'done': 0, 'total': len(cells) + 1, 'cells': cells}
+        threading.Thread(target=self._gav_out_run, args=(sid, C, R, D, long_, aud, cells), daemon=True, name='TikLiveGav').start()
+        return {'ok': True, 'message': f'🎬 開始輸出 {C}×{R}、每格 {D:g} 秒（背景一次一件，電腦忙會先等）'}
+
+    def _gav_out_run(self, sid, C, R, D, long_, aud, cells):
+        S = self._pfx_S(); J = S['gv']; tmpd = self._gav_dir('gav_out') / f'{sid}_{int(time.time())}'; fps = 30
+        def wait_idle():
+            for _w in range(240):
+                try: bz = self._busy_guard()[0]
+                except Exception: bz = False
+                if not bz or getattr(self, '_handoff', False): return
+                J['msg'] = '電腦忙，先等'; time.sleep(5)
+        try:
+            tmpd.mkdir(parents=True, exist_ok=True); ff, enc = self._pfx_ffenc()
+            if not ff: raise RuntimeError('找不到 ffmpeg')
+            W, H, cw, ch, gp = self._mos_geom(C, R, 16 / 9, 0, long_)
+            va = lambda e_: self._video_encoder_args(e_) if e_ != 'libx264' else ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-threads', '2']
+            n = len(cells)
+            for i, c in enumerate(cells):
+                if getattr(self, '_handoff', False): raise RuntimeError('程式要關了')
+                wait_idle(); J.update(msg=f'取第 {i + 1}/{n} 格', done=i)
+                p = self._gav_src(c['f']); o = tmpd / f'c{i:03d}.mp4'; ok = False
+                if p is not None:
+                    st = c['pos'] + c['o']; pad = max(0.0, -st)
+                    vf = f"fps={fps},scale={cw}:{ch}:force_original_aspect_ratio=increase,crop={cw}:{ch},setsar=1" + (f",tpad=start_mode=clone:start_duration={pad:.2f}" if pad > 0 else '') + f",tpad=stop_mode=clone:stop_duration={D:.2f}"
+                    for e_ in ([enc, 'libx264'] if enc != 'libx264' else ['libx264']):
+                        cmd = [ff, '-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-ss', f'{max(0.0, st):.3f}', '-i', str(p), '-t', f'{D:.3f}', '-vf', vf, '-t', f'{D:.3f}'] + va(e_)
+                        cmd += (['-af', f'aresample=48000,apad=whole_dur={D:.3f}', '-c:a', 'aac', '-b:a', '128k', '-ac', '2'] if aud else ['-an']) + [str(o)]
+                        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=600, **_no_window_kwargs(idle=True))
+                        if r.returncode == 0 and o.is_file() and o.stat().st_size > 1000: ok = True; break
+                if not ok:                                                      # 這格做不出來：黑畫面（＋靜音）補上
+                    subprocess.run([ff, '-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-f', 'lavfi', '-i', f'color=c=black:s={cw}x{ch}:r={fps}:d={D:.3f}', '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo', '-t', f'{D:.3f}', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p'] + (['-c:a', 'aac'] if aud else ['-an']) + [str(o)],
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, **_no_window_kwargs(idle=True))
+            wait_idle(); J.update(msg=f'拼成 {W}×{H}…', done=n)
+            ins = ['-f', 'lavfi', '-i', f'color=c=black:s={W}x{H}:r={fps}:d={D:.3f}']
+            for i in range(n): ins += ['-i', str(tmpd / f'c{i:03d}.mp4')]
+            fl = []; last = '0:v'
+            for i in range(n):
+                x = (i % C) * cw; y = (i // C) * ch; tag = f'o{i}'
+                fl.append(f'[{last}][{i + 1}:v]overlay={x}:{y}:eof_action=repeat[{tag}]'); last = tag
+            fl.append(f'[{last}]format=yuv420p[vo]'); amap = []
+            if aud:
+                fl.append(''.join(f'[{i + 1}:a]' for i in range(n)) + f'amix=inputs={n}:duration=longest:dropout_transition=0,volume={min(n, 8)},alimiter=limit=0.89[ao]'); amap = ['-map', '[ao]', '-c:a', 'aac', '-b:a', '192k']
+            r_ = self._web_db('SELECT username, started_at FROM sessions WHERE id=?', (sid,)) or [['', '']]
+            u = str(r_[0][0] or ''); nick = self.streamer_names.get(u, u)
+            od = Path(self.video_root()) / 'TikLive_手機特效' / '_禮物陣列'; od.mkdir(parents=True, exist_ok=True)
+            out = od / re.sub(r'[\\/:*?"<>|\s]+', '_', f'{nick}_#{sid}_陣列{C}x{R}_{D:g}秒_{time.strftime("%Y%m%d_%H%M%S")}.mp4'); part = out.with_suffix('.part.mp4'); r = None
+            for e_ in ([enc, 'libx264'] if enc != 'libx264' else ['libx264']):
+                ex_ = va(e_) if e_ == 'libx264' else ['-c:v', e_, '-b:v', '16M', '-pix_fmt', 'yuv420p']
+                r = subprocess.run([ff, '-hide_banner', '-loglevel', 'error', '-nostdin', '-y'] + ins + ['-filter_complex', ';'.join(fl), '-map', '[vo]'] + amap + ['-t', f'{D:.3f}'] + ex_ + ['-movflags', '+faststart', str(part)],
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=3600, **_no_window_kwargs(idle=True))
+                if r.returncode == 0 and part.is_file() and part.stat().st_size > 1000: break
+            if not (part.is_file() and part.stat().st_size > 1000): raise RuntimeError('拼不起來：' + ((r.stderr if r else b'') or b'').decode('utf-8', 'replace')[-200:])
+            os.replace(part, out); J.update(msg=f'✔ 好了：{out.name}（{W}×{H}）', out=out.name, done=J['total'])
+            self._pfx_log(f'🎛 禮物陣列：{out.name}')
+        except Exception as e: J['msg'] = f'✖ {e}'; self._pfx_log(f'禮物陣列失敗：{e}')
+        finally: J['run'] = False; shutil.rmtree(tmpd, ignore_errors=True)
+
+    def _gav_outs(self, sid=0):
+        od = Path(self.video_root()) / 'TikLive_手機特效' / '_禮物陣列'
+        try: L = sorted((p for p in od.glob('*.mp4') if not p.name.endswith('.part.mp4') and (not sid or f'_#{int(sid)}_' in p.name)), key=lambda p: -p.stat().st_mtime)[:30]
+        except Exception: L = []
+        return [{'f': p.name, 'sz': p.stat().st_size, 't': p.stat().st_mtime} for p in L]
+
+    def _gav_file(self, f):
+        if not re.fullmatch(r'[^\\/:*?"<>|]+\.mp4', str(f or '')) or '..' in str(f): return None
+        p = Path(self.video_root()) / 'TikLive_手機特效' / '_禮物陣列' / str(f); return p if p.is_file() else None
+
     def _pfx_learn_path(self): return Path(PACKAGE_ROOT) / '_DB_SSD' / 'pfx_gift_learn.json'
 
     def _pfx_learn(self):
@@ -38170,6 +38408,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
         if op == 'mix': return self._mix_save(int(d.get('sid') or 0), None if d.get('reset') else (d.get('plan') or []))   # V1.1.75
         if op == 'mixout': return self._mix_out(int(d.get('sid') or 0))
         if op == 'mixalign': return self._mix_align(d)                         # V1.1.76
+        if op == 'gav_save': return self._gav_save(d)                           # V1.1.77 禮物陣列影片
+        if op == 'gav_out': return self._gav_out(d)
         if op == 'glearn': return self._pfx_learn_add(d)
         if op == 'reboot':
             T = self._pfx_tools(); dev = S.get('dev') or {}
@@ -46495,7 +46735,7 @@ function drawSetSearch(){const q=(S.setQ||"").trim().toLowerCase(),sb=$("#sbody"
   sb.onclick=e=>{const b=e.target.closest(".sres");if(!b)return;S.scat=b.dataset.cat;S.setQ="";const k=b.dataset.k;drawSetCat();
     setTimeout(()=>{const el=document.querySelector(`#sbody [data-k="${CSS.escape(k)}"]`);const row=el&&(el.closest(".si,.pi,.prow")||el);if(row){row.scrollIntoView({block:"center"});row.classList.add("sflash");setTimeout(()=>row.classList.remove("sflash"),1800);}},350);};}
 /* ---------------- V0.6.95 工具（主頁分頁）：原本放在設定左邊的工作流 ---------------- */
-const TOOLS=[["緊急事件",[["emg","🚨","緊急處理","C／I 槽堆積、轉檔與搬檔進度、速度、模式、顯示卡"]]],["🧪 實驗工作區",[["exp","🧪","實驗工作區","新想法先放這裡：同一件事的幾種做法並排，A／B 對照自動比較"]]],["資料",[["gift","🎁","送禮者","誰送了多少、送禮排行、每位的紀錄"],["hrank","🏆","主播收禮排行","每位主播收了多少鑽石、裡面誰送最多（送禮者反過來看）"]]],["影片工具",[["vg","▦","檔案總管（影片快速瀏覽 v2）","每幾秒一張圖排滿畫面，選起來初剪；上面分頁也可以直接進"],["tkd","📥","TKDownloader","新增主播頁貼影片網址下載的短影片：篩選、播放、存到手機"],["igd","📸","IGDownloader","新增主播頁貼 IG 網址下載的照片／影片：篩選、看、存到手機"],["feat","⏯","精選／審核 開關","暫停省效能（功能保留），之後在這裡再打開"],["sp","✂","批量剪輯","選主播＋禮物，一次剪很多段"],["org","🗂","整理 MP4","依保存等級／已剪輯過的，一次刪 MP4"],["shp","📸","批量截 20 張","歷史場次先截好 20 張圖（不用等刪 MP4）"],["yt","▶","YouTube 上傳","自動上傳（不公開）、拿到網址後移到暫放"],["pfx","📲","手機錄特效","一支安卓手機接電腦：主播開播自動打開直播間、錄下有禮物特效的手機畫面（scrcpy）"],["phr","📱","手機錄屏","從外接硬碟限速匯入手機錄的畫面，用聲音自動對上是哪一場，回放可以切換版本"],["cul","🌐","Chrome 上傳限速","看 K 槽忙不忙自動調 Chrome 的上傳速度"],["stt","🎙","語音轉字幕","下播後自動轉；進度、效能上限"]]],
+const TOOLS=[["緊急事件",[["emg","🚨","緊急處理","C／I 槽堆積、轉檔與搬檔進度、速度、模式、顯示卡"]]],["🧪 實驗工作區",[["exp","🧪","實驗工作區","新想法先放這裡：同一件事的幾種做法並排，A／B 對照自動比較"]]],["資料",[["gift","🎁","送禮者","誰送了多少、送禮排行、每位的紀錄"],["hrank","🏆","主播收禮排行","每位主播收了多少鑽石、裡面誰送最多（送禮者反過來看）"]]],["影片工具",[["vg","▦","檔案總管（影片快速瀏覽 v2）","每幾秒一張圖排滿畫面，選起來初剪；上面分頁也可以直接進"],["tkd","📥","TKDownloader","新增主播頁貼影片網址下載的短影片：篩選、播放、存到手機"],["igd","📸","IGDownloader","新增主播頁貼 IG 網址下載的照片／影片：篩選、看、存到手機"],["feat","⏯","精選／審核 開關","暫停省效能（功能保留），之後在這裡再打開"],["sp","✂","批量剪輯","選主播＋禮物，一次剪很多段"],["org","🗂","整理 MP4","依保存等級／已剪輯過的，一次刪 MP4"],["shp","📸","批量截 20 張","歷史場次先截好 20 張圖（不用等刪 MP4）"],["yt","▶","YouTube 上傳","自動上傳（不公開）、拿到網址後移到暫放"],["pfx","📲","手機錄特效","一支安卓手機接電腦：主播開播自動打開直播間、錄下有禮物特效的手機畫面（scrcpy）"],["gav","🎛","禮物陣列影片","手機特效的禮物排成陣列：5 張預覽挑、一起循環播、每格 ±0.1 秒對齊、選排法輸出 MP4"],["phr","📱","手機錄屏","從外接硬碟限速匯入手機錄的畫面，用聲音自動對上是哪一場，回放可以切換版本"],["cul","🌐","Chrome 上傳限速","看 K 槽忙不忙自動調 Chrome 的上傳速度"],["stt","🎙","語音轉字幕","下播後自動轉；進度、效能上限"]]],
   ["電腦與連線",[["bg","🖥","後台狀態","現在在跑什麼、排隊什麼，可以取消"],["stat","📈","開播統計","主播什麼時候開播、播多久"],["prof","🧭","主播特性","習慣、PK 比例、你標的等級、錄到幾成 → 建議"],["csv","📤","匯出場次表（Excel）","最近 7／30／90 天或一年的場次，或只匯出某位主播，CSV 直接用 Excel 開"],["dtl","📅","一天的時間軸","今天（或任一天）每位主播幾點播到幾點、錄到哪裡、漏了開頭沒有"],["ythold","🗑","YouTube 已上傳-刪除隔離區","傳好 YouTube 的原檔都在這：逐項抽查 YouTube／原檔，沒問題就一次全部刪"],["mig","💽","E → R 搬硬碟","把 E 槽整顆慢慢複製到 R 槽（斷電安全），最後一次切換"],["merge","⧉","合併重複場次","程式重開、斷電切成好幾段的同一場直播，合成一場（影片照時間接著播）"],["gsd","🎛","顯示卡供需","顯示卡每天閒多久、忙多久；字幕每天錄到的量轉不轉得完（要不要換顯示卡看這裡）"],["hp","🩺","一頁健檢","所有要處理／要留意的事一次看，加上記憶體、熱更新、備份、字幕搜尋庫等數字"],["host","👤","主播總覽","選一位主播：開播時段、下次可能開播、等級、禮物、筆記、最近場次"],["dhh","🩺","硬碟健康紀錄","每顆硬碟 30 天的溫度、讀寫錯誤趨勢；錯誤一直變多就該換了"],["hevc","🧪","HEVC 壓縮試算","拿一分鐘影片用顯示卡壓成 H.265，看能省多少空間、畫質比較（只試，不動原檔）"],["act","🕘","自動處理紀錄","程式自己做了什麼：刪除、YouTube、手機錄屏、自動分級、備份、重開"],["sbk","🗂","小檔備份","每天自動備份設定／分級／YouTube 排隊／手機錄屏紀錄，可以下載"],["chv","🆕","版本與更新","這次更新了什麼：可以搜尋、依版本收合，新的標 🆕"],["wkr","📰","每週報告","上週錄了多少、錄到幾成、最精彩的 5 段"],["cg","🚦","連線管控","排隊、被限制時自動放慢"],["conn","🩺","連線狀況","每位主播的連線情形"],["logx","📋","LOG 與問題","錯誤紀錄、異常、自動處理結果"],["rules","📖","規則說明","程式實際怎麼做：等級、刪除、YouTube、回放延遲、控溫…"]]],
   ["主播與畫面",[["cats","🗂","主播分類","分類顏色、資料夾"],["gfx","🎁","送禮動畫","直播畫面上的送禮動畫"]]]];
 function toolName(k){if(k==="host")return "👤 主播總覽";if(k==="gifs")return "🎞 GIF 製作";for(const [,L] of TOOLS)for(const x of L)if(x[0]===k)return x[1]+" "+x[2];return "工具";}
@@ -46630,7 +46870,7 @@ const RULES=[
   {t:"空間不夠時",d:"<ul><li>SSD 剩不到 <b>"+RU_V('rec.ssd_min_free','GB',60)+"</b>：新的錄影改成直接錄在影片庫硬碟。</li><li>影片硬碟剩不到 <b>"+RU_V('rec.video_min_free','GB',30)+"</b>：不開始新的錄影（<b>聲音照錄</b>）。</li><li>🛡 C 槽守門員每分鐘看 C 剩多少、減少多快：第 1 級先停不急的背景工作；第 2 級全速把東西搬走；第 3 級（剩不到 15 GB 或 20 分鐘內會滿）才會一位一位停掉正在錄到 C 的影片（F → E → 未分級先停）。</li></ul>"},
   {t:"同一場直播的判定（斷線、重開）",d:"<ul><li>主播斷線後 <b>"+RU_V('conn.grace_minutes','分鐘',10)+"內</b>連回同一個直播間＝<b>續寫同一場</b>（錄影會分成第 2 段、第 3 段…）。</li><li>直播中卻 <b>"+RU_V('monitor.silent_min','分鐘',30)+"</b>沒有任何留言、禮物、進場、人數也沒變（而且沒在錄影）→ 重新連一次確認：還在播就續寫，結束了就把結束時間改回最後有資料的時間。</li><li>程式重開、斷電、超過 10 分鐘才連回來 → 會變成<b>另一場</b>。這種被切開的，用「⧉ 合併重複場次」合回一場（見「場次合併」）。</li></ul>"},
   {t:"開程式、熱更新時的監控",d:"<ul><li>開程式 3 秒後自動開始監控（設定可以關）。正在錄的場次在熱更新、重開時會<b>接著錄同一場</b>。</li><li>搬硬碟切換後，如果找不到影片硬碟（例如 R 槽代號跑掉），程式<b>先不開始監控</b>，不會錄到別的地方，會提示你去磁碟管理改代號。</li></ul>"},
-  {t:"📲 手機錄特效",d:"<ul><li>一支安卓手機（紅米 10）用 USB 接電腦，裝好 scrcpy（工具頁可自動從官方 GitHub 下載）。</li><li>主播開播 → 手機自己亮起來、打開那個直播間 → 錄下手機畫面＋聲音（有禮物特效）。一支手機一次錄一場。</li><li>錄誰：<b>S 級</b>的主播，照「工具 → 📲 手機錄特效」裡拖好的順序；按「▶ 開始」後，排最前面、正在直播的那位先錄，他下播換下一位還在播的。要加人＝在審核改成 S。</li><li>改順序要按右下角「✔ 套用」才生效；套用後（或排更前面的開播了）正在錄的不是第一順位 → 倒數 10 秒停掉、換錄新的那位。</li><li>主播斷線／下播超過 90 秒才停；TikTok 被關掉或跳走會自己重新打開直播間；拔線再插回、scrcpy 中斷 → 接著錄下一段（_p2、_p3…）。</li><li>手機超過 46°C 先停錄，降到 41°C 再繼續。</li><li>先錄在 SSD（MKV，斷電也播得了），結束後不重新壓縮換成 MP4（idle），搬到影片資料夾 <b>TikLive_手機特效\\帳號\\</b>；不到 15 秒的段丟掉。</li><li>回放：同一場可以切換「原本／手機」版本（用聲音對齊；對不上用錄影時間，可能差幾秒）。剪輯器那場的來源最後多一個手機特效檔。</li><li>S 級：手機特效版也排進 YouTube（標題加「手機特效版」，跟原本的是不同一部）。容量預測也算進去。</li><li>🎁 禮物剪輯：「錄好的」那場按「禮物剪輯」→ 選一位大哥（不算 10 鑽以下），或不分是誰、單次 ≥ 2000 鑽的全部 → 每個禮物一格（一次顯示 10 格，往右滑再載入）；點一格只載那一小段，用 ±1／±5 調送禮前、送禮後幾秒，按 OK 換下一格；沒調的用預設 → 全部接成一支 MP4（連在一起的併成一段，用顯示卡壓縮）。</li><li>學習時間差：每次按 OK 都記下來（禮物、你調的秒數、當時幾個人在播…）。同一種禮物有 2 筆以上就用它們當預設：取中位數、差太多的先不算、其他平均；之後資料夠了可以分析延遲原因。</li><li>回放切到「手機」版本時，程式自己畫的送禮動畫不顯示（手機畫面本來就有真的特效）。</li><li>🧩 手機版合併：同一場有手機特效（自動錄）和上傳的手機／平板錄屏（用「手機錄屏」上傳，聲音自動對上這場）→ 回放的「📱 手機」預設用上傳的把重疊時間蓋掉；「錄好的」按「🧩 合併」可以改成只蓋幾分到幾分，也可以照結果輸出一支 MP4（不同尺寸補黑邊，用顯示卡壓縮）。</li><li>🎯 手動對齊：上傳的位置不對（聲音對不上、被放錯時間）→ 合併畫面每支上傳的按「🎯 手動對齊位置」：上面播上傳的、下面播這場（原本錄的或手機特效，可以點禮物清單跳過去），兩邊停在同一瞬間按「🎯 這兩個是同一刻」→ 程式再用聲音在前後 2 秒內找最準的一點（找不到就照你對的）；之後可以 ±0.1／±0.5 秒微調、「▶ 兩個一起播」檢查；存過的「蓋幾分到幾分」會跟著一起挪。</li><li>✂ 剪輯：那場有手機特效版會先問要剪「原本錄的」還是「手機特效版」；沒有就直接開。</li><li>看畫面：錄影中每 30 秒截一張手機畫面（頁面看得到），也讀畫面上的字、看現在是不是直播間。黑畫面（螢幕關了、直播間沒畫面）、TikTok 顯示「發生錯誤／請稍後再試」、跑到首頁不在直播間、一模一樣 2 分鐘（卡住）、錄影檔沒在長 → 看到就馬上動手，30 秒後還不對換下一招：①完全關掉 TikTok 重開直播間（每次開直播間都先這樣，避免叫回上一場已結束的）②先進另一位正在播的直播間 6 秒再回來 ③再關掉 TikTok 重開 ④檢查手機網路，不通就關掉 Wi-Fi 再打開 ⑤重開錄影 ⑥重開手機（6 小時最多一次）。小米「充電速度慢」這類跳出來的視窗按返回關掉。只是畫面沒動（主播可能停在同一畫面）救 3 招後改 3 分鐘再看。螢幕設成永遠不自己關。</li><li>自己處理：通知欄被拉下來、USB 用途選單、系統對話框 → 20 秒內自己收掉；離開 TikTok 會重新打開直播間；連不上 3 分鐘重新啟動 adb；處理不了的（找不到手機、電量低沒充電、在播卻沒在錄）會出現在狀態卡和這頁最上面。</li><li>聲音：開直播間前先把手機媒體音量調到 0（錄影還沒開始那幾秒不出聲），錄影接手聲音後（手機本來就不出聲）調回原本的音量，確保錄得到聲音。</li><li>螢幕：下播停錄 → 回桌面、把 TikTok 完全關掉（主帳號＋小米分身，不在背景一直播、耗電、出聲）；沒在錄、1 分鐘沒人操作 → 回桌面、亮度最低、關螢幕待機；開播時亮起來（亮度照設定，預設 50%）→ 回桌面 → 進直播間，開錄前先看一眼畫面，黑的就回桌面再開一次。頁面有手動按鈕：亮屏、熄屏、回桌面、開 TikTok、截一張、亮度拉桿（任何裝置都能按）。</li><li>SIM 卡：錄影手機不要插中國的 SIM 卡（TikTok 會把手機當成在中國，整頁「發生錯誤」、不能登入）；偵測到會在頁面最上面提醒。只用 Wi-Fi 就好。</li><li>帳號：有小米分身（雙開，系統使用者 999）登入另一個 TikTok 帳號時，每一場輪流用；一個帳號一直「發生錯誤」（可能被 TikTok 擋）就換另一個，被擋的休息 30 分鐘。兩個都不行就不再一直重開，改成等 5、10、20 分鐘再試，並提醒你（重開手機對這種沒用，只用在黑畫面）。</li><li>手機畫面每 30 秒截一張顯示在頁面（螢幕關著不截）；錄影中的截圖另外存成那支影片的「預覽」（檔名＝影片第幾秒），在「錄好的」按 🖼 預覽看，點一張從那裡播。要先開小米「USB 偵錯（安全設定）」程式才能按電源鍵。</li><li>每週二、週五凌晨 3～7 點（沒在錄、S 級都沒在播時）自動重開手機一次；</li><li>全部在背景執行緒：手機只把壓好的畫面傳過來，電腦不解碼、不開視窗。</li></ul>"},
+  {t:"📲 手機錄特效",d:"<ul><li>一支安卓手機（紅米 10）用 USB 接電腦，裝好 scrcpy（工具頁可自動從官方 GitHub 下載）。</li><li>主播開播 → 手機自己亮起來、打開那個直播間 → 錄下手機畫面＋聲音（有禮物特效）。一支手機一次錄一場。</li><li>錄誰：<b>S 級</b>的主播，照「工具 → 📲 手機錄特效」裡拖好的順序；按「▶ 開始」後，排最前面、正在直播的那位先錄，他下播換下一位還在播的。要加人＝在審核改成 S。</li><li>改順序要按右下角「✔ 套用」才生效；套用後（或排更前面的開播了）正在錄的不是第一順位 → 倒數 10 秒停掉、換錄新的那位。</li><li>主播斷線／下播超過 90 秒才停；TikTok 被關掉或跳走會自己重新打開直播間；拔線再插回、scrcpy 中斷 → 接著錄下一段（_p2、_p3…）。</li><li>手機超過 46°C 先停錄，降到 41°C 再繼續。</li><li>先錄在 SSD（MKV，斷電也播得了），結束後不重新壓縮換成 MP4（idle），搬到影片資料夾 <b>TikLive_手機特效\\帳號\\</b>；不到 15 秒的段丟掉。</li><li>回放：同一場可以切換「原本／手機」版本（用聲音對齊；對不上用錄影時間，可能差幾秒）。剪輯器那場的來源最後多一個手機特效檔。</li><li>S 級：手機特效版也排進 YouTube（標題加「手機特效版」，跟原本的是不同一部）。容量預測也算進去。</li><li>🎁 禮物剪輯：「錄好的」那場按「禮物剪輯」→ 選一位大哥（不算 10 鑽以下），或不分是誰、單次 ≥ 2000 鑽的全部 → 每個禮物一格（一次顯示 10 格，往右滑再載入）；點一格只載那一小段，用 ±1／±5 調送禮前、送禮後幾秒，按 OK 換下一格；沒調的用預設 → 全部接成一支 MP4（連在一起的併成一段，用顯示卡壓縮）。</li><li>學習時間差：每次按 OK 都記下來（禮物、你調的秒數、當時幾個人在播…）。同一種禮物有 2 筆以上就用它們當預設：取中位數、差太多的先不算、其他平均；之後資料夠了可以分析延遲原因。</li><li>回放切到「手機」版本時，程式自己畫的送禮動畫不顯示（手機畫面本來就有真的特效）。</li><li>🧩 手機版合併：同一場有手機特效（自動錄）和上傳的手機／平板錄屏（用「手機錄屏」上傳，聲音自動對上這場）→ 回放的「📱 手機」預設用上傳的把重疊時間蓋掉；「錄好的」按「🧩 合併」可以改成只蓋幾分到幾分，也可以照結果輸出一支 MP4（不同尺寸補黑邊，用顯示卡壓縮）。</li><li>🎯 手動對齊：上傳的位置不對（聲音對不上、被放錯時間）→ 合併畫面每支上傳的按「🎯 手動對齊位置」：上面播上傳的、下面播這場（原本錄的或手機特效，可以點禮物清單跳過去），兩邊停在同一瞬間按「🎯 這兩個是同一刻」→ 程式再用聲音在前後 2 秒內找最準的一點（找不到就照你對的）；之後可以 ±0.1／±0.5 秒微調、「▶ 兩個一起播」檢查；存過的「蓋幾分到幾分」會跟著一起挪。</li><li>🎛 禮物陣列影片（工具／網頁版第 61 頁，或「錄好的」那場按「🎛 禮物陣列」，跟批量剪輯、GIF 陣列分開）：選一場 → 用「送禮的人／禮物／單次 ≥ 幾鑽」篩，每個禮物 5 張預覽圖（從開始秒數起每格長度內平均 5 張）看表情挑 → 排成陣列，全部格子一起從頭循環播（每格是送禮前 10 秒～後 20 秒的小預覽影片，顯示卡壓縮、存 SSD）→ 點一格用 −0.1／+0.1（按住一直調）、−1／+1 調它從哪裡開始，其他格照播；「☑ 多選」「同一種禮物」可以一起調；◀ ▶ 換位置、✕ 拿掉 → 選每格秒數、排法（幾欄×幾列）、長邊、要不要聲音 → 輸出一支 MP4（存在 TikLive_手機特效\_禮物陣列\，背景一次一件、電腦忙先等）。每次調整都記下來（_DB_SSD\pfx_gav_log.jsonl：哪種禮物、誰送、調前調後、當時幾個人在播），同一種禮物 2 格以上就自動當下次的預設開始秒數；工作區自動存，下次打開同一場接著做。</li><li>✂ 剪輯：那場有手機特效版會先問要剪「原本錄的」還是「手機特效版」；沒有就直接開。</li><li>看畫面：錄影中每 30 秒截一張手機畫面（頁面看得到），也讀畫面上的字、看現在是不是直播間。黑畫面（螢幕關了、直播間沒畫面）、TikTok 顯示「發生錯誤／請稍後再試」、跑到首頁不在直播間、一模一樣 2 分鐘（卡住）、錄影檔沒在長 → 看到就馬上動手，30 秒後還不對換下一招：①完全關掉 TikTok 重開直播間（每次開直播間都先這樣，避免叫回上一場已結束的）②先進另一位正在播的直播間 6 秒再回來 ③再關掉 TikTok 重開 ④檢查手機網路，不通就關掉 Wi-Fi 再打開 ⑤重開錄影 ⑥重開手機（6 小時最多一次）。小米「充電速度慢」這類跳出來的視窗按返回關掉。只是畫面沒動（主播可能停在同一畫面）救 3 招後改 3 分鐘再看。螢幕設成永遠不自己關。</li><li>自己處理：通知欄被拉下來、USB 用途選單、系統對話框 → 20 秒內自己收掉；離開 TikTok 會重新打開直播間；連不上 3 分鐘重新啟動 adb；處理不了的（找不到手機、電量低沒充電、在播卻沒在錄）會出現在狀態卡和這頁最上面。</li><li>聲音：開直播間前先把手機媒體音量調到 0（錄影還沒開始那幾秒不出聲），錄影接手聲音後（手機本來就不出聲）調回原本的音量，確保錄得到聲音。</li><li>螢幕：下播停錄 → 回桌面、把 TikTok 完全關掉（主帳號＋小米分身，不在背景一直播、耗電、出聲）；沒在錄、1 分鐘沒人操作 → 回桌面、亮度最低、關螢幕待機；開播時亮起來（亮度照設定，預設 50%）→ 回桌面 → 進直播間，開錄前先看一眼畫面，黑的就回桌面再開一次。頁面有手動按鈕：亮屏、熄屏、回桌面、開 TikTok、截一張、亮度拉桿（任何裝置都能按）。</li><li>SIM 卡：錄影手機不要插中國的 SIM 卡（TikTok 會把手機當成在中國，整頁「發生錯誤」、不能登入）；偵測到會在頁面最上面提醒。只用 Wi-Fi 就好。</li><li>帳號：有小米分身（雙開，系統使用者 999）登入另一個 TikTok 帳號時，每一場輪流用；一個帳號一直「發生錯誤」（可能被 TikTok 擋）就換另一個，被擋的休息 30 分鐘。兩個都不行就不再一直重開，改成等 5、10、20 分鐘再試，並提醒你（重開手機對這種沒用，只用在黑畫面）。</li><li>手機畫面每 30 秒截一張顯示在頁面（螢幕關著不截）；錄影中的截圖另外存成那支影片的「預覽」（檔名＝影片第幾秒），在「錄好的」按 🖼 預覽看，點一張從那裡播。要先開小米「USB 偵錯（安全設定）」程式才能按電源鍵。</li><li>每週二、週五凌晨 3～7 點（沒在錄、S 級都沒在播時）自動重開手機一次；</li><li>全部在背景執行緒：手機只把壓好的畫面傳過來，電腦不解碼、不開視窗。</li></ul>"},
   {t:"⏸ 暫停監控並封存",d:"<ul><li>主播分類（或審核、檔案總管）<b>長按主播</b> → 主播選單 →「⏸ 暫停監控並封存」。</li><li>從那一刻起<b>不再連線、不錄新的</b>（直播中的話那一場停在那裡、照常收尾）；主播清單、等級、分類、<b>以前的場次全部留著</b>，照常轉檔、整理、照等級排隊上傳 YouTube、照保留天數刪原檔。</li><li>在主播分類移到最下面「⏸ 暫停監控（封存）」那區；<b>審核頁</b>也收到最下面同一欄「⏸ 封存」（保留原本的等級、照等級排、灰階，點進去一樣看以前的紀錄）。同一個選單按「▶ 恢復監控」就接回來。</li><li>封存中的主播又被<b>新增</b>（貼 TikTok 連結、@帳號、匯入）：會先問「目前封存中，要解封嗎？」— 解封＝移回來繼續監控；取消＝取消新增、維持封存。</li><li>每一次封存／解封都會記下來（時間、從哪裡按的），長按主播的小視窗最上面「🗄 封存紀錄」看得到。</li><li>跟「🗑 刪除主播」不一樣：刪除＝整位全部刪掉（等於標 F 再處置）。</li></ul>"},
   {t:"只錄聲音的主播（照審核等級 G）",d:"<ul><li><b>在「主播審核」標 G＝只錄聲音</b>；改成別的等級就恢復錄影片。以前另外的「只錄聲音的主播」清單已經拿掉，程式每分鐘照等級對一次，以審核等級為準。</li><li>G 的主播直播中照樣錄畫面（FLV 先放 C 槽），下播後截 60 張圖＋字幕，自動傳 YouTube，傳好才移走原檔。</li><li>直播中每 <b>"+RU_V('rec.snap_min','分鐘',2)+"</b>另外拍一張快照，回放時在影片的位置左右翻看。</li></ul>"}]},
  {k:"play",i:"📺",c:"#4dc9ff",t:"回放與直播中觀看：延遲、預載入",s:[
@@ -46900,6 +47140,7 @@ function viewTool(k){$("#clk").textContent="";V().onclick=null;
   if(k==="mig"){migMount($("#sbody"));return;}   /* V1.1.07 */
   if(k==="merge"){mrgMount($("#sbody"));return;}   /* V1.1.25 */
   if(k==="rules"){rulesMount($("#sbody"));return;}
+  if(k==="gav"){gavMount($("#sbody"));return;}   /* V1.1.77 */
   if(k==="pfx"){pfxMount($("#sbody"));return;}   /* V1.1.63 */   /* V1.1.32 */
   if(k==="ythold"){yhcMount($("#sbody"));return;}   /* TK_V1.0.97 */
   if(k==="gifs"){gfsMount($("#sbody"));return;}   /* TK_V1.0.75 */
@@ -51323,6 +51564,113 @@ async function mxClick(e){const b=e.target.closest("[data-m]");if(!b)return;cons
     const r=await rvPost("/api/pc/pfx/set",{op:"mix",sid:MX.sid,plan});if(r&&r.message&&typeof toast==="function")toast(r.message);await mxLoad();return;}
   if(m==="reset"){if(!confirm("回到預設（每個上傳的整段蓋上去）？"))return;const r=await rvPost("/api/pc/pfx/set",{op:"mix",sid:MX.sid,reset:1});if(r&&r.message&&typeof toast==="function")toast(r.message);await mxLoad();return;}
   if(m==="out"){if(!confirm("照「結果」那條接成一支 MP4？（不同尺寸的會補黑邊、不變形；用顯示卡壓縮）"))return;const r=await rvPost("/api/pc/pfx/set",{op:"mixout",sid:MX.sid});if(r&&r.message&&typeof toast==="function")toast(r.message);await mxLoad();return;}}
+/* V1.1.77 🎛 禮物陣列影片（新工作區）：手機特效的禮物排成陣列，一起循環播，每格 ±0.1 秒對齊，選排法輸出一支 MP4 */
+const GAV={st:"ses",D:8,cells:[],sel:new Set(),multi:false,pick:new Set(),fu:"",fg:"",mn:1,C:0,long:1920,aud:false,pxc:{},pxq:[],pxn:0,log:{},paused:false,c:0,t0:0,lc:0,lt:0};
+function gavCss(){if(document.getElementById("gavCss"))return;const s=document.createElement("style");s.id="gavCss";s.textContent=`.gvW{display:flex;flex-direction:column;gap:10px;padding-bottom:120px}.gvW .gvC{border:1px solid rgba(140,150,165,.3);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.gvW .gvR{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.gvW .gvS{font-size:12px;opacity:.75}.gvW h3{margin:0;font-size:17px}
+.gvW button.gb,.gavBar button{border:1px solid rgba(140,150,165,.5);background:rgba(120,140,170,.12);color:inherit;border-radius:9px;padding:8px 12px;font-size:14px;white-space:nowrap;cursor:pointer;touch-action:manipulation}
+.gvW button.go,.gavBar button.go{background:#2e7df6;border-color:#2e7df6;color:#fff}.gvW button.on{background:#f0ad4e;border-color:#f0ad4e;color:#111}.gvW select{font-size:14px;padding:6px;border-radius:8px}
+.gvW .gvSes{display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;background:rgba(120,140,170,.1);cursor:pointer}.gvW .gvSes:hover{background:rgba(46,125,246,.18)}
+.gvW .gvL{display:flex;flex-direction:column;gap:6px}.gvW .gvI{display:flex;gap:10px;align-items:center;padding:6px;border-radius:10px;background:rgba(120,140,170,.08);cursor:pointer;border:2px solid transparent}
+.gvW .gvI.on{border-color:#2e7df6;background:rgba(46,125,246,.16)}.gvW .gvI img{width:min(62vw,560px);aspect-ratio:720/256;object-fit:cover;border-radius:6px;background:#000;flex:0 0 auto}
+.gvW .gvI .tx{display:flex;flex-direction:column;gap:2px;font-size:13px;min-width:0}.gvW .gvI .ck{font-size:22px;flex:0 0 auto}
+.gvW .gvG{display:grid;gap:3px;background:#000;padding:3px;border-radius:8px}.gvW .gvCell{position:relative;padding-top:177.78%;background:#111;border-radius:4px;overflow:hidden;cursor:pointer;outline:3px solid transparent;outline-offset:-3px}
+.gvW .gvCell video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.gvW .gvCell.sel::after{content:"";position:absolute;inset:0;border:3px solid #f0ad4e;border-radius:4px;pointer-events:none;z-index:2}.gvW .gvCell .lb{position:absolute;left:0;right:0;bottom:0;font-size:10px;line-height:1.25;padding:2px 3px;background:rgba(0,0,0,.55);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gvW .gvCell .ld{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;color:#aaa}.gvW .gvCell.empty{background:#000;cursor:default}
+.gavBar{position:fixed;left:0;right:0;bottom:0;z-index:9000;display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:center;padding:8px 96px 10px 10px;background:rgba(18,24,34,.96);color:#e8edf5;border-top:1px solid rgba(140,150,165,.35)}
+.gavBar .n{font-size:13px;opacity:.85}.gavBar button.gvBig{font-size:18px;padding:10px 18px;min-width:76px}`;document.head.appendChild(s);}
+function gavPhone(){return typeof rvPhone==="function"?rvPhone():!!document.getElementById("sbody");}
+function gavOpen(sid){GAV.next=+sid||0;if(gavPhone()){if(location.hash==="#tool/gav"&&GAV.root)gavMount(GAV.root);else location.hash="#tool/gav";}else if(typeof go==="function")go(61);}
+function gavMount(root){gavCss();if(typeof pfxCss==="function")pfxCss();GAV.root=root;root.innerHTML='<div class="gvW"><div class="gvC">讀取中…</div></div>';if(!root._gv){root._gv=1;root.addEventListener("click",gavClick);root.addEventListener("change",gavChange);}
+  if(GAV.next){const s=GAV.next;GAV.next=0;gavLoad(s);}else if(GAV.sid&&GAV.d)gavDraw();else gavSes();}
+function gavBox(){return GAV.root&&GAV.root.querySelector(".gvW");}
+function gavBar(h){let b=document.getElementById("gavBar");if(!h){if(b)b.remove();return;}if(!b){b=document.createElement("div");b.id="gavBar";b.className="gavBar";document.body.appendChild(b);b.addEventListener("click",gavClick);gavHoldWire(b);
+  clearInterval(GAV.bw);GAV.bw=setInterval(()=>{const B=gavBox();if(!B||!B.isConnected||B.offsetParent===null){const x=document.getElementById("gavBar");if(x)x.remove();clearInterval(GAV.bw);}},800);}b.innerHTML=h;}
+function gavLeft(){return !GAV.root||!GAV.root.isConnected||!gavBox();}
+async function gavSes(){GAV.st="ses";gavBar("");let j=null;try{j=await rvGet("/api/pc/pfx/gav/ses");}catch(e){}const B=gavBox();if(!B)return;const L=(j&&j.L)||[];
+  B.innerHTML=`<div class="gvC"><h3>🎛 禮物陣列影片</h3><div class="gvS">用手機錄到的特效（每一種禮物都有）：選一場 → 挑送禮（看 5 張預覽圖挑表情好看的）→ 排成陣列一起循環播、每格 ±0.1 秒對齊 → 選排法輸出一支 MP4。跟批量剪輯、GIF 陣列是分開的。</div></div>
+<div class="gvC"><b>選一場（有手機特效的）</b><div class="gvL">${L.map(x=>`<div class="gvSes" data-g="ses" data-sid="${x.sid}">${x.g?`<b style="color:${x.g==="S"?"#ff5a7a":"#8a93a3"}">${rvE(x.g)}</b>`:""}<b>${rvE(x.name||x.u)}</b><span class="gvS">#${String(x.sid).padStart(5,"0")} · ${x.t?new Date(x.t*1000).toLocaleString("zh-TW",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}):""} · ${x.n} 段手機特效</span></div>`).join("")||'<div class="gvS">還沒有手機特效錄影</div>'}</div></div>`;}
+async function gavLoad(sid){GAV.sid=+sid;GAV.st="pick";const B=gavBox();if(B)B.innerHTML='<div class="gvC">讀取這場的禮物…</div>';let d=null;try{d=await rvGet("/api/pc/pfx/gav?sid="+sid);}catch(e){}if(gavLeft())return;
+  GAV.d=d||{rows:[]};GAV.rows=GAV.d.rows||[];GAV.R={};GAV.rows.forEach(r=>GAV.R[r.rid]=r);GAV.fu="";GAV.fg="";GAV.sel=new Set();GAV.log={};
+  const sv=GAV.d.saved;GAV.cells=[];GAV.pick=new Set();if(sv&&sv.cells){GAV.D=+sv.D||8;GAV.C=+sv.C||0;sv.cells.forEach(c=>{if(GAV.R[c.rid]){GAV.cells.push({rid:c.rid,o:+c.o});GAV.pick.add(c.rid);}});}
+  GAV.st=GAV.cells.length?"grid":"pick";gavDraw();}
+function gavO0(g){const D=(GAV.d&&GAV.d.def)||{};return D[g]?D[g][0]:(D["*"]?D["*"][0]:-1);}
+function gavDraw(){if(GAV.st==="grid")return gavGrid();if(GAV.st==="ses")return gavSes();gavPick();}
+function gavFilt(){return GAV.rows.filter(r=>(!GAV.fu||r.u===GAV.fu)&&(!GAV.fg||r.g===GAV.fg)&&r.dia>=GAV.mn);}
+function gavPick(){GAV.st="pick";const B=gavBox();if(!B)return;const d=GAV.d||{},R=GAV.rows;
+  const us={},gs={};R.forEach(r=>{if(r.dia<GAV.mn)return;const u=us[r.u]||(us[r.u]={n:0,dia:0,nick:r.nick});u.n++;u.dia+=r.dia;if(!GAV.fu||r.u===GAV.fu){const g=gs[r.g]||(gs[r.g]={n:0,dia:r.dia});g.n++;}});
+  const F=gavFilt(),D=GAV.D;
+  B.innerHTML=`<div class="gvC"><div class="gvR"><button class="gb" data-g="back">‹ 換場次</button><h3>🎛 #${String(GAV.sid).padStart(5,"0")} 挑禮物</h3></div>
+<div class="gvS">手機特效裡看得到的禮物 ${R.length} 個（${d.segs||0} 段手機特效）。每個禮物 5 張圖＝從送禮${gavSg(-1)}開始 ${D} 秒平均取 5 張，看主播表情好不好看，點一下選／不選。</div>
+<div class="gvR"><span class="gvS">送禮的人</span><select data-g="fu"><option value="">全部（${Object.keys(us).length} 位）</option>${Object.entries(us).sort((a,b)=>b[1].dia-a[1].dia).map(([u,x])=>`<option value="${rvE(u)}" ${u===GAV.fu?"selected":""}>${rvE(x.nick)}（${x.n} 個・${x.dia}💎）</option>`).join("")}</select>
+<span class="gvS">禮物</span><select data-g="fg"><option value="">全部</option>${Object.entries(gs).sort((a,b)=>b[1].dia-a[1].dia).map(([g,x])=>`<option value="${rvE(g)}" ${g===GAV.fg?"selected":""}>${rvE(g)}（${x.n} 個・${x.dia}💎）</option>`).join("")}</select>
+<span class="gvS">單次 ≥</span><select data-g="mn">${[1,10,100,500,1000,2000,5000].map(v=>`<option ${v===GAV.mn?"selected":""}>${v}</option>`).join("")}</select><span class="gvS">鑽</span></div>
+<div class="gvR"><span class="gvS">符合 ${F.length} 個</span><button class="gb" data-g="all">✔ 全選這些</button><button class="gb" data-g="none">✕ 這些全不選</button><span class="gvS">已選 ${GAV.pick.size} 個</span></div></div>
+<div class="gvL">${F.slice(0,400).map(r=>{const o=gavO0(r.g),on=GAV.pick.has(r.rid);return `<div class="gvI${on?" on":""}" data-g="pk" data-rid="${r.rid}"><span class="ck">${on?"☑":"☐"}</span><img loading="lazy" src="${rvB()}/api/pc/pfx/gav/th?f=${r.f}&t=${Math.max(0,r.pos+o).toFixed(1)}&d=${D}" alt=""><div class="tx"><b>${rvE(r.g)}${r.cnt>1?" ×"+r.cnt:""} <span class="gvS">${r.dia}💎</span></b><span>${rvE(r.nick)}</span><span class="gvS">${mxT(r.ts-(d.live||r.ts))}${r.al?"":" ・時間未對齊"}</span></div></div>`;}).join("")||'<div class="gvS">沒有符合的禮物</div>'}${F.length>400?`<div class="gvS">只列前 400 個，請用上面篩選</div>`:""}</div>`;
+  gavBar(`<span class="n">已選 ${GAV.pick.size} 個</span>${GAV.cells.length?`<button data-g="togrid">回陣列（${GAV.cells.length} 格）</button>`:""}<button class="go" data-g="next" ${GAV.pick.size?"":"disabled"}>下一步：排成陣列 ▶</button>`);}
+function gavSg(o){return o<0?"前 "+(-o)+" 秒":o>0?"後 "+o+" 秒":"當下";}
+function gavToGrid(){const old={};GAV.cells.forEach(c=>old[c.rid]=c);GAV.cells=[...GAV.pick].map(rid=>GAV.R[rid]).filter(Boolean).sort((a,b)=>a.ts-b.ts).map(r=>old[r.rid]||{rid:r.rid,o:gavO0(r.g)});
+  GAV.cells.forEach(gavClampC);GAV.sel=new Set();GAV.st="grid";gavGrid();gavSave();}
+function gavLays(n){const L=[];for(let c=1;c<=Math.min(20,n);c++){const r=Math.ceil(n/c);if(r>40)continue;if(c>1&&Math.ceil(n/(c-1))===r)continue;L.push([c,r]);}return L;}
+function gavClampC(c){const r=GAV.R[c.rid];if(!r)return;const px0=Math.max(0,r.pos-10),lo=px0-r.pos,hi=px0+30-GAV.D-r.pos;c.o=Math.round(Math.max(lo,Math.min(hi,c.o))*10)/10;}
+function gavGrid(){GAV.st="grid";const B=gavBox();if(!B)return;const n=GAV.cells.length,L=gavLays(n);if(!GAV.C||!L.some(x=>x[0]===GAV.C)){GAV.C=Math.ceil(Math.sqrt(n))||1;if(!L.some(x=>x[0]===GAV.C)&&L.length)GAV.C=L.reduce((a,x)=>Math.abs(x[0]-Math.sqrt(n))<Math.abs(a[0]-Math.sqrt(n))?x:a,L[0])[0];}
+  const C=GAV.C,R=Math.ceil(n/C);
+  B.innerHTML=`<div class="gvC"><div class="gvR"><button class="gb" data-g="topick">‹ 挑禮物</button><h3>🎛 #${String(GAV.sid).padStart(5,"0")} 陣列 ${n} 格</h3><span class="gvS" id="gavClk"></span></div>
+<div class="gvR"><button class="gb" data-g="play">${GAV.paused?"▶ 播放":"⏸ 暫停"}</button><span class="gvS">每格</span><select data-g="D">${[3,4,5,6,7,8,10,12,15,20].map(v=>`<option value="${v}" ${v===GAV.D?"selected":""}>${v} 秒</option>`).join("")}</select>
+<span class="gvS">排法</span><select data-g="C">${L.map(([c,r])=>`<option value="${c}" ${c===C?"selected":""}>${c} 欄 × ${r} 列${c*r>n?`（空 ${c*r-n} 格）`:""}</option>`).join("")}</select>
+<button class="gb ${GAV.multi?"on":""}" data-g="multi">☑ 多選${GAV.multi?"中":""}</button><button class="gb" data-g="selall">全選</button><button class="gb ${GAV.big?"on":""}" data-g="zoom">${GAV.big?"🔍 縮回一頁":"🔍 放大格子"}</button></div>
+<div class="gvS">全部格子一起從頭循環播。點一格＝選它，下面用 −0.1／+0.1 調它從哪裡開始（按住會一直調），其他格繼續播；先把第 1 格定好，再拿第 2 格去對第 1 格…。開「多選」可以一次調好幾格；「同一種禮物」一鍵選好同種的。每次調整都會記下來（之後當預設、做分析）。</div></div>
+<div class="gvG" id="gavG" style="grid-template-columns:repeat(${C},minmax(0,1fr));${GAV.big?"":`max-width:${Math.max(260,Math.floor((innerHeight-260)/(R*16/9)*C))}px;`}margin:0 auto;width:100%">${GAV.cells.map((c,i)=>{const r=GAV.R[c.rid]||{};return `<div class="gvCell${GAV.sel.has(c.rid)?" sel":""}" data-g="cell" data-rid="${c.rid}"><video muted playsinline preload="auto" data-rid="${c.rid}"></video><div class="ld">⏳</div><div class="lb">${i+1}・${rvE(r.g||"")}・<span data-o="${c.rid}">${gavOs(c.o)}</span></div></div>`;}).join("")}${Array(C*R-n).fill('<div class="gvCell empty"></div>').join("")}</div>
+<div class="gvC"><b>🎬 輸出</b><div class="gvR"><span class="gvS">長邊</span><select data-g="long">${[1080,1920,2560,3840].map(v=>`<option ${v===GAV.long?"selected":""}>${v}</option>`).join("")}</select><label class="gvS"><input type="checkbox" data-g="aud" ${GAV.aud?"checked":""}> 聲音（全部格子疊在一起）</label><button class="gb go" data-g="out">🎬 輸出 MP4（${C}×${R}、每格 ${GAV.D} 秒）</button></div><div id="gavJob" class="gvS"></div></div>`;
+  gavSelBar();GAV.t0=performance.now()-GAV.c*1000;GAV.lc=GAV.c;GAV.cells.forEach(c=>{const k=gavPxKey(c);if(GAV.pxc[k])gavPxSet(c);else if(!GAV.pxq.includes(c.rid))GAV.pxq.push(c.rid);});gavPxRun();
+  if(!GAV.raf)GAV.raf=requestAnimationFrame(gavTick);gavJob();}
+function gavOs(o){return (o>=0?"+":"")+o.toFixed(1)+"s";}
+function gavPxKey(c){const r=GAV.R[c.rid];return r?r.f+"|"+r.pos:"";}
+async function gavPxRun(){while(GAV.pxn<3&&GAV.pxq.length){const rid=GAV.pxq.shift(),c=GAV.cells.find(x=>x.rid===rid),r=GAV.R[rid];if(!c||!r)continue;const k=gavPxKey(c);if(GAV.pxc[k]){gavPxSet(c);continue;}
+  GAV.pxn++;(async()=>{let j=null;try{j=await rvGet(`/api/pc/pfx/gav/px?f=${r.f}&pos=${r.pos}`);}catch(e){}GAV.pxn--;if(j&&j.ok){GAV.pxc[k]=j;gavPxSet(c);}else{const el=gavCellEl(rid);if(el){const ld=el.querySelector(".ld");if(ld)ld.textContent="✖ "+((j&&j.message)||"讀不到");}}gavPxRun();})();}}
+function gavCellEl(rid){return document.querySelector(`#gavG .gvCell[data-rid="${rid}"]`);}
+function gavPxSet(c){const j=GAV.pxc[gavPxKey(c)],el=gavCellEl(c.rid);if(!j||!el)return;c.px0=j.t0;const v=el.querySelector("video");if(v.dataset.n===j.n)return;v.dataset.n=j.n;v.src=`${rvB()}/api/pc/pfx/gav/pf?n=${j.n}`;
+  v.addEventListener("loadeddata",()=>{v.dataset.ok="1";const ld=el.querySelector(".ld");if(ld)ld.remove();c.force=1;},{once:true});}
+function gavTick(now){if(GAV.st!=="grid"||!document.getElementById("gavG")){GAV.raf=0;return;}
+  if(!GAV.paused)GAV.c=((now-GAV.t0)/1000)%GAV.D;
+  if(now-GAV.lt>120){GAV.lt=now;const wrap=GAV.c<GAV.lc-0.05;GAV.lc=GAV.c;const k=document.getElementById("gavClk");if(k)k.textContent=`${GAV.c.toFixed(1)} / ${GAV.D} 秒`;
+    for(const c of GAV.cells){const el=gavCellEl(c.rid);if(!el)continue;const v=el.querySelector("video");if(!v||v.dataset.ok!=="1"||c.px0==null)continue;const r=GAV.R[c.rid];const want=Math.max(0,r.pos+c.o-c.px0+GAV.c);
+      if(GAV.paused){if(!v.paused)v.pause();if(Math.abs(v.currentTime-want)>0.04||c.force){v.currentTime=want;c.force=0;}continue;}
+      const dd=want-v.currentTime;if(wrap||c.force||Math.abs(dd)>0.5){v.currentTime=want;v.playbackRate=1;c.force=0;}else{const pr=Math.abs(dd)<0.03?1:Math.max(0.75,Math.min(1.25,1+dd*2));if(Math.abs(v.playbackRate-pr)>0.02)v.playbackRate=pr;}if(v.paused)v.play().catch(()=>{});}}
+  GAV.raf=requestAnimationFrame(gavTick);}
+function gavSelBar(){const n=GAV.sel.size;if(GAV.st!=="grid"){return;}if(!n){gavBar(`<span class="n">點一格選它來調；${GAV.multi?"多選中：點幾格一起選":"開「☑ 多選」可以一次選好幾格"}</span>`);return;}
+  const one=n===1?GAV.cells.find(c=>GAV.sel.has(c.rid)):null,r=one?GAV.R[one.rid]:null;
+  gavBar(`<span class="n">${n===1?`第 ${GAV.cells.indexOf(one)+1} 格 ${rvE(r.g)} ${rvE(r.nick)}・從送禮${gavSg(one.o)}`:`已選 ${n} 格`}</span><button class="gvBig" data-g="nd" data-v="-1">−1</button><button class="gvBig" data-g="nd" data-v="-0.1">−0.1</button><button class="gvBig" data-g="nd" data-v="0.1">+0.1</button><button class="gvBig" data-g="nd" data-v="1">+1</button>
+<button data-g="same">同一種禮物</button>${one?`<button data-g="mv" data-v="-1">◀</button><button data-g="mv" data-v="1">▶</button>`:""}<button data-g="rm">✕ 拿掉</button><button data-g="clr">取消選取</button>`);}
+function gavHoldWire(b){let tm=0,iv=0;const stop=()=>{clearTimeout(tm);clearInterval(iv);tm=iv=0;};b.addEventListener("pointerdown",e=>{const x=e.target.closest('[data-g="nd"]');if(!x)return;const v=+x.dataset.v;tm=setTimeout(()=>{iv=setInterval(()=>gavNudge(v),110);},420);});["pointerup","pointercancel","pointerleave"].forEach(t=>b.addEventListener(t,stop));}
+function gavNudge(dv){for(const c of GAV.cells){if(!GAV.sel.has(c.rid))continue;const r=GAV.R[c.rid];const L=GAV.log[c.rid]||(GAV.log[c.rid]={rid:c.rid,g:r.g,dia:r.dia,u:r.u,al:r.al,from:c.o});c.o=Math.round((c.o+dv)*10)/10;gavClampC(c);L.to=c.o;c.force=1;
+  const s=document.querySelector(`#gavG [data-o="${c.rid}"]`);if(s)s.textContent=gavOs(c.o);}gavSelBar();gavSave();}
+function gavSave(){clearTimeout(GAV.svt);GAV.svt=setTimeout(async()=>{const log=Object.values(GAV.log);GAV.log={};
+  const r=await rvPost("/api/pc/pfx/set",{op:"gav_save",sid:GAV.sid,D:GAV.D,C:GAV.C,R:Math.ceil(GAV.cells.length/(GAV.C||1)),cells:GAV.cells.map(c=>({rid:c.rid,o:c.o})),log});if(!r||!r.ok)log.forEach(x=>{if(!GAV.log[x.rid])GAV.log[x.rid]=x;});},1500);}
+async function gavJob(){clearTimeout(GAV.jt);const el=document.getElementById("gavJob");if(!el)return;let j=null;try{j=await rvGet("/api/pc/pfx/gav/job?sid="+GAV.sid);}catch(e){}const el2=document.getElementById("gavJob");if(!el2)return;const jb=(j&&j.job)||{};
+  const mine=jb.sid===GAV.sid&&jb.msg;el2.innerHTML=(mine?`<div class="${jb.run?"":String(jb.msg).startsWith("✖")?"pfBad":"pfOk"}">${jb.run?"⏳ ":""}${rvE(jb.msg)}${jb.run?`（${jb.done||0}/${jb.total||0}）`:""}</div>`:"")+((j&&j.outs)||[]).map(o=>`<div>🎞 <a href="${rvB()}/api/pc/pfx/gav/file?f=${encodeURIComponent(o.f)}" target="_blank" rel="noopener">${rvE(o.f)}</a> ${(o.sz/1e6).toFixed(1)} MB</div>`).join("");
+  if(jb.run)GAV.jt=setTimeout(gavJob,2000);}
+async function gavClick(e){const b=e.target.closest("[data-g]");if(!b)return;const g=b.dataset.g;
+  if(g==="ses"){gavLoad(+b.dataset.sid);return;}if(g==="back"){GAV.sid=0;GAV.d=null;gavSes();return;}
+  if(g==="pk"){const rid=+b.dataset.rid;if(GAV.pick.has(rid))GAV.pick.delete(rid);else GAV.pick.add(rid);b.classList.toggle("on",GAV.pick.has(rid));const ck=b.querySelector(".ck");if(ck)ck.textContent=GAV.pick.has(rid)?"☑":"☐";gavBar(`<span class="n">已選 ${GAV.pick.size} 個</span>${GAV.cells.length?`<button data-g="togrid">回陣列（${GAV.cells.length} 格）</button>`:""}<button class="go" data-g="next" ${GAV.pick.size?"":"disabled"}>下一步：排成陣列 ▶</button>`);return;}
+  if(g==="all"){gavFilt().slice(0,400).forEach(r=>GAV.pick.add(r.rid));gavPick();return;}if(g==="none"){gavFilt().forEach(r=>GAV.pick.delete(r.rid));gavPick();return;}
+  if(g==="next"){gavToGrid();return;}if(g==="togrid"){GAV.st="grid";gavGrid();return;}if(g==="topick"){gavPick();return;}
+  if(g==="cell"){const rid=+b.dataset.rid;if(GAV.multi){if(GAV.sel.has(rid))GAV.sel.delete(rid);else GAV.sel.add(rid);}else{if(GAV.sel.size===1&&GAV.sel.has(rid))GAV.sel.clear();else GAV.sel=new Set([rid]);}
+    document.querySelectorAll("#gavG .gvCell[data-rid]").forEach(x=>x.classList.toggle("sel",GAV.sel.has(+x.dataset.rid)));gavSelBar();return;}
+  if(g==="multi"){GAV.multi=!GAV.multi;b.classList.toggle("on",GAV.multi);b.textContent="☑ 多選"+(GAV.multi?"中":"");gavSelBar();return;}
+  if(g==="zoom"){GAV.big=!GAV.big;gavGrid();return;}if(g==="selall"){GAV.multi=true;GAV.sel=new Set(GAV.cells.map(c=>c.rid));gavGrid();return;}
+  if(g==="clr"){GAV.sel.clear();document.querySelectorAll("#gavG .gvCell.sel").forEach(x=>x.classList.remove("sel"));gavSelBar();return;}
+  if(g==="same"){const gs=new Set([...GAV.sel].map(rid=>(GAV.R[rid]||{}).g));GAV.multi=true;GAV.cells.forEach(c=>{if(gs.has((GAV.R[c.rid]||{}).g))GAV.sel.add(c.rid);});gavGrid();return;}
+  if(g==="nd"){gavNudge(+b.dataset.v);return;}
+  if(g==="mv"){const i=GAV.cells.findIndex(c=>GAV.sel.has(c.rid)),j=i+(+b.dataset.v);if(i<0||j<0||j>=GAV.cells.length)return;[GAV.cells[i],GAV.cells[j]]=[GAV.cells[j],GAV.cells[i]];gavGrid();gavSave();return;}
+  if(g==="rm"){if(!confirm(`拿掉 ${GAV.sel.size} 格？`))return;GAV.cells=GAV.cells.filter(c=>!GAV.sel.has(c.rid));GAV.sel.forEach(rid=>GAV.pick.delete(rid));GAV.sel.clear();GAV.C=0;gavGrid();gavSave();return;}
+  if(g==="play"){GAV.paused=!GAV.paused;if(!GAV.paused)GAV.t0=performance.now()-GAV.c*1000;b.textContent=GAV.paused?"▶ 播放":"⏸ 暫停";return;}
+  if(g==="out"){const n=GAV.cells.length,C=GAV.C,R=Math.ceil(n/C);if(!confirm(`輸出 ${C} 欄 × ${R} 列、每格 ${GAV.D} 秒、長邊 ${GAV.long}${GAV.aud?"、有聲音":""}？`))return;
+    const r=await rvPost("/api/pc/pfx/set",{op:"gav_out",sid:GAV.sid,C,R,D:GAV.D,long:GAV.long,aud:GAV.aud,cells:GAV.cells.map(c=>{const x=GAV.R[c.rid];return {f:x.f,pos:x.pos,o:c.o};})});
+    if(r&&r.message&&typeof toast==="function")toast(r.message);else if(r&&!r.ok)alert(r.message);gavSave();gavJob();return;}}
+function gavChange(e){const b=e.target.closest("[data-g]");if(!b)return;const g=b.dataset.g,v=b.type==="checkbox"?b.checked:b.value;
+  if(g==="fu"){GAV.fu=v;GAV.fg="";gavPick();}else if(g==="fg"){GAV.fg=v;gavPick();}else if(g==="mn"){GAV.mn=+v;gavPick();}
+  else if(g==="D"){GAV.D=+v;GAV.cells.forEach(gavClampC);GAV.c=0;gavGrid();gavSave();}else if(g==="C"){GAV.C=+v;gavGrid();gavSave();}else if(g==="long")GAV.long=+v;else if(g==="aud")GAV.aud=!!v;}
 /* V1.1.76 🎯 手動對齊：上下兩個播放器對同一瞬間，再用聲音前後 2 秒自動微調 */
 function mxT1(t){const g=t<0?"-":"";t=Math.abs(t||0);const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=t%60;return g+(h?h+":"+String(m).padStart(2,"0"):m)+":"+s.toFixed(1).padStart(4,"0");}
 async function mxAlOpen(id){const d=MX.d||{},x=(d.items||[]).find(y=>y.id===id);if(!x)return;MX.al={id,x,mode:"rec",gm:100,link:false};
@@ -51422,7 +51770,7 @@ function pfxHtml(j){const D=j.dev||{},c=j.cur,cf=j.cfg||{},gr=j.gr||{};const gC=
   h+=`<details class="pfC"><summary>⚙ 錄影設定</summary><div class="pfR" style="margin-top:8px"><label>畫質 <input class="pfN" type="number" min="2" max="20" data-o="mbps" value="${cf.mbps}"> Mbps</label><label>長邊 <input class="pfN" type="number" min="720" max="2400" step="10" data-o="max_size" value="${cf.max_size}"></label><label>手機超過 <input class="pfN" type="number" min="38" max="60" data-o="temp_stop" value="${cf.temp_stop}"> °C 停錄</label><label>降到 <input class="pfN" type="number" min="30" max="55" data-o="temp_ok" value="${cf.temp_ok}"> °C 繼續</label><label>下播等 <input class="pfN" type="number" min="30" max="900" data-o="off_grace" value="${cf.off_grace}"> 秒才停</label><label>開錄時亮度 <input class="pfN" type="number" min="1" max="100" data-o="bright" value="${cf.bright??50}"> %</label><button class="pfB" data-pa="opt">存</button></div><div class="pfSub" style="margin-top:6px">8 Mbps 一小時約 3.6 GB。先錄在 SSD（MKV，斷電也播得了），下播後不重新壓縮換成 MP4，再搬到影片資料夾的 TikLive_手機特效\\帳號\\。</div></details>`;
   h+=pfxGuide();
   const AL={ok:'<span class="pfOk" title="用聲音對齊了，回放切換同一秒">🔊 已對齊</span>',time:'<span class="pfW" title="聲音沒對上，用錄影時間對齊，可能差幾秒">⏱ 時間對齊</span>',wait:'<span class="pfSub">⏳ 對齊中</span>'};const seen=new Set();
-  h+=`<div class="pfC"><h4>🎬 錄好的</h4><div class="pfSub" style="margin-bottom:6px">回放那場可以切換「原本／手機」版本；剪輯器那場的來源最後面多一個「手機特效」檔；S 級會排進 YouTube（標題加「手機特效版」）。</div>${(j.rec||[]).length?`<div class="pfL">`+j.rec.map(x=>{const g=x.sid&&!seen.has(x.sid);if(x.sid)seen.add(x.sid);return `<div class="pfI"><b>${rvE(x.name||x.u)} <span class="pfSub">${rvE(x.f)}</span></b><span class="pfSub">${pfxDur((x.t1||0)-(x.t0||0))} · ${((x.sz||0)/1e9).toFixed(2)} GB · ${pfxT(x.t1||0)}</span>${AL[x.al]||""}${x.shots?`<button class="pfB" data-pa="thumbs" data-i="${x.i}">🖼 預覽</button>`:""}${g?`<button class="pfB" data-pa="gift" data-sid="${x.sid}">🎁 禮物剪輯</button>`:""}${g&&(j.up_sids||[]).includes(+x.sid)?`<button class="pfB" data-pa="mix" data-sid="${x.sid}">🧩 合併</button>`:""}<a class="pfB" style="text-decoration:none;border:1px solid rgba(140,150,165,.5);border-radius:9px;padding:6px 10px" href="${rvB()}/api/pc/pfx/file?i=${x.i}" target="_blank" rel="noopener">▶</a></div>${PFX.th&&PFX.th.i===x.i?`<div style="display:flex;gap:6px;overflow-x:auto;padding:4px 0 8px">${(PFX.th.L||[]).map(s=>`<a href="${rvB()}/api/pc/pfx/file?i=${x.i}#t=${s}" target="_blank" rel="noopener" style="flex:0 0 auto;text-align:center;font-size:11px;color:inherit;text-decoration:none"><img loading="lazy" src="${rvB()}/api/pc/pfx/thumb?i=${x.i}&t=${s}" style="height:150px;border-radius:6px;display:block;background:#000"><span>${pfxDur(s)}</span></a>`).join("")||'<span class="pfSub">沒有預覽圖</span>'}</div>`:""}`;}).join("")+`</div>`:'<div class="pfSub">還沒有</div>'}</div>`;
+  h+=`<div class="pfC"><h4>🎬 錄好的</h4><div class="pfSub" style="margin-bottom:6px">回放那場可以切換「原本／手機」版本；剪輯器那場的來源最後面多一個「手機特效」檔；S 級會排進 YouTube（標題加「手機特效版」）。</div>${(j.rec||[]).length?`<div class="pfL">`+j.rec.map(x=>{const g=x.sid&&!seen.has(x.sid);if(x.sid)seen.add(x.sid);return `<div class="pfI"><b>${rvE(x.name||x.u)} <span class="pfSub">${rvE(x.f)}</span></b><span class="pfSub">${pfxDur((x.t1||0)-(x.t0||0))} · ${((x.sz||0)/1e9).toFixed(2)} GB · ${pfxT(x.t1||0)}</span>${AL[x.al]||""}${x.shots?`<button class="pfB" data-pa="thumbs" data-i="${x.i}">🖼 預覽</button>`:""}${g?`<button class="pfB" data-pa="gift" data-sid="${x.sid}">🎁 禮物剪輯</button>`:""}${g&&(j.up_sids||[]).includes(+x.sid)?`<button class="pfB" data-pa="mix" data-sid="${x.sid}">🧩 合併</button>`:""}${g?`<button class="pfB" data-pa="gav" data-sid="${x.sid}">🎛 禮物陣列</button>`:""}<a class="pfB" style="text-decoration:none;border:1px solid rgba(140,150,165,.5);border-radius:9px;padding:6px 10px" href="${rvB()}/api/pc/pfx/file?i=${x.i}" target="_blank" rel="noopener">▶</a></div>${PFX.th&&PFX.th.i===x.i?`<div style="display:flex;gap:6px;overflow-x:auto;padding:4px 0 8px">${(PFX.th.L||[]).map(s=>`<a href="${rvB()}/api/pc/pfx/file?i=${x.i}#t=${s}" target="_blank" rel="noopener" style="flex:0 0 auto;text-align:center;font-size:11px;color:inherit;text-decoration:none"><img loading="lazy" src="${rvB()}/api/pc/pfx/thumb?i=${x.i}&t=${s}" style="height:150px;border-radius:6px;display:block;background:#000"><span>${pfxDur(s)}</span></a>`).join("")||'<span class="pfSub">沒有預覽圖</span>'}</div>`:""}`;}).join("")+`</div>`:'<div class="pfSub">還沒有</div>'}</div>`;
   {const rs=new Set((j.rec||[]).map(x=>+x.sid));const extra=(j.up_sids||[]).filter(s=>!rs.has(s)).slice(-10).reverse();if(extra.length)h+=`<div class="pfC"><h4>🧩 有上傳手機／平板錄屏的場次</h4><div class="pfL">${extra.map(s=>`<div class="pfI"><b>#${String(s).padStart(5,"0")}</b><button class="pfB" data-pa="mix" data-sid="${s}">🧩 合併設定</button></div>`).join("")}</div></div>`;}
   h+=pfxGiftHtml(j);
   h+=`<details class="pfC" open><summary>📝 紀錄</summary><div class="pfLog">${(j.log||[]).map(e=>`<div>${pfxT(e[0])} ${rvE(e[1])}</div>`).join("")||"—"}</div></details>`;
@@ -51444,7 +51792,7 @@ async function pfxAct(root,el){const a=el.dataset.pa,j=PFX.j||{},cf=j.cfg||{};le
   else if(a==="thumbs"){const i=+el.dataset.i;if(PFX.th&&PFX.th.i===i){PFX.th=null;pfxLoad(root);return;}let L=[];try{L=(await rvGet("/api/pc/pfx/thumbs?i="+i)).L||[];}catch(e){}PFX.th={i,L};pfxLoad(root);return;}
   else if(a==="idle_off"){r=await rvPost("/api/pc/pfx/set",{op:"idle_off",on:el.checked?1:0});}
   else if(a==="gift"){pfxGEOpen(el.dataset.sid);return;}
-  else if(a==="mix"){mxOpen(el.dataset.sid);return;}
+  else if(a==="gav"){gavOpen(el.dataset.sid);return;}if(a==="mix"){mxOpen(el.dataset.sid);return;}
   else if(a==="gx"){PFX.gsid=null;PFX.gd=null;pfxLoad(root);return;}
   else if(a==="gref"){PFX.gmin=+(root.querySelector("#pgMin").value||0);await pfxGiftLoad(root);return;}
   else if(a==="guser"||a==="gbig"){const v=id=>+(root.querySelector(id)||{}).value;const o={op:"gclip",sid:PFX.gsid,mode:a==="gbig"?"big":"user",u:el.dataset.u||"",pre:v("#pgPre"),post:v("#pgPost")};o.min=a==="gbig"?v("#pgBig"):v("#pgMin");r=await rvPost("/api/pc/pfx/set",o);}

@@ -935,6 +935,24 @@ def route(win, sock, method, rest, q, body):
         p_ = win._pfx_thumb(q.get('i', '-1'), q.get('t', '0'))
         if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True
         win._web_send_file(sock, p_, 'image/jpeg'); return True
+    if name == 'pfx/gav/ses' and method == 'GET': _bg(win, sock, win._gav_sessions); return True   # V1.1.77 禮物陣列影片（只讀）
+    if name == 'pfx/gav' and method == 'GET':
+        s_ = int(q.get('sid', '0') or 0); _bg(win, sock, lambda: win._gav_rows(s_)); return True
+    if name == 'pfx/gav/job' and method == 'GET':
+        s_ = int(q.get('sid', '0') or 0); _bg(win, sock, lambda: {'ok': True, 'job': {k: v for k, v in (win._pfx_S().get('gv') or {}).items() if k != 'cells'}, 'outs': win._gav_outs(s_)}); return True
+    if name == 'pfx/gav/px' and method == 'GET':
+        f_, p_ = q.get('f', '-1'), q.get('pos', '0'); _bg(win, sock, lambda: win._gav_px(f_, p_)); return True
+    if name == 'pfx/gav/pf' and method == 'GET':
+        p_ = win._gav_pxfile(q.get('n', ''))
+        if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True
+        win._web_send_file(sock, p_, 'video/mp4'); return True
+    if name == 'pfx/gav/th' and method == 'GET':
+        f_, t_, d_ = q.get('f', '-1'), q.get('t', '0'), q.get('d', '8')
+        win._img_bg_send(sock, lambda: win._gav_sheet(f_, t_, d_)); return True
+    if name == 'pfx/gav/file' and method == 'GET':
+        p_ = win._gav_file(q.get('f', ''))
+        if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True
+        win._web_send_file(sock, p_, 'video/mp4'); return True
     if name == 'pfx/mix' and method == 'GET': J(win._mix_info(int(q.get('sid', '0') or 0))); return True   # V1.1.75 手機版合併（只讀）
     if name == 'pfx/gfile' and method == 'GET':
         p_ = win._pfx_gfile(q.get('f', ''))
