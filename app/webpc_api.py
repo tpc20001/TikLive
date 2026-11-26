@@ -952,7 +952,7 @@ def route(win, sock, method, rest, q, body):
     if name == 'pfx/gav/file' and method == 'GET':
         p_ = win._gav_file(q.get('f', ''))
         if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True
-        win._web_send_file(sock, p_, 'video/mp4'); return True
+        win._web_send_file(sock, p_, 'video/mp4', dlname=p_.name if q.get('dl') == '1' else ''); return True   # V1.1.81 dl=1＝存到手機
     if name == 'pfx/mix' and method == 'GET': J(win._mix_info(int(q.get('sid', '0') or 0))); return True   # V1.1.75 手機版合併（只讀）
     if name == 'pfx/gfile' and method == 'GET':
         p_ = win._pfx_gfile(q.get('f', ''))
