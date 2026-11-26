@@ -941,7 +941,7 @@ def route(win, sock, method, rest, q, body):
     if name == 'pfx/gav/job' and method == 'GET':
         s_ = int(q.get('sid', '0') or 0); _bg(win, sock, lambda: {'ok': True, 'job': {k: v for k, v in (win._pfx_S().get('gv') or {}).items() if k != 'cells'}, 'outs': win._gav_outs(s_)}); return True
     if name == 'pfx/gav/px' and method == 'GET':
-        f_, p_ = q.get('f', '-1'), q.get('pos', '0'); _bg(win, sock, lambda: win._gav_px(f_, p_)); return True
+        f_, p_, t_, l_, r_, a_, b_ = q.get('f', '-1'), q.get('pos', '0'), q.get('t0'), q.get('L'), q.get('retry') == '1', q.get('a'), q.get('b'); _bg(win, sock, lambda: win._gav_px(f_, p_, t_, l_, r_, a_, b_)); return True
     if name == 'pfx/gav/pf' and method == 'GET':
         p_ = win._gav_pxfile(q.get('n', ''))
         if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True
