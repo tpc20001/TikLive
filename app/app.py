@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.74"
+APP_VERSION = "1.1.75"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -20581,6 +20581,120 @@ try { NLConnect | Out-Null; Unset
     def _phr_for_sid(self, sid):
         return [x for x in self._phr_db()['items'].values() if x.get('st') == 'ok' and not x.get('psid') and int(x.get('sid') or 0) == int(sid) and x.get('e0') is not None]
 
+    # ---------- V1.1.75 手機版合併：手機特效（自動錄）＋上傳的手機／平板錄屏，選幾分到幾分用上傳的蓋上去
+    def _mix_path(self): return Path(PACKAGE_ROOT) / '_DB_SSD' / 'phone_mix.json'
+
+    def _mix_all(self):
+        try: return dict(json.loads(self._mix_path().read_text(encoding='utf-8')) or {})
+        except Exception: return {}
+
+    def _mix_items(self, sid, live=None):
+        """這場所有手機版：[{id, up(上傳的), s, e（開播後第幾秒）, dur, name, path}]."""
+        if live is None:
+            try: live = float(self._history_live_epoch(int(sid)))               # 跟回放用同一個開播時間
+            except Exception: live = 0.0
+        out = []
+        for x in self._phr_for_sid(sid):
+            st_ = float(x['e0']) - float(live); d_ = float(x.get('dur') or 0)
+            out.append({'id': str(x['id']), 'up': not x.get('pfx'), 's': round(st_, 2), 'e': round(st_ + d_, 2) if d_ else None, 'dur': d_, 'name': Path(str(x.get('path') or '')).name, 'path': str(x.get('path') or '')})
+        return out, float(live or 0)
+
+    def _mix_plan(self, sid, items=None):
+        """[[開始秒, 結束秒, 上傳的 id], ...]：有存過用存的，沒有＝每個上傳的整段都蓋上去."""
+        p = self._mix_all().get(str(int(sid)))
+        if isinstance(p, list): return [[float(a), float(b), str(i)] for a, b, i in p]
+        items = items if items is not None else self._mix_items(sid)[0]
+        return [[x['s'], x['e'], x['id']] for x in items if x['up'] and x['e'] is not None]
+
+    def _mix_segs(self, sid, live=None):
+        """算出要接的段：[(id, 開始秒, 結束秒, 檔案內第幾秒)]；上傳的照設定蓋上去，其他時間用手機特效（同時有好幾段時後開始的優先）."""
+        items, live = self._mix_items(sid, live)
+        if not items: return []
+        M = {x['id']: x for x in items}; plan = self._mix_plan(sid, items)
+        top = []
+        for a, b, i in plan:
+            x = M.get(str(i))
+            if not x or x['e'] is None: continue
+            a, b = max(a, x['s']), min(b, x['e'])
+            if b - a > 0.5: top.append((a, b, x['id']))
+        base = [(x['s'], x['e'] if x['e'] is not None else x['s'] + 1e7, x['id']) for x in items if not x['up']]
+        cuts = sorted({v for a, b, _ in top + base for v in (a, b)})
+        res = []
+        for k in range(len(cuts) - 1):
+            a, b = cuts[k], cuts[k + 1]; m = (a + b) / 2; pick = None
+            for ta, tb, i in top:
+                if ta <= m < tb: pick = i                                       # 後面設定的優先
+            if pick is None:
+                c = [(ba, i) for ba, bb, i in base if ba <= m < bb]
+                if c: pick = max(c)[1]
+            if pick is None: continue
+            if res and res[-1][0] == pick and abs(res[-1][2] - a) < 0.01: res[-1][2] = b
+            else: res.append([pick, a, b])
+        return [(i, a, b, a - M[i]['s']) for i, a, b in res]
+
+    def _mix_info(self, sid):
+        items, live = self._mix_items(sid)
+        return {'ok': True, 'sid': int(sid), 'live': live, 'items': [{k: v for k, v in x.items() if k != 'path'} for x in items], 'plan': self._mix_plan(sid, items),
+                'saved': str(int(sid)) in self._mix_all(), 'segs': [[i, round(a, 1), round(b, 1)] for i, a, b, _o in self._mix_segs(sid, live)], 'mj': dict(self._pfx_S().get('mj') or {})}
+
+    def _mix_save(self, sid, plan):
+        d = self._mix_all()
+        if plan is None: d.pop(str(int(sid)), None)
+        else: d[str(int(sid))] = [[round(float(a), 2), round(float(b), 2), str(i)] for a, b, i in plan if float(b) > float(a)]
+        p = self._mix_path(); tp = p.with_suffix('.tmp'); tp.write_text(json.dumps(d, ensure_ascii=False), encoding='utf-8'); os.replace(tp, p)
+        return {'ok': True, 'message': '✔ 已套用（回放的「手機」版本照這個接）' if plan is not None else '✔ 回到預設（上傳的整段蓋上去）'}
+
+    def _mix_out(self, sid):
+        S = self._pfx_S()
+        if (S.get('mj') or {}).get('run'): return {'ok': False, 'message': '上一支合併還在做'}
+        items, live = self._mix_items(sid); segs = self._mix_segs(sid, live); M = {x['id']: x for x in items}
+        segs = [z for z in segs if Path(M[z[0]]['path']).is_file() and z[2] - z[1] >= 0.5]
+        if not segs: return {'ok': False, 'message': '這場沒有可以接的手機版'}
+        S['mj'] = {'run': True, 'sid': int(sid), 'msg': f'準備接 {len(segs)} 段', 'done': 0, 'total': len(segs)}
+        threading.Thread(target=self._mix_out_run, args=(int(sid), segs, M), daemon=True, name='TikLiveMix').start()
+        return {'ok': True, 'message': f'🎬 開始輸出：{len(segs)} 段接成一支 MP4（好了會出現在下面）'}
+
+    def _mix_out_run(self, sid, segs, M):
+        S = self._pfx_S(); J = S['mj']; tmpd = self._pfx_tmp() / f'mix_{sid}_{int(time.time())}'
+        try:
+            tmpd.mkdir(parents=True, exist_ok=True); ff, enc = self._pfx_ffenc(); va = self._video_encoder_args(enc)
+            if not ff: raise RuntimeError('找不到 ffmpeg')
+            W_, H_ = 1080, 1920                                                 # 尺寸：用手機特效那段的（不同尺寸的補黑邊、不變形）
+            try:
+                p0 = next((M[i]['path'] for i, *_ in segs if not M[i]['up']), M[segs[0][0]]['path'])
+                inf = ffmpeg_info(ff, Path(p0)); W_, H_ = int(inf[0] or 1080) // 2 * 2, int(inf[1] or 1920) // 2 * 2
+            except Exception: pass
+            parts = []
+            for k, (i, a, b, off) in enumerate(segs):
+                for _w in range(120):
+                    try: bz = self._busy_guard()[0]
+                    except Exception: bz = False
+                    if not bz: break
+                    J['msg'] = '電腦忙，先等'; time.sleep(5)
+                o = tmpd / f'{k:04d}.mp4'
+                r = subprocess.run([ff, '-y', '-v', 'error', '-ss', f'{max(0.0, off):.3f}', '-i', M[i]['path'], '-t', f'{b - a:.3f}', '-map', '0:v:0', '-map', '0:a:0?',
+                                    '-vf', f'scale={W_}:{H_}:force_original_aspect_ratio=decrease,pad={W_}:{H_}:(ow-iw)/2:(oh-ih)/2,setsar=1', '-r', '30'] + va +
+                                   ['-af', 'aresample=async=1:first_pts=0,apad', '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart', str(o)],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=7200, **_no_window_kwargs(idle=True))
+                if r.returncode == 0 and o.is_file(): parts.append(o)
+                J.update(done=k + 1, msg=f'接第 {k + 1}/{len(segs)} 段（{"上傳的" if M[i]["up"] else "手機特效"}，{fmt_elapsed(b - a)}）')
+            if not parts: raise RuntimeError('一段都沒做成')
+            lst = tmpd / 'list.txt'; lst.write_text(''.join(f"file '{p.as_posix()}'\n" for p in parts), encoding='utf-8')
+            r_ = self._web_db('SELECT username, started_at FROM sessions WHERE id=?', (sid,)) or [['', '']]
+            u = str(r_[0][0] or ''); nick = self.streamer_names.get(u, u)
+            try: ts = datetime.fromisoformat(str(r_[0][1])).strftime('%Y%m%d_%H%M%S')
+            except Exception: ts = time.strftime('%Y%m%d_%H%M%S')
+            out = self._pfx_vdir(u or 'x') / re.sub(r'[\\/:*?"<>|\s]+', '_', f'{nick}_{ts}_#{sid}_手機合併.mp4'); k_ = 2
+            while out.exists(): out = out.with_name(out.stem.rsplit('_手機合併', 1)[0] + f'_手機合併{k_}.mp4'); k_ += 1
+            tmp = out.with_suffix('.part.mp4')
+            r = subprocess.run([ff, '-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', str(lst), '-c', 'copy', '-movflags', '+faststart', str(tmp)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=7200, **_no_window_kwargs(idle=True))
+            if r.returncode != 0 or not tmp.is_file(): raise RuntimeError('接起來失敗：' + (r.stderr or b'').decode('utf-8', 'replace')[-200:])
+            os.replace(tmp, out); J.update(msg=f'✔ 好了：{out.name}', out=str(out)); self._pfx_log('🧩 手機版合併：' + out.name)
+            L = self._pfx_idx(); L.append({'u': u, 'name': nick, 'sid': sid, 'ls': None, 'seg': 0, 't0': time.time() - sum(b - a for _i, a, b, _o in segs), 't1': time.time(), 'f': str(out), 'sz': out.stat().st_size, 'mp4': True, 'mix': 1})
+            p = self._pfx_idx_path(); tp = p.with_suffix('.tmp'); tp.write_text(json.dumps(L[-2000:], ensure_ascii=False), encoding='utf-8'); os.replace(tp, p)
+        except Exception as e: J['msg'] = f'✖ {e}'; self._pfx_log(f'手機版合併失敗：{e}')
+        finally: J['run'] = False; shutil.rmtree(tmpd, ignore_errors=True)
+
     def _phr_file(self, iid):
         it = self._phr_db()['items'].get(str(iid))
         if not it: return None
@@ -29858,10 +29972,12 @@ $r | ConvertTo-Json -Depth 4 -Compress
             except Exception: mb=0
             fl.append({'url':f'/media/{sid}/{i}','kind':f['kind'],'mb':mb})
         segs=list(segs)                                                         # TK_V0.9.78 手機錄屏：另一個版本（不動快取的 segs）
-        try:
+        try:                                                                    # V1.1.75 手機特效＋上傳的手機／平板錄屏：照合併設定接（沒設定＝上傳的蓋過重疊的時間）
+            fidx = {}
             for x in self._phr_for_sid(sid):
-                st_=float(x['e0'])-live; fl.append({'url':f'/phrec/{x["id"]}','kind':'phone','mb':round((x.get('size') or 0)/1e6,1)})
-                segs.append({'f':len(fl)-1,'start':round(st_,2),'end':round(st_+float(x.get('dur') or 0),2) if x.get('dur') else None,'off':0.0})
+                fl.append({'url':f'/phrec/{x["id"]}','kind':'phone','mb':round((x.get('size') or 0)/1e6,1)}); fidx[str(x['id'])] = len(fl)-1
+            for iid_, a_, b_, off_ in self._mix_segs(sid, live):
+                if str(iid_) in fidx: segs.append({'f':fidx[str(iid_)],'start':round(a_,2),'end':round(b_,2),'off':round(off_,2)})
         except Exception: pass
         return {'id':sid,'u':u,'name':self.streamer_names.get(u,u),'avatar':avatar_path(u).exists(),'live_start':live,'total':round(total,1),'ended':bool(en),
                 'start':datetime.fromtimestamp(live).strftime('%Y-%m-%d %H:%M'),'dur':fmt_elapsed(total),'viewers':tv,'peak':peak,
@@ -37489,7 +37605,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         """這場手機特效的每一段：[(檔案, 影片第 0 秒的時間 e0, 長度)]；e0 用聲音對齊的（還沒對好用錄影開始時間）."""
         D = self._phr_db()['items']; out = []
         for ix, x in enumerate(self._pfx_idx()):
-            if str(x.get('sid')) != str(sid): continue
+            if str(x.get('sid')) != str(sid) or x.get('mix'): continue
             p = Path(x['f'])
             if not p.is_file(): continue
             it = D.get(str(x.get('phr') or '')) or {}
@@ -37915,6 +38031,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         live = sorted([[u, self.streamer_names.get(u, u), float(st.get(u) or 0)] for u, v in es.items() if v == 'LIVE'], key=lambda x: -x[2])
         T = self._pfx_tools()
         PD = self._phr_db()['items']
+        up_sids = sorted({int(x.get('sid')) for x in PD.values() if x.get('st') == 'ok' and not x.get('pfx') and not x.get('psid') and x.get('sid')})   # V1.1.75 有上傳的手機／平板錄屏的場次
         rec = [dict(x, f=Path(x['f']).name, i=i, al=(lambda it: 'ok' if it.get('st') == 'ok' and 'pfx' in it and '用錄影時間' not in str(it.get('msg') or '') else ('time' if it.get('st') == 'ok' else ('wait' if it.get('st') in ('wait', 'run') else '')))(PD.get(str(x.get('phr') or '')) or {}))
                for i, x in enumerate(self._pfx_idx())][-30:][::-1]
         try: S['rno'] = {u: i for i, u in enumerate(self._roster_ids(), 1)}
@@ -37924,7 +38041,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         sw = dict(S['sw'], left=max(0, round(float(S['sw']['at']) - now))) if S.get('sw') else None
         return {'ok': True, 'now': now, 'tools': bool(T), 'tdir': str(self._pfx_tdir()), 'scrv': (self._pfx_scr_ver(T[1]) if T else ''), 'dl': S.get('dl') or '', 'dl_run': bool(S.get('dl_run')),
                 'dev': dict(S.get('dev') or {}), 'cur': cur, 'man': S.get('man'), 'hot': bool(S.get('hot')), 'wait': S.get('wait') or '', 'run': bool(S.get('gen')),
-                'acct': self._pfx_uid(), 'rest': {k: v for k, v in (S.get('rest') or {}).items() if float(v) > now}, 'tk_bad': S.get('tk_bad'),
+                'up_sids': up_sids, 'mj': dict(S.get('mj') or {}), 'acct': self._pfx_uid(), 'rest': {k: v for k, v in (S.get('rest') or {}).items() if float(v) > now}, 'tk_bad': S.get('tk_bad'),
                 'shot': dict(S.get('shot') or {}), 'alerts': list(S.get('alerts') or []), 'gj': dict(S.get('gj') or {}), 'gl': self._pfx_glist(), 'rb_t': S.get('rb_t'),
                 'cfg': cfg, 'live': live, 'sl': sl, 'sw': sw, 'log': list(S.get('log') or [])[-40:][::-1], 'rec': rec,
                 'gr': {u: self._rv_grade_of(u) for u in [x[0] for x in live] + list(cfg.get('users') or [])}}
@@ -37969,6 +38086,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
         if op == 'tools':
             threading.Thread(target=self._pfx_tools_get, daemon=True, name='TikLivePhoneFxDl').start(); return {'ok': True, 'message': '開始下載 scrcpy（官方 GitHub）'}
         if op == 'gclip': return self._pfx_gclip(d)
+        if op == 'mix': return self._mix_save(int(d.get('sid') or 0), None if d.get('reset') else (d.get('plan') or []))   # V1.1.75
+        if op == 'mixout': return self._mix_out(int(d.get('sid') or 0))
         if op == 'glearn': return self._pfx_learn_add(d)
         if op == 'reboot':
             T = self._pfx_tools(); dev = S.get('dev') or {}
@@ -46429,7 +46548,7 @@ const RULES=[
   {t:"空間不夠時",d:"<ul><li>SSD 剩不到 <b>"+RU_V('rec.ssd_min_free','GB',60)+"</b>：新的錄影改成直接錄在影片庫硬碟。</li><li>影片硬碟剩不到 <b>"+RU_V('rec.video_min_free','GB',30)+"</b>：不開始新的錄影（<b>聲音照錄</b>）。</li><li>🛡 C 槽守門員每分鐘看 C 剩多少、減少多快：第 1 級先停不急的背景工作；第 2 級全速把東西搬走；第 3 級（剩不到 15 GB 或 20 分鐘內會滿）才會一位一位停掉正在錄到 C 的影片（F → E → 未分級先停）。</li></ul>"},
   {t:"同一場直播的判定（斷線、重開）",d:"<ul><li>主播斷線後 <b>"+RU_V('conn.grace_minutes','分鐘',10)+"內</b>連回同一個直播間＝<b>續寫同一場</b>（錄影會分成第 2 段、第 3 段…）。</li><li>直播中卻 <b>"+RU_V('monitor.silent_min','分鐘',30)+"</b>沒有任何留言、禮物、進場、人數也沒變（而且沒在錄影）→ 重新連一次確認：還在播就續寫，結束了就把結束時間改回最後有資料的時間。</li><li>程式重開、斷電、超過 10 分鐘才連回來 → 會變成<b>另一場</b>。這種被切開的，用「⧉ 合併重複場次」合回一場（見「場次合併」）。</li></ul>"},
   {t:"開程式、熱更新時的監控",d:"<ul><li>開程式 3 秒後自動開始監控（設定可以關）。正在錄的場次在熱更新、重開時會<b>接著錄同一場</b>。</li><li>搬硬碟切換後，如果找不到影片硬碟（例如 R 槽代號跑掉），程式<b>先不開始監控</b>，不會錄到別的地方，會提示你去磁碟管理改代號。</li></ul>"},
-  {t:"📲 手機錄特效",d:"<ul><li>一支安卓手機（紅米 10）用 USB 接電腦，裝好 scrcpy（工具頁可自動從官方 GitHub 下載）。</li><li>主播開播 → 手機自己亮起來、打開那個直播間 → 錄下手機畫面＋聲音（有禮物特效）。一支手機一次錄一場。</li><li>錄誰：<b>S 級</b>的主播，照「工具 → 📲 手機錄特效」裡拖好的順序；按「▶ 開始」後，排最前面、正在直播的那位先錄，他下播換下一位還在播的。要加人＝在審核改成 S。</li><li>改順序要按右下角「✔ 套用」才生效；套用後（或排更前面的開播了）正在錄的不是第一順位 → 倒數 10 秒停掉、換錄新的那位。</li><li>主播斷線／下播超過 90 秒才停；TikTok 被關掉或跳走會自己重新打開直播間；拔線再插回、scrcpy 中斷 → 接著錄下一段（_p2、_p3…）。</li><li>手機超過 46°C 先停錄，降到 41°C 再繼續。</li><li>先錄在 SSD（MKV，斷電也播得了），結束後不重新壓縮換成 MP4（idle），搬到影片資料夾 <b>TikLive_手機特效\\帳號\\</b>；不到 15 秒的段丟掉。</li><li>回放：同一場可以切換「原本／手機」版本（用聲音對齊；對不上用錄影時間，可能差幾秒）。剪輯器那場的來源最後多一個手機特效檔。</li><li>S 級：手機特效版也排進 YouTube（標題加「手機特效版」，跟原本的是不同一部）。容量預測也算進去。</li><li>🎁 禮物剪輯：「錄好的」那場按「禮物剪輯」→ 選一位大哥（不算 10 鑽以下），或不分是誰、單次 ≥ 2000 鑽的全部 → 每個禮物一格（一次顯示 10 格，往右滑再載入）；點一格只載那一小段，用 ±1／±5 調送禮前、送禮後幾秒，按 OK 換下一格；沒調的用預設 → 全部接成一支 MP4（連在一起的併成一段，用顯示卡壓縮）。</li><li>學習時間差：每次按 OK 都記下來（禮物、你調的秒數、當時幾個人在播…）。同一種禮物有 2 筆以上就用它們當預設：取中位數、差太多的先不算、其他平均；之後資料夠了可以分析延遲原因。</li><li>回放切到「手機」版本時，程式自己畫的送禮動畫不顯示（手機畫面本來就有真的特效）。</li><li>✂ 剪輯：那場有手機特效版會先問要剪「原本錄的」還是「手機特效版」；沒有就直接開。</li><li>看畫面：錄影中每 30 秒截一張手機畫面（頁面看得到），也讀畫面上的字、看現在是不是直播間。黑畫面（螢幕關了、直播間沒畫面）、TikTok 顯示「發生錯誤／請稍後再試」、跑到首頁不在直播間、一模一樣 2 分鐘（卡住）、錄影檔沒在長 → 看到就馬上動手，30 秒後還不對換下一招：①完全關掉 TikTok 重開直播間（每次開直播間都先這樣，避免叫回上一場已結束的）②先進另一位正在播的直播間 6 秒再回來 ③再關掉 TikTok 重開 ④檢查手機網路，不通就關掉 Wi-Fi 再打開 ⑤重開錄影 ⑥重開手機（6 小時最多一次）。小米「充電速度慢」這類跳出來的視窗按返回關掉。只是畫面沒動（主播可能停在同一畫面）救 3 招後改 3 分鐘再看。螢幕設成永遠不自己關。</li><li>自己處理：通知欄被拉下來、USB 用途選單、系統對話框 → 20 秒內自己收掉；離開 TikTok 會重新打開直播間；連不上 3 分鐘重新啟動 adb；處理不了的（找不到手機、電量低沒充電、在播卻沒在錄）會出現在狀態卡和這頁最上面。</li><li>聲音：開直播間前先把手機媒體音量調到 0（錄影還沒開始那幾秒不出聲），錄影接手聲音後（手機本來就不出聲）調回原本的音量，確保錄得到聲音。</li><li>螢幕：下播停錄 → 回桌面、把 TikTok 完全關掉（主帳號＋小米分身，不在背景一直播、耗電、出聲）；沒在錄、1 分鐘沒人操作 → 回桌面、亮度最低、關螢幕待機；開播時亮起來（亮度照設定，預設 50%）→ 回桌面 → 進直播間，開錄前先看一眼畫面，黑的就回桌面再開一次。頁面有手動按鈕：亮屏、熄屏、回桌面、開 TikTok、截一張、亮度拉桿（任何裝置都能按）。</li><li>SIM 卡：錄影手機不要插中國的 SIM 卡（TikTok 會把手機當成在中國，整頁「發生錯誤」、不能登入）；偵測到會在頁面最上面提醒。只用 Wi-Fi 就好。</li><li>帳號：有小米分身（雙開，系統使用者 999）登入另一個 TikTok 帳號時，每一場輪流用；一個帳號一直「發生錯誤」（可能被 TikTok 擋）就換另一個，被擋的休息 30 分鐘。兩個都不行就不再一直重開，改成等 5、10、20 分鐘再試，並提醒你（重開手機對這種沒用，只用在黑畫面）。</li><li>手機畫面每 30 秒截一張顯示在頁面（螢幕關著不截）；錄影中的截圖另外存成那支影片的「預覽」（檔名＝影片第幾秒），在「錄好的」按 🖼 預覽看，點一張從那裡播。要先開小米「USB 偵錯（安全設定）」程式才能按電源鍵。</li><li>每週二、週五凌晨 3～7 點（沒在錄、S 級都沒在播時）自動重開手機一次；</li><li>全部在背景執行緒：手機只把壓好的畫面傳過來，電腦不解碼、不開視窗。</li></ul>"},
+  {t:"📲 手機錄特效",d:"<ul><li>一支安卓手機（紅米 10）用 USB 接電腦，裝好 scrcpy（工具頁可自動從官方 GitHub 下載）。</li><li>主播開播 → 手機自己亮起來、打開那個直播間 → 錄下手機畫面＋聲音（有禮物特效）。一支手機一次錄一場。</li><li>錄誰：<b>S 級</b>的主播，照「工具 → 📲 手機錄特效」裡拖好的順序；按「▶ 開始」後，排最前面、正在直播的那位先錄，他下播換下一位還在播的。要加人＝在審核改成 S。</li><li>改順序要按右下角「✔ 套用」才生效；套用後（或排更前面的開播了）正在錄的不是第一順位 → 倒數 10 秒停掉、換錄新的那位。</li><li>主播斷線／下播超過 90 秒才停；TikTok 被關掉或跳走會自己重新打開直播間；拔線再插回、scrcpy 中斷 → 接著錄下一段（_p2、_p3…）。</li><li>手機超過 46°C 先停錄，降到 41°C 再繼續。</li><li>先錄在 SSD（MKV，斷電也播得了），結束後不重新壓縮換成 MP4（idle），搬到影片資料夾 <b>TikLive_手機特效\\帳號\\</b>；不到 15 秒的段丟掉。</li><li>回放：同一場可以切換「原本／手機」版本（用聲音對齊；對不上用錄影時間，可能差幾秒）。剪輯器那場的來源最後多一個手機特效檔。</li><li>S 級：手機特效版也排進 YouTube（標題加「手機特效版」，跟原本的是不同一部）。容量預測也算進去。</li><li>🎁 禮物剪輯：「錄好的」那場按「禮物剪輯」→ 選一位大哥（不算 10 鑽以下），或不分是誰、單次 ≥ 2000 鑽的全部 → 每個禮物一格（一次顯示 10 格，往右滑再載入）；點一格只載那一小段，用 ±1／±5 調送禮前、送禮後幾秒，按 OK 換下一格；沒調的用預設 → 全部接成一支 MP4（連在一起的併成一段，用顯示卡壓縮）。</li><li>學習時間差：每次按 OK 都記下來（禮物、你調的秒數、當時幾個人在播…）。同一種禮物有 2 筆以上就用它們當預設：取中位數、差太多的先不算、其他平均；之後資料夠了可以分析延遲原因。</li><li>回放切到「手機」版本時，程式自己畫的送禮動畫不顯示（手機畫面本來就有真的特效）。</li><li>🧩 手機版合併：同一場有手機特效（自動錄）和上傳的手機／平板錄屏（用「手機錄屏」上傳，聲音自動對上這場）→ 回放的「📱 手機」預設用上傳的把重疊時間蓋掉；「錄好的」按「🧩 合併」可以改成只蓋幾分到幾分，也可以照結果輸出一支 MP4（不同尺寸補黑邊，用顯示卡壓縮）。</li><li>✂ 剪輯：那場有手機特效版會先問要剪「原本錄的」還是「手機特效版」；沒有就直接開。</li><li>看畫面：錄影中每 30 秒截一張手機畫面（頁面看得到），也讀畫面上的字、看現在是不是直播間。黑畫面（螢幕關了、直播間沒畫面）、TikTok 顯示「發生錯誤／請稍後再試」、跑到首頁不在直播間、一模一樣 2 分鐘（卡住）、錄影檔沒在長 → 看到就馬上動手，30 秒後還不對換下一招：①完全關掉 TikTok 重開直播間（每次開直播間都先這樣，避免叫回上一場已結束的）②先進另一位正在播的直播間 6 秒再回來 ③再關掉 TikTok 重開 ④檢查手機網路，不通就關掉 Wi-Fi 再打開 ⑤重開錄影 ⑥重開手機（6 小時最多一次）。小米「充電速度慢」這類跳出來的視窗按返回關掉。只是畫面沒動（主播可能停在同一畫面）救 3 招後改 3 分鐘再看。螢幕設成永遠不自己關。</li><li>自己處理：通知欄被拉下來、USB 用途選單、系統對話框 → 20 秒內自己收掉；離開 TikTok 會重新打開直播間；連不上 3 分鐘重新啟動 adb；處理不了的（找不到手機、電量低沒充電、在播卻沒在錄）會出現在狀態卡和這頁最上面。</li><li>聲音：開直播間前先把手機媒體音量調到 0（錄影還沒開始那幾秒不出聲），錄影接手聲音後（手機本來就不出聲）調回原本的音量，確保錄得到聲音。</li><li>螢幕：下播停錄 → 回桌面、把 TikTok 完全關掉（主帳號＋小米分身，不在背景一直播、耗電、出聲）；沒在錄、1 分鐘沒人操作 → 回桌面、亮度最低、關螢幕待機；開播時亮起來（亮度照設定，預設 50%）→ 回桌面 → 進直播間，開錄前先看一眼畫面，黑的就回桌面再開一次。頁面有手動按鈕：亮屏、熄屏、回桌面、開 TikTok、截一張、亮度拉桿（任何裝置都能按）。</li><li>SIM 卡：錄影手機不要插中國的 SIM 卡（TikTok 會把手機當成在中國，整頁「發生錯誤」、不能登入）；偵測到會在頁面最上面提醒。只用 Wi-Fi 就好。</li><li>帳號：有小米分身（雙開，系統使用者 999）登入另一個 TikTok 帳號時，每一場輪流用；一個帳號一直「發生錯誤」（可能被 TikTok 擋）就換另一個，被擋的休息 30 分鐘。兩個都不行就不再一直重開，改成等 5、10、20 分鐘再試，並提醒你（重開手機對這種沒用，只用在黑畫面）。</li><li>手機畫面每 30 秒截一張顯示在頁面（螢幕關著不截）；錄影中的截圖另外存成那支影片的「預覽」（檔名＝影片第幾秒），在「錄好的」按 🖼 預覽看，點一張從那裡播。要先開小米「USB 偵錯（安全設定）」程式才能按電源鍵。</li><li>每週二、週五凌晨 3～7 點（沒在錄、S 級都沒在播時）自動重開手機一次；</li><li>全部在背景執行緒：手機只把壓好的畫面傳過來，電腦不解碼、不開視窗。</li></ul>"},
   {t:"⏸ 暫停監控並封存",d:"<ul><li>主播分類（或審核、檔案總管）<b>長按主播</b> → 主播選單 →「⏸ 暫停監控並封存」。</li><li>從那一刻起<b>不再連線、不錄新的</b>（直播中的話那一場停在那裡、照常收尾）；主播清單、等級、分類、<b>以前的場次全部留著</b>，照常轉檔、整理、照等級排隊上傳 YouTube、照保留天數刪原檔。</li><li>在主播分類移到最下面「⏸ 暫停監控（封存）」那區；<b>審核頁</b>也收到最下面同一欄「⏸ 封存」（保留原本的等級、照等級排、灰階，點進去一樣看以前的紀錄）。同一個選單按「▶ 恢復監控」就接回來。</li><li>封存中的主播又被<b>新增</b>（貼 TikTok 連結、@帳號、匯入）：會先問「目前封存中，要解封嗎？」— 解封＝移回來繼續監控；取消＝取消新增、維持封存。</li><li>每一次封存／解封都會記下來（時間、從哪裡按的），長按主播的小視窗最上面「🗄 封存紀錄」看得到。</li><li>跟「🗑 刪除主播」不一樣：刪除＝整位全部刪掉（等於標 F 再處置）。</li></ul>"},
   {t:"只錄聲音的主播（照審核等級 G）",d:"<ul><li><b>在「主播審核」標 G＝只錄聲音</b>；改成別的等級就恢復錄影片。以前另外的「只錄聲音的主播」清單已經拿掉，程式每分鐘照等級對一次，以審核等級為準。</li><li>G 的主播直播中照樣錄畫面（FLV 先放 C 槽），下播後截 60 張圖＋字幕，自動傳 YouTube，傳好才移走原檔。</li><li>直播中每 <b>"+RU_V('rec.snap_min','分鐘',2)+"</b>另外拍一張快照，回放時在影片的位置左右翻看。</li></ul>"}]},
  {k:"play",i:"📺",c:"#4dc9ff",t:"回放與直播中觀看：延遲、預載入",s:[
@@ -51091,6 +51210,36 @@ async function geClick(e){const b=e.target.closest("[data-g],[data-gt]");if(!b)r
     const st=document.getElementById("geStrip");if(st){st.scrollLeft=sx;const t=st.querySelector(".geT.sel");if(t)t.scrollIntoView({behavior:"smooth",inline:"center",block:"nearest"});}return;}
   if(g==="make"){const o={op:"gclip",sid:GE.sid,mode:GE.mode,u:GE.u,min:GE.mode==="big"?GE.big:GE.min,adj:GE.adj,pre:GE.pre,post:GE.post};const x=await rvPost("/api/pc/pfx/set",o);
     if(x&&x.ok){if(typeof toast==="function")toast(x.message);geClose();if(PFX.root)pfxLoad(PFX.root);}else alert((x&&x.message)||"失敗");return;}}
+/* V1.1.75 🧩 手機版合併：手機特效（自動錄）＋上傳的手機／平板錄屏，選幾分到幾分用上傳的蓋上去 */
+const MX={};
+function mxT(t){t=Math.max(0,Math.round(t||0));const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=t%60;return (h?h+":"+String(m).padStart(2,"0"):m)+":"+String(s).padStart(2,"0");}
+function mxP(v){const p=String(v||"").trim().split(":").map(Number);if(p.some(isNaN)||!p.length)return null;return p.reduce((a,b)=>a*60+b,0);}
+async function mxOpen(sid){geCss();mxClose();MX.sid=+sid;const o=document.createElement("div");o.id="pfxGE";o.innerHTML=`<div class="geH"><b>🧩 手機版合併 #${String(sid).padStart(5,"0")}</b><button class="gb" data-m="x">✕ 關閉</button></div><div class="geB" id="mxB"><div class="geS">讀取中…</div></div><div class="geF" id="mxF"></div>`;document.body.appendChild(o);
+  o.addEventListener("click",mxClick);await mxLoad();}
+function mxClose(){const o=document.getElementById("pfxGE");if(o)o.remove();clearInterval(MX.tm);}
+async function mxLoad(){try{MX.d=await rvGet("/api/pc/pfx/mix?sid="+MX.sid);}catch(e){MX.d=null;}mxDraw();}
+function mxDraw(){const B=document.getElementById("mxB"),F=document.getElementById("mxF");if(!B)return;const d=MX.d;if(!d){B.innerHTML='<div class="geS">讀不到</div>';return;}
+  const I=d.items||[],ups=I.filter(x=>x.up),pf=I.filter(x=>!x.up),T=Math.max(1,...I.map(x=>x.e||x.s+1),...(d.segs||[]).map(z=>z[2])),L0=Math.min(0,...I.map(x=>x.s));const P=v=>Math.max(0,Math.min(100,(v-L0)/(T-L0)*100));
+  const blk=(a,b,c,t)=>`<i title="${rvE(t)}" style="position:absolute;top:0;bottom:0;left:${P(a)}%;width:${Math.max(.4,P(b)-P(a))}%;background:${c};border-radius:3px"></i>`;
+  const bar=(lab,h)=>`<div class="geR" style="flex-wrap:nowrap"><span style="width:84px;flex:0 0 84px;font-size:12px">${lab}</span><div style="position:relative;flex:1;height:22px;background:rgba(120,140,170,.12);border-radius:6px">${h}</div></div>`;
+  const plan={};(d.plan||[]).forEach(p=>plan[p[2]]=p);
+  let h=`<div class="geS">回放切到「📱 手機」時照下面「結果」那條接：橘色＝上傳的（手機／平板錄屏）、藍色＝手機特效（自動錄）。預設是上傳的整段蓋上去；可以改成只蓋其中幾分到幾分。</div>`;
+  h+=bar("📲 手機特效",pf.map(x=>blk(x.s,x.e||x.s+1,"#2e7df6",x.name)).join(""))+bar("📤 上傳的",ups.map(x=>blk(x.s,x.e||x.s+1,"#f0ad4e",x.name)).join(""))+bar("✅ 結果",(d.segs||[]).map(z=>{const x=I.find(y=>y.id===z[0])||{};return blk(z[1],z[2],x.up?"#f0ad4e":"#2e7df6",`${mxT(z[1])}–${mxT(z[2])} ${x.up?"上傳的":"手機特效"}`);}).join(""));
+  h+=`<div class="geR geS"><span style="width:84px"></span><span>${L0<0?"開播前 "+mxT(-L0):"0:00"}</span><span style="flex:1"></span><span>${mxT(T)}</span></div>`;
+  h+=`<div class="geS">結果：${(d.segs||[]).map(z=>{const x=I.find(y=>y.id===z[0])||{};return `${mxT(z[1])}–${mxT(z[2])} ${x.up?"上傳的":"手機特效"}`;}).join(" → ")||"（沒有）"}</div>`;
+  if(!ups.length)h+=`<div class="geS">這場還沒有上傳的手機／平板錄屏（到「工具 → 📱 手機錄屏」上傳，程式會用聲音自動對上這場）。</div>`;
+  h+=ups.map((x,k)=>{const p=plan[x.id];return `<div class="geEd"><div class="geR"><b>📤 上傳的 ${k+1}</b><span class="geS">${rvE(x.name)}・涵蓋 ${mxT(x.s)}–${mxT(x.e)}</span></div>
+    <div class="geR"><label><input type="checkbox" data-mu="${rvE(x.id)}" ${p?"checked":""}> 蓋上去</label><span>從</span><input class="gn" data-ma="${rvE(x.id)}" value="${mxT(p?p[0]:x.s)}" style="width:86px"><span>到</span><input class="gn" data-mb="${rvE(x.id)}" value="${mxT(p?p[1]:x.e)}" style="width:86px"><button class="gb" data-m="full" data-i="${rvE(x.id)}">整段</button></div></div>`;}).join("");
+  const mj=d.mj||{};if(mj.sid===MX.sid&&mj.msg)h+=`<div class="${mj.run?"geS":String(mj.msg).startsWith("✖")?"pfBad":"pfOk"}">${mj.run?"⏳ ":""}${rvE(mj.msg)}${mj.run?`（${mj.done||0}/${mj.total||0}）`:""}</div>`;
+  B.innerHTML=h;F.innerHTML=`<span class="geS" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">${d.saved?"自訂":"預設"}</span><button class="gb" data-m="reset">↺ 預設</button><button class="gb go" data-m="apply" ${ups.length?"":"disabled"}>✔ 套用</button><button class="gb" data-m="out" ${mj.run?"disabled":""}>🎬 輸出一支 MP4</button>`;
+  clearInterval(MX.tm);if(mj.run&&mj.sid===MX.sid)MX.tm=setInterval(async()=>{if(!document.getElementById("mxB")){clearInterval(MX.tm);return;}const ae=document.activeElement;if(ae&&ae.tagName==="INPUT")return;await mxLoad();},3000);}
+async function mxClick(e){const b=e.target.closest("[data-m]");if(!b)return;const m=b.dataset.m,d=MX.d||{};
+  if(m==="x"){mxClose();if(PFX.root)pfxLoad(PFX.root);return;}
+  if(m==="full"){const x=(d.items||[]).find(y=>y.id===b.dataset.i);if(!x)return;const B=document.getElementById("mxB");B.querySelector(`[data-ma="${CSS.escape(x.id)}"]`).value=mxT(x.s);B.querySelector(`[data-mb="${CSS.escape(x.id)}"]`).value=mxT(x.e);B.querySelector(`[data-mu="${CSS.escape(x.id)}"]`).checked=true;return;}
+  if(m==="apply"){const B=document.getElementById("mxB"),plan=[];for(const x of (d.items||[]).filter(y=>y.up)){if(!B.querySelector(`[data-mu="${CSS.escape(x.id)}"]`).checked)continue;const a=mxP(B.querySelector(`[data-ma="${CSS.escape(x.id)}"]`).value),c=mxP(B.querySelector(`[data-mb="${CSS.escape(x.id)}"]`).value);if(a==null||c==null||c<=a){alert("時間格式要像 12:30 或 1:05:00，而且「到」要比「從」晚");return;}plan.push([a,c,x.id]);}
+    const r=await rvPost("/api/pc/pfx/set",{op:"mix",sid:MX.sid,plan});if(r&&r.message&&typeof toast==="function")toast(r.message);await mxLoad();return;}
+  if(m==="reset"){if(!confirm("回到預設（每個上傳的整段蓋上去）？"))return;const r=await rvPost("/api/pc/pfx/set",{op:"mix",sid:MX.sid,reset:1});if(r&&r.message&&typeof toast==="function")toast(r.message);await mxLoad();return;}
+  if(m==="out"){if(!confirm("照「結果」那條接成一支 MP4？（不同尺寸的會補黑邊、不變形；用顯示卡壓縮）"))return;const r=await rvPost("/api/pc/pfx/set",{op:"mixout",sid:MX.sid});if(r&&r.message&&typeof toast==="function")toast(r.message);await mxLoad();return;}}
 function pfxGuide(){return `<details class="pfC"><summary>📋 第一次設定（紅米 10，照順序做一次就好）</summary><ol>
 <li><b>不用回復原廠</b>。手機裡沒有你個人的資料、也不打算拿來做別的事就直接用；有個人資料、或登入的是你的主帳號，才建議回復原廠。</li>
 <li>TikTok（國際版，不是抖音）登入一個<b>小帳號</b>（帳號密碼你自己在手機上打，程式不碰）。</li>
@@ -51129,7 +51278,8 @@ function pfxHtml(j){const D=j.dev||{},c=j.cur,cf=j.cfg||{},gr=j.gr||{};const gC=
   h+=`<details class="pfC"><summary>⚙ 錄影設定</summary><div class="pfR" style="margin-top:8px"><label>畫質 <input class="pfN" type="number" min="2" max="20" data-o="mbps" value="${cf.mbps}"> Mbps</label><label>長邊 <input class="pfN" type="number" min="720" max="2400" step="10" data-o="max_size" value="${cf.max_size}"></label><label>手機超過 <input class="pfN" type="number" min="38" max="60" data-o="temp_stop" value="${cf.temp_stop}"> °C 停錄</label><label>降到 <input class="pfN" type="number" min="30" max="55" data-o="temp_ok" value="${cf.temp_ok}"> °C 繼續</label><label>下播等 <input class="pfN" type="number" min="30" max="900" data-o="off_grace" value="${cf.off_grace}"> 秒才停</label><label>開錄時亮度 <input class="pfN" type="number" min="1" max="100" data-o="bright" value="${cf.bright??50}"> %</label><button class="pfB" data-pa="opt">存</button></div><div class="pfSub" style="margin-top:6px">8 Mbps 一小時約 3.6 GB。先錄在 SSD（MKV，斷電也播得了），下播後不重新壓縮換成 MP4，再搬到影片資料夾的 TikLive_手機特效\\帳號\\。</div></details>`;
   h+=pfxGuide();
   const AL={ok:'<span class="pfOk" title="用聲音對齊了，回放切換同一秒">🔊 已對齊</span>',time:'<span class="pfW" title="聲音沒對上，用錄影時間對齊，可能差幾秒">⏱ 時間對齊</span>',wait:'<span class="pfSub">⏳ 對齊中</span>'};const seen=new Set();
-  h+=`<div class="pfC"><h4>🎬 錄好的</h4><div class="pfSub" style="margin-bottom:6px">回放那場可以切換「原本／手機」版本；剪輯器那場的來源最後面多一個「手機特效」檔；S 級會排進 YouTube（標題加「手機特效版」）。</div>${(j.rec||[]).length?`<div class="pfL">`+j.rec.map(x=>{const g=x.sid&&!seen.has(x.sid);if(x.sid)seen.add(x.sid);return `<div class="pfI"><b>${rvE(x.name||x.u)} <span class="pfSub">${rvE(x.f)}</span></b><span class="pfSub">${pfxDur((x.t1||0)-(x.t0||0))} · ${((x.sz||0)/1e9).toFixed(2)} GB · ${pfxT(x.t1||0)}</span>${AL[x.al]||""}${x.shots?`<button class="pfB" data-pa="thumbs" data-i="${x.i}">🖼 預覽</button>`:""}${g?`<button class="pfB" data-pa="gift" data-sid="${x.sid}">🎁 禮物剪輯</button>`:""}<a class="pfB" style="text-decoration:none;border:1px solid rgba(140,150,165,.5);border-radius:9px;padding:6px 10px" href="${rvB()}/api/pc/pfx/file?i=${x.i}" target="_blank" rel="noopener">▶</a></div>${PFX.th&&PFX.th.i===x.i?`<div style="display:flex;gap:6px;overflow-x:auto;padding:4px 0 8px">${(PFX.th.L||[]).map(s=>`<a href="${rvB()}/api/pc/pfx/file?i=${x.i}#t=${s}" target="_blank" rel="noopener" style="flex:0 0 auto;text-align:center;font-size:11px;color:inherit;text-decoration:none"><img loading="lazy" src="${rvB()}/api/pc/pfx/thumb?i=${x.i}&t=${s}" style="height:150px;border-radius:6px;display:block;background:#000"><span>${pfxDur(s)}</span></a>`).join("")||'<span class="pfSub">沒有預覽圖</span>'}</div>`:""}`;}).join("")+`</div>`:'<div class="pfSub">還沒有</div>'}</div>`;
+  h+=`<div class="pfC"><h4>🎬 錄好的</h4><div class="pfSub" style="margin-bottom:6px">回放那場可以切換「原本／手機」版本；剪輯器那場的來源最後面多一個「手機特效」檔；S 級會排進 YouTube（標題加「手機特效版」）。</div>${(j.rec||[]).length?`<div class="pfL">`+j.rec.map(x=>{const g=x.sid&&!seen.has(x.sid);if(x.sid)seen.add(x.sid);return `<div class="pfI"><b>${rvE(x.name||x.u)} <span class="pfSub">${rvE(x.f)}</span></b><span class="pfSub">${pfxDur((x.t1||0)-(x.t0||0))} · ${((x.sz||0)/1e9).toFixed(2)} GB · ${pfxT(x.t1||0)}</span>${AL[x.al]||""}${x.shots?`<button class="pfB" data-pa="thumbs" data-i="${x.i}">🖼 預覽</button>`:""}${g?`<button class="pfB" data-pa="gift" data-sid="${x.sid}">🎁 禮物剪輯</button>`:""}${g&&(j.up_sids||[]).includes(+x.sid)?`<button class="pfB" data-pa="mix" data-sid="${x.sid}">🧩 合併</button>`:""}<a class="pfB" style="text-decoration:none;border:1px solid rgba(140,150,165,.5);border-radius:9px;padding:6px 10px" href="${rvB()}/api/pc/pfx/file?i=${x.i}" target="_blank" rel="noopener">▶</a></div>${PFX.th&&PFX.th.i===x.i?`<div style="display:flex;gap:6px;overflow-x:auto;padding:4px 0 8px">${(PFX.th.L||[]).map(s=>`<a href="${rvB()}/api/pc/pfx/file?i=${x.i}#t=${s}" target="_blank" rel="noopener" style="flex:0 0 auto;text-align:center;font-size:11px;color:inherit;text-decoration:none"><img loading="lazy" src="${rvB()}/api/pc/pfx/thumb?i=${x.i}&t=${s}" style="height:150px;border-radius:6px;display:block;background:#000"><span>${pfxDur(s)}</span></a>`).join("")||'<span class="pfSub">沒有預覽圖</span>'}</div>`:""}`;}).join("")+`</div>`:'<div class="pfSub">還沒有</div>'}</div>`;
+  {const rs=new Set((j.rec||[]).map(x=>+x.sid));const extra=(j.up_sids||[]).filter(s=>!rs.has(s)).slice(-10).reverse();if(extra.length)h+=`<div class="pfC"><h4>🧩 有上傳手機／平板錄屏的場次</h4><div class="pfL">${extra.map(s=>`<div class="pfI"><b>#${String(s).padStart(5,"0")}</b><button class="pfB" data-pa="mix" data-sid="${s}">🧩 合併設定</button></div>`).join("")}</div></div>`;}
   h+=pfxGiftHtml(j);
   h+=`<details class="pfC" open><summary>📝 紀錄</summary><div class="pfLog">${(j.log||[]).map(e=>`<div>${pfxT(e[0])} ${rvE(e[1])}</div>`).join("")||"—"}</div></details>`;
   return h;}
@@ -51150,6 +51300,7 @@ async function pfxAct(root,el){const a=el.dataset.pa,j=PFX.j||{},cf=j.cfg||{};le
   else if(a==="thumbs"){const i=+el.dataset.i;if(PFX.th&&PFX.th.i===i){PFX.th=null;pfxLoad(root);return;}let L=[];try{L=(await rvGet("/api/pc/pfx/thumbs?i="+i)).L||[];}catch(e){}PFX.th={i,L};pfxLoad(root);return;}
   else if(a==="idle_off"){r=await rvPost("/api/pc/pfx/set",{op:"idle_off",on:el.checked?1:0});}
   else if(a==="gift"){pfxGEOpen(el.dataset.sid);return;}
+  else if(a==="mix"){mxOpen(el.dataset.sid);return;}
   else if(a==="gx"){PFX.gsid=null;PFX.gd=null;pfxLoad(root);return;}
   else if(a==="gref"){PFX.gmin=+(root.querySelector("#pgMin").value||0);await pfxGiftLoad(root);return;}
   else if(a==="guser"||a==="gbig"){const v=id=>+(root.querySelector(id)||{}).value;const o={op:"gclip",sid:PFX.gsid,mode:a==="gbig"?"big":"user",u:el.dataset.u||"",pre:v("#pgPre"),post:v("#pgPost")};o.min=a==="gbig"?v("#pgBig"):v("#pgMin");r=await rvPost("/api/pc/pfx/set",o);}
