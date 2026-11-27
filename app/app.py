@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.13"
+APP_VERSION = "1.2.14"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -224,6 +224,10 @@ class EventTableModel(QAbstractTableModel):
         for _ in range(self.trailing_blank_rows):
             self.rows.append(tuple('' for _ in self.headers))
         self.endResetModel()
+
+
+class _PreparedRows(list):
+    """V1.2.14 背景已經轉好字串的表格列（fill_model 看到就不再逐格轉）."""
 
 
 class SearchSortProxy(QSortFilterProxyModel):
@@ -27499,6 +27503,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         try: return json.loads((Path(folder) / '_fetched.json').read_text(encoding='utf-8'))
         except Exception: return None
 
+
     def _lane_room(self):
         """Copy the next old FLV to the SSD only when at most 1 is already waiting there and the SSD has space."""
         try:
@@ -27510,6 +27515,96 @@ $r | ConvertTo-Json -Depth 4 -Compress
 
     # ================= V0.7.42.045 緊急分流：C 槽堆積（HDD 寫太慢）→ 排隊要搬到 HDD 的場次改搬到分流資料夾（例如 I 槽 SSD），不經過 HDD 限速 =================
     # ================= V0.8.12 借用空間：平常記錄每顆硬碟的空間變化，C 槽真的不夠時才建議借哪一顆、借多少（由你決定，不自動借） =================
+    def _lane_fetch(self, folder):
+        """HDD -> SSD (one straight read), then convert there. The original FLVs stay on the HDD until the MP4 is safely back."""
+        folder = Path(folder); key = str(folder)
+        try: _HddLane.get().limit = float(self.cfg('rec.hdd_copy_limit'))
+        except Exception: pass
+        if str(folder) in self._active_rec_dirs(): self._flv_job(key, state='failed', msg='還在錄影中'); return
+        flvs = [f for f in sorted(folder.glob('*.flv')) if f.stat().st_size > 0]
+        if not flvs: self._flv_job(key, state='done', msg='已經沒有 FLV'); return
+        ssd = self._ssd_root()
+        if not ssd or not self._ssd_ok(sum(f.stat().st_size for f in flvs) * 2.2):
+            self._flv_job(key, state='convert', msg='SSD 空間不夠，直接在 HDD 上轉')
+            threading.Thread(target=self._video_finalize, args=(folder,), daemon=True).start(); return
+        dst = ssd / folder.parent.name / folder.name
+        shutil.rmtree(dst, ignore_errors=True); dst.mkdir(parents=True, exist_ok=True)
+        lane = _HddLane.get(); total = sum(f.stat().st_size for f in flvs); done = 0; sizes = {}
+        self._flv_job(key, state='copy_in', pct=0, msg='', bytes=total)
+        try:
+            mp = session_meta_path(folder)
+            if mp.exists(): shutil.copy2(mp, dst / mp.name)
+            for f in flvs:
+                n = lane.copy(f, dst / f.name, f'{folder.name} → SSD'); sizes[f.name] = n; done += n
+                self._flv_job(key, pct=round(done / max(1, total) * 100, 1))
+            (dst / '_fetched.json').write_text(json.dumps({'origin': str(folder), 'files': sizes, 't': time.time()}, ensure_ascii=False), encoding='utf-8')
+        except _HddLane.Cancelled:
+            shutil.rmtree(dst, ignore_errors=True); _flv_jobs().pop(key, None)        # back in the list, nothing touched on the HDD
+            try: self._experiment_status(f'已取消：{folder.name}（FLV 留在原處）')
+            except Exception: pass
+            return
+        except Exception as ex:
+            shutil.rmtree(dst, ignore_errors=True); self._flv_job(key, state='failed', msg=f'複製到 SSD 失敗：{ex}'); return
+        self._flv_job(key, state='ssd_wait', pct=0, ssd=str(dst))
+        threading.Thread(target=self._video_finalize, args=(dst,), daemon=True).start()
+
+    def _lane_publish(self, folder):
+        """SSD folder -> its place in the video library on the HDD (one straight write), then the SSD copy is removed."""
+        folder = Path(folder)
+        try: _HddLane.get().limit = float(self.cfg('rec.hdd_copy_limit'))
+        except Exception: pass
+        try:                                                                    # V1.1.07 搬硬碟最後切換那幾分鐘：先別搬進硬碟，等切好再搬（會搬到 R）
+            if self._mig_load().get('phase') == 'final':
+                threading.Timer(60, lambda f=str(folder): _HddLane.get().put('publish', f)).start(); return
+        except Exception: pass
+        if not folder.exists() or str(folder) in self._active_rec_dirs(): return
+        if (folder / '_merge_work').exists() or any(folder.glob('*.part')): return        # still converting
+        fe = self._fetched_info(folder); key = fe['origin'] if fe else str(folder)
+        if self._is_ovf_path(folder) and (key in (self.__dict__.get('_ovf_busy') or set()) or any(folder.glob('*.copying')) or any(folder.glob('*.flv'))): return    # 還在分流進來，先不要動      # V0.7.42.045 分流：直接搬到分流資料夾（SSD → SSD，不經過 HDD）
+        mp4s = sorted(folder.glob('*.mp4'))
+        if fe and not mp4s:
+            shutil.rmtree(folder, ignore_errors=True)
+            if (_flv_jobs().get(key) or {}).get('cancel'): _flv_jobs().pop(key, None); return        # cancelled: back in the list
+            self._flv_job(key, state='failed', msg='轉檔沒有成功，FLV 照樣留在 HDD 原處'); return
+        if fe: dst = Path(fe['origin'])
+        else:
+            dst = self.video_root() / folder.parent.name / folder.name
+            if dst.exists() and any(dst.iterdir()):                   # an older part of this live already sits there: keep both
+                dst = dst.with_name(dst.name + '_ssd'); k = 2
+                while dst.exists(): dst = dst.with_name(f'{folder.name}_ssd{k}'); k += 1
+        lane = _HddLane.get(); src_meta = session_meta_path(folder)
+        files = [f for f in folder.iterdir() if f.is_file() and f.name != '_fetched.json' and not f.name.endswith(('.part', '.copying'))]
+        total = sum(f.stat().st_size for f in files); done = 0
+        self._flv_job(key, state='copy_out', pct=0, msg='')
+        try:
+            dst.mkdir(parents=True, exist_ok=True)
+            for f in sorted(files, key=lambda f: f.suffix.lower() == '.json'):          # the info file last: it points at the video
+                name = f'{dst.name}.json' if f.resolve() == src_meta.resolve() else f.name
+                t = dst / name
+                if f.suffix.lower() == '.flv' and t.exists() and t.stat().st_size == f.stat().st_size: done += f.stat().st_size; continue
+                done += lane.copy(f, t, f'{folder.name} → HDD')
+                self._flv_job(key, pct=round(done / max(1, total) * 100, 1))
+        except Exception as ex:
+            self._flv_job(key, state='failed', msg=f'搬回 HDD 失敗（SSD 上的檔案保留，稍後重試）：{ex}')
+            threading.Timer(600, lambda: _HddLane.get().put('publish', str(folder))).start(); return
+        if fe and mp4s:                                   # only FLVs that really went into the MP4 (the converter removed their SSD copy)
+            for n in (fe.get('files') or {}):
+                if (folder / n).exists(): continue
+                try: (dst / n).unlink()
+                except Exception: pass
+        shutil.rmtree(folder, ignore_errors=True)
+        try:
+            if folder.parent != self._ssd_dir() and not any(folder.parent.iterdir()): folder.parent.rmdir()
+        except Exception: pass
+        self._lib_invalidate()
+        self._flv_job(key, state='done' if mp4s else 'failed', pct=100, msg='' if mp4s else '轉檔沒有成功，FLV 已搬到 HDD，可在「FLV 待處理」重試', where=str(dst))
+        try: self._experiment_status(f'已搬到影片庫：{dst.name}' + ('' if mp4s else '（FLV，轉檔失敗）'))
+        except Exception: pass
+        if mp4s: self._lib_auto_publish_later(dst, 'video', 3000)
+
+    # ================= V0.7.42.045 緊急分流：C 槽堆積（HDD 寫太慢）→ 排隊要搬到 HDD 的場次改搬到分流資料夾（例如 I 槽 SSD），不經過 HDD 限速 =================
+    # ================= V0.8.12 借用空間：平常記錄每顆硬碟的空間變化，C 槽真的不夠時才建議借哪一顆、借多少（由你決定，不自動借） =================
+
     def _lend_dirs(self):
         """借過（或救急用過）的緩衝資料夾清單；裡面還有東西就會繼續慢慢搬回 E. 10/21 救急用的 I 槽也在裡面."""
         c = self.__dict__.get('_lendd_c')
@@ -28455,7 +28550,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
         for d in list(root.glob('*/session_*')):
             if not d.is_dir() or str(d) in active: continue
             try:
-                for x in list(d.glob('*.copying')) + list(d.glob('*.part')): x.unlink()
+                for x in list(d.glob('*.copying')) + list(d.glob('*.part')):
+                    try: x.unlink()
+                    except OSError: pass                                             # V1.2.14 正在用（另一個程序開著）就先不刪
                 shutil.rmtree(d / '_merge_work', ignore_errors=True)        # startup: no other window can be converting it
                 if any(f.stat().st_size > 0 for f in d.glob('*.flv')):
                     fe = self._fetched_info(d)
@@ -35442,7 +35539,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         def isnew(v):
             try: return bool(self._chv_pg_seen) and vt(str(v)) > vt(self._chv_pg_seen)
             except Exception: return False
-        OP={}
+        OP={}; MX=[40]
         def rows():
             if allb.isChecked(): return entries
             try: base=vt('0.7.42'); return [e for e in entries if vt(str(e.get('version'))) >= base]
@@ -35456,7 +35553,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
             host=QWidget(); hl=QVBoxLayout(host); hl.setContentsMargins(2,2,2,2); hl.setSpacing(6); n=0
             NV=[e for e in entries if isnew(e.get('version'))]
             sub.setText(f'目前版本 V{APP_VERSION}' + (f' · 上次看到 V{self._chv_pg_seen}' if self._chv_pg_seen else '') + (f'　✨ 上次看過之後有 {len(NV)} 個新版本、{sum(len(e.get("items") or []) for e in NV)} 項新功能（標 🆕）' if NV else '　· 都看過了 ✓'))
-            for e in rows():
+            R_=rows(); more_=0
+            if not W and not allb.isChecked() and len(R_)>MX[0]: more_=len(R_)-MX[0]; R_=R_[:MX[0]]   # V1.2.14 先畫最新 40 版（兩百多版一次畫很慢）
+            for e in R_:
                 v=str(e.get('version')); it=[str(x) for x in (e.get('items') or [])]
                 sh=[x for x in it if all(k in x.lower() for k in W)] if W else it
                 if W and not sh: continue
@@ -35471,6 +35570,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     for x in sh:
                         t=QLabel('•  '+x); t.setWordWrap(True); t.setTextInteractionFlags(Qt.TextSelectableByMouse); cl.addWidget(t)
                 hl.addWidget(card)
+            if more_:
+                mb=QPushButton(f'顯示更早的 {more_} 版…'); mb.clicked.connect(lambda: (MX.__setitem__(0, MX[0]+100), paint())); hl.addWidget(mb)
             if not hl.count(): hl.addWidget(QLabel(f'沒有找到「{q.text().strip()}」' if W else '找不到升級資訊（app\\CHANGELOG.json）'))
             hl.addStretch(1); box.setWidget(host)
         def setall(o):
@@ -35478,7 +35579,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             paint()
         q.textChanged.connect(lambda _t: paint()); allb.toggled.connect(lambda _b: (OP.clear(), paint()))
         exb.clicked.connect(lambda: setall(True)); cob.clicked.connect(lambda: setall(False))
-        self._chv_paint=paint; paint()
+        self._chv_paint=paint                                                # V1.2.14 不在開程式／熱更新時畫（LOG：每次熱更新卡 3 秒以上），切到這頁才畫
         return w
 
     def _chv_page_shown(self):
@@ -37776,7 +37877,12 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 try: self._pfx_log(f'🎛 禮物陣列小預覽做不出來：{p.name} 檔內 {t0:.1f} 秒：{why}')
                 except Exception: pass
                 return {'ok': False, 'message': '小預覽影片做不出來', 'why': f'{p.name} 檔內 {fmt_elapsed(t0)} 起 {dur:g} 秒：{why}'}
-            os.replace(tmp, out)
+            for k_ in range(6):                                                  # V1.2.14 舊的那支正被手機播放（Windows 鎖住）→ 等一下再換；換不了就先用新檔名
+                try: os.replace(tmp, out); break
+                except PermissionError:
+                    if k_ == 5:
+                        out = out.with_name(out.stem + f'_{int(time.time())}.mp4'); os.replace(tmp, out); n = out.name
+                    else: time.sleep(0.5)
             I = self._gav_pxidx(); I[n] = [sk, t0, dur, int(time.time()), 2]
             self.__dict__['_gav_pxn'] = self.__dict__.get('_gav_pxn', 0) + 1
             if self.__dict__['_gav_pxn'] % 30 == 1:                              # V1.1.90 SSD 上的小預覽影片超過 6 GB → 刪最舊的到 5 GB（不佔滿 SSD）
@@ -43258,7 +43364,9 @@ exit /b 1
         query={'sessions':lambda: self._sessions_rows_ed(self._query_sessions_rows()),'gifters':self._query_gifters_rows,'profiles':self._query_profiles_rows}[kind]      # V0.6.76 已剪輯（共 N 段）
         def worker():
             rows=None
-            try: rows=query()
+            try:
+                rows=query()
+                if rows is not None: rows=_PreparedRows(tuple('' if x is None else str(x) for x in r) for r in rows)   # V1.2.14 逐格轉字串在背景做（LOG：換表格時畫面卡 13～15 秒）
             finally:
                 self._ui_call.emit(lambda r=rows,k=kind: self._apply_bg_rows(k,r))
         threading.Thread(target=worker,daemon=True).start()
@@ -43282,7 +43390,7 @@ exit /b 1
         con=None
         try:
             con=sqlite3.connect(DB_PATH); con.execute('PRAGMA busy_timeout=5000')
-            rows=con.execute('SELECT username,nickname,sessions,comments,joins,gifts,diamonds FROM user_profiles ORDER BY diamonds DESC,gifts DESC,comments DESC').fetchall()
+            rows=con.execute('SELECT username,nickname,sessions,comments,joins,gifts,diamonds FROM user_profiles ORDER BY diamonds DESC,gifts DESC,comments DESC LIMIT 5000').fetchall()   # V1.2.14 只列送最多的 5000 位（全部幾十萬位在畫面執行緒排序會卡十幾秒）
             return rows
         except Exception as e:
             self._ui_call.emit(lambda m=str(e): self.statusBar().showMessage('使用者資料載入失敗：'+m))
@@ -43307,7 +43415,7 @@ exit /b 1
         # V0.6.53 「數據」頁已移除：這裡原本每 2 秒開一次資料庫算本場統計，現在不用了
 
     def fill_model(self,model,rows):
-        model.replace_rows(rows)
+        model.replace_rows(rows, prepared=isinstance(rows, _PreparedRows))
 
     def eventFilter(self,obj,event):
         try:

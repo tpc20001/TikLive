@@ -910,7 +910,7 @@ def route(win, sock, method, rest, q, body):
     if name == 'rv/gdefs' and method == 'GET': J({'ok': True, 'gdefs': win._rv_gdefs()}); return True   # TK_V1.0.93（只讀、讀設定檔很快）
     if name == 'host/sum' and method == 'GET':                           # TK_V1.0.90 主播小視窗統計（只讀）
         u_ = str(q.get('u', '') or ''); _bg(win, sock, lambda: win._host_sum(u_)); return True
-    if name == 'mig' and method == 'GET': J(win._mig_info()); return True
+    if name == 'mig' and method == 'GET': _bg(win, sock, win._mig_info); return True   # V1.2.14 LOG：在畫面執行緒卡 8 秒 → 背景
     if name == 'merge' and method == 'GET': J(win._web_merge_status()); return True
     if name == 'capsim' and method == 'GET': _bg(win, sock, lambda: win._capsim_data()); return True   # V1.1.42 容量預測（只讀）
     if name == 'rules/vals' and method == 'GET': J(win._rules_vals([s_ for s_ in str(q.get('k', '') or '').split(',') if s_][:60])); return True   # V1.1.35 規則頁的數字（只讀）                     # V1.1.25 合併重複場次（只讀）
@@ -1011,7 +1011,7 @@ def route(win, sock, method, rest, q, body):
     if name == 'phr/cfg':
         J(win._phr_cfg_set(d)); return True
     if name == 'phr/pick':
-        J(win._phr_pick(str(d.get('id') or ''), int(d.get('sid') or 0))); return True
+        iid_, sid_ = str(d.get('id') or ''), int(d.get('sid') or 0); _bg(win, sock, lambda: win._phr_pick(iid_, sid_)); return True   # V1.2.14 歸檔可能要跨硬碟複製（LOG：畫面卡 120 秒）→ 背景
     if name == 'phr/mksess':                                             # TK_V0.9.79 沒有紀錄的手機錄屏：建成手機場次（P 編號）
         J(win._phr_mksess([str(x) for x in (d.get('ids') or [])][:500], str(d.get('u') or ''), bool(d.get('yt', True)))); return True
     if name == 'phr/usbimport':                                          # TK_V0.9.90 外接硬碟 TIKLIVE ScreenRecord Files 裡新的全部匯入
