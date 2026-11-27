@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.03"
+APP_VERSION = "1.2.04"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -51548,7 +51548,8 @@ async function gavJob(){if(document.hidden){const a_=arguments;document.addEvent
   el2.innerHTML=(mine?(jb.run?`<div class="gvPb"><i style="width:${(fr*100).toFixed(1)}%"></i></div>`:"")+`<div class="${jb.run?"":String(jb.msg).startsWith("✖")?"pfBad":"pfOk"}">${jb.run?"⏳ 輸出中 ":""}${rvE(jb.msg)}${jb.run?`（${jb.done||0}/${jb.total||0} 步・已經 ${gavFmt(el_)}${eta!=null?`・大概還要 ${gavFmt(eta)}`:""}）`:""}</div>`:"")
    +(last?`<div class="gvOut"><video src="${fu(last.f)}" controls playsinline loop muted autoplay></video><div class="gvR"><a class="gb go" href="${fu(last.f,1)}" download="${rvE(last.f)}">⬇ 存到這台（手機／平板相簿）</a><a class="gb" href="${fu(last.f)}" target="_blank" rel="noopener">▶ 另開播放</a></div></div>`:"")
    +`<div class="gvS" style="margin-top:6px">📁 存在電腦：影片資料夾\\TikLive_手機特效\\_禮物陣列\\（這場做過的 ${outs.length} 支，新的在上面）</div>`
-   +outs.map(o=>`<div class="gvR" style="gap:8px">🎞 <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${rvE(o.f)}</span><span class="gvS">${(o.sz/1e6).toFixed(1)} MB</span><a class="gb" href="${fu(o.f)}" target="_blank" rel="noopener">▶</a><a class="gb" href="${fu(o.f,1)}" download="${rvE(o.f)}">⬇ 存到這台</a></div>`).join("");
+   +(()=>{const row=o=>`<div class="gvR" style="gap:8px">🎞 <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${rvE(o.f)}</span><span class="gvS">${(o.sz/1e6).toFixed(1)} MB</span><a class="gb" href="${fu(o.f)}" target="_blank" rel="noopener">▶</a><a class="gb" href="${fu(o.f,1)}" download="${rvE(o.f)}">⬇ 存到這台</a></div>`;
+     return outs.slice(0,5).map(row).join("")+(outs.length>5?`<details class="gvOld"${GAV.oldOpen?" open":""} ontoggle="GAV.oldOpen=this.open"><summary class="gvS" style="cursor:pointer;margin:4px 0">▸ 更早的 ${outs.length-5} 支</summary>${outs.slice(5).map(row).join("")}</details>`:"");})();   /* V1.2.04 只列最新 5 支，其他收起來 */
   if(jb.run)GAV.jt=setTimeout(gavJob,2000);else if(GAV.jw){GAV.jw=0;const v=el2.querySelector(".gvOut");if(v)v.scrollIntoView({behavior:"smooth",block:"center"});}}
 async function gavClick(e){const b=e.target.closest("[data-g]");if(!b)return;const g=b.dataset.g;
   if(g==="ses"){gavLoad(+b.dataset.sid);return;}if(g==="back"){GAV.sid=0;GAV.d=null;gavSes();return;}
