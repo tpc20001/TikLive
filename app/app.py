@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.02"
+APP_VERSION = "1.2.03"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -17934,7 +17934,7 @@ try { NLConnect | Out-Null; Unset
                 self._ui_call.emit(lambda t=text, s=sock, pv=prev, nv=len(vids), up=unp_, sr=src_: self._phone_added(s,t,pv,nv,up,sr))
             threading.Thread(target=worker,daemon=True).start(); return
         if rest=='api/live': J(self._web_live()); return
-        if rest=='api/room': J(self._web_room(q.get('u',''))); return
+        if rest=='api/room': u_=q.get('u',''); _side_module('webpc_api')._bg(self,sock,lambda: self._web_room(u_)); return   # V1.2.03 直播間資料（查資料庫＋120 則聊天）改背景
         if rest=='api/sessions':                                   # V0.6.23b 背景執行，不再讓主程式畫面卡住
             a=(int(q.get('n','60') or 60),q.get('from',''),q.get('to',''),q.get('u',''),q.get('q',''),q.get('cat',''),q.get('us',''))
             gz_='gzip' in str((getattr(sock,'_hdr',{}) or {}).get('accept-encoding',''))
