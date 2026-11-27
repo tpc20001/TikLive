@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.09"
+APP_VERSION = "1.2.10"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -51701,7 +51701,7 @@ function pfxHtml(j){const D=j.dev||{},c=j.cur,cf=j.cfg||{},gr=j.gr||{};const gC=
   h+=`<div class="pfC"><h4>🎬 錄好的</h4><div class="pfSub" style="margin-bottom:6px">一場一列：▶ 播各段、🖼 預覽圖；回放可以切「原本／手機」版本，S 級會排進 YouTube（標題加「手機特效版」）。</div>${G.length?`<div class="pfL">`+G.map(g=>{const L=g.L.slice().reverse(),dur=L.reduce((a,x)=>a+((x.t1||0)-(x.t0||0)),0),sz=[...L,...g.X].reduce((a,x)=>a+(x.sz||0),0),t=L.length?L[0].t0:(g.X[0]||{}).t0;
     return `<div class="pfGrp"><div class="pfI"><b>${rvE(g.name)} ${g.sid?`<span class="pfSub">#${String(g.sid).padStart(5,"0")}</span>`:""}</b><span class="pfSub">${pfxT(t||0)} · ${L.length} 段 · ${pfxDur(dur)} · ${(sz/1e9).toFixed(2)} GB</span><span style="flex:1"></span>${g.sid?`<button class="pfB" data-pa="gift" data-sid="${g.sid}">🎁 禮物剪輯</button>${(j.up_sids||[]).includes(+g.sid)?`<button class="pfB" data-pa="mix" data-sid="${g.sid}">🧩 合併</button>`:""}<button class="pfB" data-pa="gav" data-sid="${g.sid}">🎛 禮物陣列</button>`:""}</div>
     <div class="pfSegs">${L.map((x,k)=>seg(x,L.length>1?"第 "+(k+1)+" 段":"播放")).join("")}${g.X.length?`<details class="pfX"><summary>🧩 合併輸出 ${g.X.length} 支</summary>${g.X.map(x=>`<a href="${rvB()}/api/pc/pfx/file?i=${x.i}" target="_blank" rel="noopener">▶ ${rvE(x.f)}</a>`).join("")}</details>`:""}</div>${[...L,...g.X].map(thumbs).join("")}</div>`;}).join("")+`</div>`:'<div class="pfSub">還沒有</div>'}</div>`;}
-  {const rs=new Set((j.rec||[]).map(x=>+x.sid));const extra=(j.up_sids||[]).filter(s=>!rs.has(s)).slice(-10).reverse();if(extra.length)h+=`<div class="pfC"><h4>🧩 有上傳手機／平板錄屏的場次</h4><div class="pfL">${extra.map(s=>`<div class="pfI"><b>#${String(s).padStart(5,"0")}</b><button class="pfB" data-pa="mix" data-sid="${s}">🧩 合併設定</button><button class="pfB" data-pa="gav" data-sid="${s}">🎛 禮物陣列</button></div>`).join("")}</div></div>`;}
+  {const rs=new Set((j.rec||[]).map(x=>+x.sid));const extra=(j.up_sids||[]).filter(s=>!rs.has(s)).slice(-10).reverse();if(extra.length)h+=`<div class="pfC"><h4>🧩 有上傳手機／平板錄屏的場次</h4><div class="pfL">${extra.map(s=>`<div class="pfI"><b>#${String(s).padStart(5,"0")}</b><button class="pfB" data-pa="gift" data-sid="${s}">🎁 禮物剪輯</button><button class="pfB" data-pa="mix" data-sid="${s}">🧩 合併設定</button><button class="pfB" data-pa="gav" data-sid="${s}">🎛 禮物陣列</button></div>`).join("")}</div></div>`;}   /* V1.2.10 只有上傳的場次也能禮物剪輯 */
   h+=pfxGiftHtml(j);
   h+=`<details class="pfC" open><summary>📝 紀錄</summary><div class="pfLog">${(j.log||[]).map(e=>`<div>${pfxT(e[0])} ${rvE(e[1])}</div>`).join("")||"—"}</div></details>`;
   return h;}
