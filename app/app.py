@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.07"
+APP_VERSION = "1.2.08"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -27234,7 +27234,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             self._mig_upd(phase='done', t_done=time.time(), t_boot=time.time(), clean={'files': 0, 'bytes': 0, 'extra': 0, 'err': 0, 'junk': 0, 'gone': True})
             self._wd_log(f"💽 搬硬碟：{S['src']} 已經拔掉、從 {S['dst']} 執行，搬硬碟完成"); ph = 'done'
         if ph == 'switched': self._mig_tail_start()                             # V1.1.20 收尾接著跑
-        if ph == 'switched' and (Path(DATA_ROOT if 'DATA_ROOT' in globals() else PACKAGE_DIR).drive or '').upper() == S['dst'].upper():
+        if ph == 'switched' and (Path(PACKAGE_DIR).drive or '').upper() == S['dst'].upper():
             self._mig_upd(phase='verify', t_boot=time.time()); self._wd_log(f"💽 搬硬碟：已經從 {S['dst']} 執行；{S['src']} 上的會慢慢比對、確認後刪掉（V1.1.21 自動）")
             self._mig_tail_start()                                              # V1.1.22 已經在跑就不再開第二條
         rt_ = self._mig_rt()
