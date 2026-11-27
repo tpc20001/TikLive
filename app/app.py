@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.96"
+APP_VERSION = "1.1.97"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -51631,7 +51631,7 @@ function gavChange(e){const b=e.target.closest("[data-g]");if(!b)return;const g=
   else if(g==="long"){GAV.long=+v;gavOutHint();}else if(g==="aud"){GAV.aud=!!v;gavOutHint();}else if(g==="gif"||g==="gcap"){GAV[g]=!!v;try{localStorage.setItem("tlm_gav_"+g,v?"1":"");}catch(e){}}else if(g==="fe"||g==="nolb"){GAV.L[g]=!!v;gavLayout();gavLaySave();}}
 /* V1.1.76 🎯 手動對齊：上下兩個播放器對同一瞬間，再用聲音前後 2 秒自動微調 */
 function mxT1(t){const g=t<0?"-":"";t=Math.abs(t||0);const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=t%60;return g+(h?h+":"+String(m).padStart(2,"0"):m)+":"+s.toFixed(1).padStart(4,"0");}
-async function mxAlign(sid,id){await mxOpen(sid);for(let k=0;k<40&&!(MX.d&&(MX.d.items||[]).some(y=>y.id===id));k++)await new Promise(z=>setTimeout(z,150));mxAlOpen(id);}   /* V1.1.82 上傳頁／手機錄特效頁直接跳進手動對齊 */
+async function mxAlign(sid,id){await mxOpen(sid);for(let k=0;k<40&&!(MX.d&&(MX.d.items||[]).some(y=>y.id===id));k++)await new Promise(z=>setTimeout(z,150));if(MX.d&&(MX.d.items||[]).some(y=>y.id===id))mxAlOpen(id);else if(typeof toast==="function")toast("這支還沒排進合併（等聲音比對好再試）",3000);}   /* V1.1.82 上傳頁／手機錄特效頁直接跳進手動對齊 */
 async function mxAlOpen(id){const d=MX.d||{},x=(d.items||[]).find(y=>y.id===id);if(!x)return;MX.al={id,x,mode:"rec",gm:100,link:false};
   const B=document.getElementById("mxB"),F=document.getElementById("mxF");B.innerHTML='<div class="geS">讀取這場的影片…</div>';F.innerHTML="";
   let R=null;try{R=await rvGet("/api/replay?id="+MX.sid);}catch(e){}if(!MX.al||MX.al.id!==id)return;MX.al.R=R||{};
@@ -53235,7 +53235,7 @@ function phrItem(x){const s=PHR_ST[x.st]||[x.st,"#888"],can=["fail","ask","none"
   if(x.msg)h+=`<div class="phrMsg">${phrE(x.msg)}${x.score!=null&&x.st==="ok"?`（聲音相似度 ${(+x.score).toFixed(2)}）`:""}</div>`;
   if(x.psid){const UN=x.u===PHR_UNK,P={wait:"⏳ 排隊處理",run:"⚙ 處理中",ytwait:"⏳ 等字幕好了自動排 YouTube",sibwait:"⏳ 等同一場的其他段",part:"🧩 同一場的其中一段",done:x.pdel?"✔ 全部做完（本機 MP4 已刪）":"✔ 處理好了",fail:"✖ 處理失敗"}[x.pst]||"",S=["整理檔案＋M4A","收進影片庫","截 60 張","語音轉字幕","YouTube"];
     h+=`<div class="phrNote">手機場次 ${phrE(x.lab)} · ${UN?"❓ 未指定主播":"@"+phrE(x.u)} · 開播 ${phrD(x.start)} · ${P}${!["done","ytwait","part"].includes(x.pst)?` · 第 ${(x.pstep||0)+1}/5 步：${S[Math.min(4,x.pstep||0)]}`:""}</div><div class="phrRow">${UN?`<input type="checkbox" class="phrPk" data-uk="${x.id}"${PHR.upk.has(x.id)?" checked":""}><button class="phrOne" data-ph="usetOne" data-id="${x.id}">👤 指定主播</button>`:""}<button data-ph="rp" data-sid="${x.psid}" data-l="0">▶ 看回放</button>${x.pst==="fail"?`<button data-ph="sretry" data-id="${x.id}">重試</button>`:""}</div>`;return h+`</div>`;}
-  if(x.st==="ok"){h+=`<div class="phrNote">對上：場次 #${String(x.sid).padStart(5,"0")} 開播後 ${phrT(x.L0)} 開始${x.e0&&x.start?` · 手機時間${x.start-x.e0>=0?"快":"慢"} ${Math.abs(x.start-x.e0).toFixed(1)} 秒`:""}</div><div class="phrRow"><button data-ph="rp" data-sid="${x.sid}" data-l="${Math.floor(x.L0||0)}">▶ 看這場回放（可以切成 📱 手機錄屏）</button><button data-ph="retry" data-id="${x.id}">重新比對</button></div>`;}
+  if(x.st==="ok"){h+=`<div class="phrNote">對上：場次 #${String(x.sid).padStart(5,"0")} 開播後 ${phrT(x.L0)} 開始${x.e0&&x.start?` · 手機時間${x.start-x.e0>=0?"快":"慢"} ${Math.abs(x.start-x.e0).toFixed(1)} 秒`:""}</div><div class="phrRow"><button data-ph="rp" data-sid="${x.sid}" data-l="${Math.floor(x.L0||0)}">▶ 看這場回放（可以切成 📱 手機錄屏）</button><button data-ph="retry" data-id="${x.id}">重新比對</button><button onclick="mxAlign(${+x.sid},'${x.id}')" title="跟手機特效合併、看對得準不準">🧩 合併／對齊</button><button onclick="gavOpen(${+x.sid})">🎛 禮物陣列</button></div>`;}   /* V1.1.97 */
   else if(x.st==="ask"||x.st==="fail"||x.st==="none"){const C=(x.cands||[]).filter(c=>c.score>-1);
     if(C.length)h+=`<div class="phrNote">候選（聲音相似度，越接近 1 越像）：</div><div class="phrRow phrCands">${C.map(c=>`<button data-ph="pick" data-id="${x.id}" data-sid="${c.sid}">#${String(c.sid).padStart(5,"0")} ${phrE(c.nm||c.u)} <small>${(+c.score).toFixed(2)}</small></button>`).join("")}</div>`;
     h+=`<div class="phrRow">${x.st!=="none"?`<button data-ph="pick" data-id="${x.id}" data-sid="0">不是任何一場</button>`:""}<button data-ph="retry" data-id="${x.id}">重新比對</button></div>`;}
@@ -53430,7 +53430,7 @@ function pupGuessHtml(j){const g=j.guess;if(!g||j.st==="done")return "";const h=
 /* TK_V1.0.14 傳好的歸到哪裡 */
 function pupWhere(x){const L=i=>typeof sidS==="function"?sidS(i):"#"+i;const st=x.st;
   if(x.psid)return `📼 ${L(x.psid)}${x.msg?` <span style="opacity:.75">${pupE(String(x.msg).slice(0,60))}</span>`:""}`;
-  if(st==="ok"&&x.sid)return `✔ 歸到 ${L(x.sid)} 那場`+(x.unal&&x.iid?` <button class="pill" style="background:#f0ad4e;color:#111" onclick="event.stopPropagation();mxAlign(${+x.sid},'${x.iid}')">🎯 聲音沒對上，手動對齊位置</button>`:"");if(st==="wait"||st==="run"||!st)return "🔍 等聲音比對（電腦閒著才做）";
+  if(st==="ok"&&x.sid)return `✔ 歸到 ${L(x.sid)} 那場`+(x.unal&&x.iid?` <button class="pill" style="background:#f0ad4e;color:#111" onclick="event.stopPropagation();mxAlign(${+x.sid},'${x.iid}')">🎯 聲音沒對上，手動對齊位置</button>`:x.iid?` <button class="pill" onclick="event.stopPropagation();mxAlign(${+x.sid},'${x.iid}')" title="跟手機特效合併、看對得準不準">🧩 合併／對齊</button>`:"")+` <button class="pill" onclick="event.stopPropagation();gavOpen(${+x.sid})" title="這場的禮物排成陣列影片">🎛 禮物陣列</button>`;   /* V1.1.97 傳好直接一鍵到合併／陣列（不用再繞手機錄特效頁） */if(st==="wait"||st==="run"||!st)return "🔍 等聲音比對（電腦閒著才做）";
   if(st==="ask")return "❓ 不太確定是哪場，到「手機錄屏」頁確認";if(st==="fail"||st==="none")return "❓ 還沒對上，等一下會自己建成手機場次";return pupE(x.msg||"處理中");}
 function pupDrawSoft(){clearTimeout(PUP.dt);PUP.dt=setTimeout(()=>{pupDraw();pupPill();},250);}
 
