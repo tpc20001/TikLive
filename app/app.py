@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.95"
+APP_VERSION = "1.1.96"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -96,6 +96,7 @@ THEMES = {
     },
 }
 THEME = dict(THEMES['dark'])
+_PAGE_SLIM = re.compile(r'[ \t]*/\* ?(?:TK_)?V\d[^*]*?\*/')   # V1.1.96 送出頁面時拿掉「/* V… */」版本註解
 THEME_MODE = {'mode':'dark'}
 
 
@@ -30205,7 +30206,13 @@ $r | ConvertTo-Json -Depth 4 -Compress
            'histbg':'hist_bg','gift':'gift_label','sel':'selection','alt':'alt_row','cmt':'series_comments','like':'series_likes','join':'series_joins'}
         return {'--'+k:th[v] for k,v in m.items() if v in th}
 
-    def _web_page_html(self, base):
+    def _web_page_html(self, base):   # V1.1.96 同一組（網址／主題／電腦名）只組一次，並拿掉版本註解（頁面小 5%）
+        k=(base,THEME_MODE.get('mode','dark'),self.pc_role_name(),self.pc_role(),id(WEB_DASHBOARD_HTML))
+        c=getattr(self,'_wph_c',None)
+        if c and c[0]==k: return c[1]
+        h=_PAGE_SLIM.sub(' ',self._web_page_html0(base)); self._wph_c=(k,h); return h
+
+    def _web_page_html0(self, base):
         th=THEME
         themes=json.dumps({k:self._web_theme_vars(v) for k,v in THEMES.items()},ensure_ascii=False)
         css=(f"--bg:{th['bg']};--nav:{th['nav']};--panel:{th['panel']};--card:{th['card']};--line:{th['border']};--line2:{th['border_strong']};"
@@ -30785,9 +30792,17 @@ $r | ConvertTo-Json -Depth 4 -Compress
         threading.Thread(target=work, name='TikLiveImg2', daemon=True).start()
 
     def _phone_send(self, sock, code, body, ctype='text/html; charset=utf-8', extra='', cache=0):
-        if isinstance(body,str): body=body.encode('utf-8')
+        md_=None
+        if isinstance(body,str):
+            if len(body)>200000:   # V1.1.96 同一份整頁：編碼＋指紋只算一次（不用每次在畫面執行緒重算 1.6 MB）
+                import hashlib; E_=self.__dict__.setdefault('_pg_enc',[])
+                hit=next((e for e in E_ if e[0] is body),None)
+                if hit is None:
+                    hit=(body,body.encode('utf-8')); hit+=(hashlib.md5(hit[1]).digest(),); E_.insert(0,hit); del E_[3:]
+                body,md_=hit[1],hit[2]
+            else: body=body.encode('utf-8')
         if code.startswith('200') and len(body)>200000 and 'html' in ctype and not cache:   # V1.1.84 整頁加 ETag：內容沒變 → 304（手機不用再下載 3 MB）
-            import hashlib; et_='"p'+hashlib.md5(body).hexdigest()[:20]+'"'
+            import hashlib; md_=md_ or hashlib.md5(body).digest(); et_='"p'+md_.hex()[:20]+'"'
             if str((getattr(sock,'_hdr',{}) or {}).get('if-none-match',''))==et_:
                 try: sock.write(f'HTTP/1.1 304 Not Modified\r\nETag: {et_}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n'.encode('ascii')); sock.flush(); sock.disconnectFromHost()
                 except Exception: pass
@@ -30797,7 +30812,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         if len(body)>2048 and ('json' in ctype or 'html' in ctype) and 'gzip' in str((getattr(sock,'_hdr',{}) or {}).get('accept-encoding','')):
             import gzip
             if len(body)>200000 and 'html' in ctype:                          # V1.1.82 整頁（約 3 MB）壓縮過的留著：同樣內容不再每次在畫面執行緒重壓（約 0.1 秒）
-                import hashlib; k_=hashlib.md5(body).digest(); C_=self.__dict__.setdefault('_gz_page_c',{})
+                import hashlib; k_=md_ or hashlib.md5(body).digest(); C_=self.__dict__.setdefault('_gz_page_c',{})
                 z_=C_.get(k_)
                 if z_ is None:
                     z_=gzip.compress(body,6)
@@ -44266,10 +44281,10 @@ html[data-mode=light] .gfxb:not(.gxbig):not(.gxhuge) .gxn{color:#e5107a;text-sha
 .sxCard{margin:0 0 10px;padding:9px 11px;border-radius:11px;background:rgba(127,127,127,.08);border:1px solid rgba(127,127,127,.18);font-size:13px;line-height:1.55}
 .sxSt{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}.sxSt b{font-size:15px}
 .sxDot{width:10px;height:10px;border-radius:50%;flex:none}.sxDot.ok{background:#45d483}.sxDot.no{background:#f0ad4e}
-.sxSub{font-size:12px;opacity:.75}
+.sxSub{font-size:12px;opacity:.75;overflow-wrap:anywhere;min-width:0}
 .sxNote{font-size:12px;opacity:.7;margin:6px 0 0}
 .sxErr{color:#ff6577;font-weight:700;margin-top:6px}
-.sxRow{display:flex;align-items:center;gap:8px;margin-top:6px}.sxRow.wrap{flex-wrap:wrap}.sxRow .grow{flex:1}
+.sxRow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px}.sxRow.wrap{flex-wrap:wrap}.sxRow .grow{flex:1}
 .sxRow input#sxQ{flex:1 1 220px;min-width:0;height:32px;padding:0 9px;border-radius:8px;border:1px solid rgba(127,127,127,.4);background:transparent;color:inherit;font-size:13px}
 .sxCard .pill,.sxCC{flex:none;width:auto;min-width:0;margin:0;height:30px;line-height:28px;padding:0 10px;font-size:12.5px;font-weight:700;white-space:nowrap;text-align:center;border-radius:9px;background:var(--card,rgba(127,127,127,.15));border:1px solid var(--line,rgba(127,127,127,.3));color:var(--text,inherit);text-decoration:none;display:inline-block;cursor:pointer}
 .sxCard .pill.sxGo{background:#2a7de1;border-color:#2a7de1;color:#fff}
@@ -45103,7 +45118,7 @@ html[data-mode=light] .gfxb:not(.gxbig):not(.gxhuge) .gxn{color:#e5107a;text-sha
 /* V0.7.36 轉檔按鈕上的小數字 */
 #sysFab button{position:relative;overflow:visible}
 #sysFab .fbN,#sysFab .fbR{position:absolute;min-width:16px;height:16px;padding:0 4px;border-radius:8px;font:800 10px/16px system-ui,sans-serif;font-style:normal;text-align:center;box-sizing:border-box;pointer-events:none;box-shadow:0 1px 4px rgba(0,0,0,.5)}
-#sysFab .fbN{top:-7px;right:-6px;background:#ff3b5c;color:#fff}
+#sysFab .fbN{top:-10px;right:-7px;height:14px;min-width:14px;padding:0 3px;font-size:9.5px;line-height:14px;background:#ff3b5c;color:#fff}   /* V1.1.96 小一點、往上：不蓋到「轉檔」字 */
 #sysFab .fbR{bottom:-7px;right:-6px;background:#1f8ef1;color:#fff}
 #sysFab .fbN[hidden],#sysFab .fbR[hidden]{display:none!important}
 /* V0.7.37 上面「🗂 分類」浮窗 */
@@ -47326,7 +47341,7 @@ function deepPop(){const ov=document.createElement("div");ov.className="calov";l
     ov.querySelectorAll("#dpL tr[data-u]").forEach(t=>t.onclick=()=>{sel=sel===t.dataset.u?null:t.dataset.u;load();});}
   ov.querySelector("#dpA").onclick=async()=>{const j=await deepPost("/api/pc/deep/start",{all:true});toast(j.ok?`已加入 ${j.n} 位`:"✖ "+(j.message||"沒有成功"));load();};
   ov.querySelector("#dpS").onclick=async()=>{await deepPost("/api/pc/deep/stop",{});load();};
-  load();tm=setInterval(load,2500);}
+  load();tm=setInterval(()=>document.hidden||load(),2500);}
 document.addEventListener("click",e=>{if(e.target.closest("[data-deep]")){e.stopPropagation();deepPop();}});
 function pfErrShow(){const sb=$("#sbody");if(!sb||S.scat!=="perf")return;let e=$("#pferr");
   if(!e){e=document.createElement("div");e.id="pferr";e.className="ubad";e.style.margin="0 0 10px";sb.prepend(e);}
@@ -47399,7 +47414,7 @@ function stHeat(){const d=S.std,box=$("#sthm");if(!d||!box)return;const rows=d.h
 async function drawConn(){const sb=$("#sbody");if(!sb)return;
   if(!S.cn)sb.innerHTML='<h2 class="stt">🩺 連線狀況</h2><div class="empty">讀取中…</div>';
   let d;try{d=await J("/api/conn");}catch(e){if(S.scat==="conn"&&$("#sbody"))sb.innerHTML='<h2 class="stt">🩺 連線狀況</h2>'+offline;return;}
-  if(S.scat!=="conn"||!$("#sbody"))return;S.cn=d;const v=d.verdict,col={bad:"#ff5c5c",warn:"#f0ad4e",ok:"#45d483"}[v.level]||"var(--strong)";
+  if(S.scat!=="conn"||!$("#sbody"))return;if(!d||!d.verdict){sb.innerHTML='<h2 class="stt">🩺 連線狀況</h2><div class="empty">還沒有資料（主程式剛開，等一下再看）</div>';return;}S.cn=d;const v=d.verdict,col={bad:"#ff5c5c",warn:"#f0ad4e",ok:"#45d483"}[v.level]||"var(--strong)";
   const C=d.cats,P=d.probe||{};
   const chips=Object.entries(d.counts).sort((a,b)=>b[1]-a[1]).filter(([k])=>C[k]).map(([k,n])=>`<span class="cnchip">${C[k][0]} ${esc(C[k][1])} <b>${n}</b></span>`).join("");
   sb.innerHTML=`<h2 class="stt">🩺 連線狀況</h2><section class="ssec"><h3>🛠 網路處理（不影響 OlivePro 等其他軟體）</h3><div><button class="pill" data-net="diag" style="margin:3px 4px 3px 0">🔍 診斷</button><button class="pill" data-net="flushdns" style="margin:3px 4px 3px 0">🧹 清 DNS 快取</button><button class="pill" data-net="rebuild" style="margin:3px 4px 3px 0">♻️ 重建這支程式的連線</button><button class="pill" data-restart="1" style="margin:3px 4px 3px 0;border-color:#c62845;color:#ff6577">🔄 重新啟動主程式</button></div><div class="snote">診斷結果和處理紀錄在「<a href="javascript:void(0)" onclick="S.scat='logx';drawSetCat()">📋 LOG 與問題</a>」。</div></section>
@@ -47535,7 +47550,7 @@ function drawPerf(){const sb=$("#sbody");if(!sb)return;
     let j;try{j=await J("/api/perf");}catch(e){S.pfErr="連不到電腦或資料讀取失敗";pfErrShow();return;}
     if(j&&j.error){S.pfErr="電腦回報錯誤："+j.error;pfErrShow();return;}S.pfErr="";S.pf=j;
     try{pfRender();}catch(e){S.pfErr="畫面錯誤："+(e&&e.message||e);pfErrShow();}};
-  clearInterval(S.pfIv);S.pfIv=setInterval(tick,2000);tick();if(S.pf)pfRender();}
+  clearInterval(S.pfIv);S.pfIv=setInterval(()=>document.hidden||tick(),2000);tick();if(S.pf)pfRender();}
 function anomHtml(L){if(!L||!L.length)return '<span style="color:#45d483">✔ 最近 7 天沒有觀察到異常（CPU、記憶體、硬碟忙碌、溫度、空間、資料庫與紀錄檔大小、主程式記憶體、畫面卡住都會自動盯著）</span>';
   const f=t=>{const d=new Date(t*1000);return (d.getMonth()+1)+"/"+d.getDate()+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");};
   return L.slice(0,30).map(e=>`<div style="margin:4px 0"><b style="color:${e.level==="bad"?"#ff4d6d":"#f0ad4e"}">⚠ ${esc(e.title||"")}</b> <span style="opacity:.65;font-size:.9em">${f(e.t)}${(e.n||1)>1?` → ${f(e.last).slice(-5)}，${e.n} 次`:""}</span><br>${esc(e.detail||"")}${e.tip?`<br><span style="opacity:.65;font-size:.9em">${esc(e.tip)}</span>`:""}</div>`).join("");}
@@ -47576,7 +47591,7 @@ async function edbPoll(){let d=null;try{d=await J("/api/pc/edit/badge");}catch(e
   if(isNaN(edbSeen())||edbSeen()>d.files+d.pend)edbMark();   /* 第一次（或刪過）：現在這些都算看過 */
   const w=document.getElementById("sysPop");if(w&&w.dataset.t==="ed")edbMark();edbPaint();}
 function edbPaint(){const d=EDB.d,b=document.querySelector('#sysFab [data-t="ed"]');if(!d||!b)return;const n=Math.max(0,d.files+d.pend-(edbSeen()||0)),N=b.querySelector(".fbN"),R=b.querySelector(".fbR");
-  N.hidden=!n;N.textContent=n>99?"99+":"+"+n;R.hidden=!d.run;R.textContent=d.run;R.title=`正在轉 ${d.run} 個工作`;}
+  N.hidden=!n;N.textContent=n>99?"99+":n;R.hidden=!d.run;R.textContent=d.run;R.title=`正在轉 ${d.run} 個工作`;}
 const SYSPOP_T={pf:"📊 電腦效能",bg:"🖥 後台狀態",ed:"✂ 轉檔（剪輯／初剪）",lv:"🗂 分類（保存等級）"};
 function sysPopOpen(t0){if(document.getElementById("sysPop"))return;const w=document.createElement("div");w.id="sysPop";
   w.innerHTML=`<div class="sysPopW"><div class="sysPopH"><b class="sysPopTt"></b><span class="sysPopN">點旁邊回到原本的頁面</span><button type="button" class="sysPopX" title="關閉">✕</button></div><div class="sysPopB"><div class="empty">讀取中…</div></div><div class="sysPopB sysPopG" hidden></div><div class="sysPopB sysPopE" hidden><div class="empty">讀取中…</div></div><div class="sysPopB sysPopL" hidden><div class="empty">讀取中…</div></div><div class="sysPopR" title="上下拖：調整視窗高度（點兩下恢復 50%）"><i></i></div></div>`;
@@ -47598,7 +47613,7 @@ function sysPopOpen(t0){if(document.getElementById("sysPop"))return;const w=docu
     if(!edb.hidden){edjLoad(edb);return;}if(!lvb.hidden)return;if(body.hidden)return;
     let j;try{j=await J("/api/perf");}catch(e){if(!S.pf)body.innerHTML='<div class="empty">連不到電腦或資料讀取失敗</div>';return;}
     if(j&&j.error){if(!S.pf)body.innerHTML=`<div class="empty">電腦回報錯誤：${esc(j.error)}</div>`;return;}S.pf=j;try{pfRender();}catch(e){}};
-  clearInterval(S.pfFx);S.pfFx=setInterval(tick,2000);if(S.pf)try{pfRender();}catch(e){}tick();
+  clearInterval(S.pfFx);S.pfFx=setInterval(()=>document.hidden||tick(),2000);if(S.pf)try{pfRender();}catch(e){}tick();
   try{if(typeof vgBackPush==="function")vgBackPush(sysPopClose);}catch(e){}}   /* 手機按返回＝關掉視窗 */
 /* V0.7.20 「✂ 轉檔」：剪輯／初剪正在做的、排隊的、做好的；點一筆＝打開那一場的回放 */
 function edjHms(x){x=Math.max(0,Math.round(+x||0));return Math.floor(x/3600)+":"+String(Math.floor(x%3600/60)).padStart(2,"0")+":"+String(x%60).padStart(2,"0");}
@@ -47614,22 +47629,6 @@ async function edjLoad(host){if(host._busy)return;host._busy=true;let d=null;try
   host.onclick=e=>{const it=e.target.closest(".edjI[data-sid]");if(!it)return;const sid=+it.dataset.sid;try{if(typeof vgBackDrop==="function")vgBackDrop(sysPopClose);}catch(x){}sysPopClose(true);location.hash="#rp/"+sid;};}
 /* V0.7.37 「🗂 分類」：整理 MP4 的精簡版——每個保存等級幾場、幾 GB、占全部 MP4 幾 %；最上面總共幾 GB、還沒標等級（未處理）幾 %；點一格＝進「整理 MP4」那個等級 */
 const LVS_L={"-2":["可丟","#ff4d6d"],"-1":["偏可丟","#ff8c42"],"0":["未分類","#f0c419"],"1":["待剪輯","#9ad94a"],"2":["保存","#2ecc71"]};
-async function lvpopLoadOld(host,now){if(host._busy)return;   /* TK_V0.9.27 舊的「分類」總覽（名字跟連續分級的 lvsLoad 撞到，已不用）*/if(!now&&host._t&&Date.now()-host._t<15000)return;host._busy=true;let d=null;try{d=await J("/api/pc/lv/sum");}catch(e){}host._busy=false;host._t=Date.now();if(!host.isConnected)return;
-  if(!d||!d.ok){if(!host._ok)host.innerHTML='<div class="empty">連不到電腦或資料讀取失敗</div>';return;}host._ok=1;
-  const G=b=>((b||0)/1e9).toFixed(b>=1e11?0:b>=1e10?1:2),T=d.tot||0,P=b=>T?Math.round(b/T*1000)/10:0,un=d.un||{n:0,b:0},done=T-un.b;
-  const K=["-2","-1","0","1","2"];
-  let h=`<div class="lvsTop"><div class="lvsTot"><small>全部 MP4</small><b>${G(T)}<u>GB</u></b><small>${d.tn||0} 場</small></div><div class="lvsTot"><small>已分類</small><b>${P(done)}<u>%</u></b><small>${G(done)} GB</small></div><div class="lvsTot un"><small title="還沒標保存等級的場次">未處理</small><b>${P(un.b)}<u>%</u></b><small>${un.n} 場 · ${G(un.b)} GB</small></div></div>`;
-  const TB=b=>b>=1e12?(b/1e12).toFixed(2)+" TB":(b/1e9).toFixed(b>=1e11?0:1)+" GB",Q=(a,b)=>b?Math.round(a/b*1000)/10:0;   /* V0.7.42 硬碟總容量：已用 %、剩多少可以緩衝 */
-  h+=(d.disks||[]).map(x=>{const pu=Q(x.used,x.total),pm=Q(Math.min(x.mp4,x.used),x.total),po=Math.max(0,Math.round((pu-pm)*10)/10),pf=Math.max(0,Math.round((100-pu)*10)/10),cls=pu>=90?"bad":pu>=75?"warn":"";
-    return `<div class="lvsDk ${cls}"><div class="lvsDkH"><b>💽 ${esc(x.d)} 槽</b><span>已用 <em>${pu}<u>%</u></em></span><span>剩 <em>${TB(x.free)}</em></span><small>共 ${TB(x.total)}</small></div><div class="lvsDkB"><i class="m" style="width:${pm}%"></i><i class="o" style="width:${po}%"></i></div><div class="lvsDkL"><span><i class="m"></i>MP4 ${pm}%（${TB(x.mp4)}）</span><span><i class="o"></i>其他 ${po}%</span><span><i class="f"></i>可用 ${pf}%</span></div>${x.days!=null?`<div class="lvsDkE${x.level?" "+x.level:""}">照最近的速度約 <b>${x.days} 天</b>會滿（每天多用 ${TB(x.per_day||0)}）</div>`:x.wait===true?`<div class="lvsDkE">⏳ 正在記錄用量，6 小時後才能預測幾天會滿</div>`:x.wait===false?`<div class="lvsDkE">最近沒有越來越滿</div>`:""}</div>`;}).join("");   /* V0.7.42.022 幾天會滿 */
-  h+=`<div class="lvsBar">${K.map(k=>{const p=P(d.lv[k].b);return p?`<i style="width:${p}%;background:${LVS_L[k][1]}" title="${k>0?"+"+k:k} ${LVS_L[k][0]} ${p}%"></i>`:"";}).join("")}${P(un.b)?`<i class="un" style="width:${P(un.b)}%" title="未處理 ${P(un.b)}%"></i>`:""}</div>`;
-  h+=`<div class="lvsG">${["2","1","0","-1","-2"].map(k=>{const x=d.lv[k];return `<button type="button" class="lvsC" data-lv="${k}" style="--c:${LVS_L[k][1]}"><b>${+k>0?"+"+k:k}</b><span>${LVS_L[k][0]}</span><em>${P(x.b)}<u>%</u></em><small>${x.n} 場 · ${G(x.b)} GB</small><i class="lvsP"><u style="width:${Math.min(100,P(x.b))}%"></u></i><s>›</s></button>`;}).join("")}</div>`;   /* V0.7.39 直的排：上到下 +2 +1 0 -1 -2 */
-  h+=`<div class="lvsN">占比＝這一級的 MP4 占全部 MP4 的容量 · 點一格進「整理 MP4」</div>`;
-  host.innerHTML=h;
-  host.onclick=e=>{const b=e.target.closest(".lvsC[data-lv]");if(!b)return;const k=+b.dataset.lv;
-    try{if(typeof LW!=="undefined"){LW.lv=k;LW.sel.clear();}localStorage.setItem("tlm_lworg","lv");}catch(x){}
-    try{if(typeof vgBackDrop==="function")vgBackDrop(sysPopClose);}catch(x){}sysPopClose(true);
-    if(location.hash==="#tool/org"){try{viewTool("org");}catch(x){}}else location.hash="#tool/org";};}
 function sysPopClose(fromBack){const w=document.getElementById("sysPop");if(!w)return;w.remove();S.pfHost=null;clearInterval(S.pfFx);S.pfFx=null;
   try{const r=document.getElementById("bgsRoot");if(r&&typeof bgsMount==="function"&&BGS.root!==r)bgsMount(r);}catch(e){}
   try{const o=document.querySelector("#sbody.lwOrg");if(o&&typeof lwOrgMount==="function")lwOrgMount(o);}catch(e){}   /* TK_V0.9.27 工具 → 整理 MP4 那頁開著的話接回去 */   /* 工具 → 後台狀態那頁開著的話接回去 */
@@ -47657,7 +47656,7 @@ function updFabInit(){const chk=async()=>{if(document.hidden)return;let d=null;t
       setTimeout(async()=>{const r=$("#updR");if(r)r.innerHTML='<div class="umsg">讀取下載資料夾的更新包、檢查中…</div>';let x,j={};
         try{x=await fetch(B+"/api/update/dl/prep",{method:"POST",cache:"no-store"});j=await x.json();}catch(e){if($("#updR"))$("#updR").innerHTML='<div class="ubad">✖ 連不到電腦</div>';return;}
         if(!$("#updR"))return;if(!x.ok||!j.ok){$("#updR").innerHTML=`<div class="ubad">✖ ${esc(j.message||"沒有成功")}</div>`;return;}updShow(j);},450);};};
-  chk();setInterval(chk,15000);}
+  chk();setInterval(()=>document.hidden||chk(),15000);}
 setTimeout(()=>{try{updFabInit();}catch(e){}},1500);
 /* 電腦程式的設定（存在電腦上，改了會影響監控／錄製；要按「套用到電腦」） */
 function pcVal(it){return S.pcPend&&it.key in S.pcPend?S.pcPend[it.key]:it.value;}
@@ -48589,7 +48588,7 @@ function sxMount(root,alive){if(!root)return;SX.logn=0;
       else if(a==="cancel"){const sid=+b.dataset.sid||0;const cur=SX.I&&SX.I.cur&&SX.I.cur.sid===sid;if(cur&&!confirm("要取消正在轉的這一場嗎？（已經轉好的部分不會保留）"))return;const j=await sxPost("/api/pc/stt/cancel",{sid});if(j&&j.ok)sxToast(cur?"已取消":"已移出排隊");}}
     finally{SX.busy=false;}setTimeout(poll,300);};
   if(!SX.rows)rows();else{const l=$q("#sxList");if(l)l.innerHTML=sxRowsHtml(SX.rows);}
-  clearInterval(SX.iv);SX.iv=setInterval(poll,1000);poll();}
+  clearInterval(SX.iv);SX.iv=setInterval(()=>document.hidden||poll(),1000);poll();}
 function drawStt(){const sb=document.getElementById("sbody");if(!sb)return;sb.innerHTML='<h2 class="stt">🎙 語音轉字幕</h2><div id="sxP"></div>';
   sxMount(document.getElementById("sxP"),()=>typeof S!=="undefined"&&S.scat==="stt"&&(typeof onSetPane==="function"?onSetPane():S.stab==="set"));}
 /* ---- 回放字幕：host() = 放影片的方塊；ctl = 放「字幕」按鈕的地方 ---- */
@@ -49441,8 +49440,6 @@ function spGList(){const L=SP.root&&SP.root.querySelector("#spGL");if(!L)return;
   L.innerHTML=!R.length?'<div class="tkEmpty">這段時間沒有收到禮物</div>':`<div class="tkRow" style="margin-bottom:8px">${A.length?'<button class="tkBtn sm" data-sp="gia">全選互動禮物</button>':""}<button class="tkBtn sm" data-sp="gall">全選</button><button class="tkBtn sm" data-sp="gnone">清除</button><span class="tkNote">每種禮物選了以後，下面可以設自己的時間</span></div>
 <div class="tkSec ia">🎬 互動禮物<small>影片裡看得到動畫</small></div>${A.length?`<div class="tkGifts">${A.map(spTile).join("")}</div>`:'<div class="tkNote" style="margin:2px 0 6px">還沒有標記。主播畫面裡看得到動畫的禮物（例如愛心手勢類），按禮物左上角的 🎬（或長按禮物）看當時的畫面，在預覽裡按「是互動禮物」，之後都會排在這裡。</div>'}
 ${O.length?`<div class="tkSec">其他禮物<small>還沒確認：點左上角 🎬 看當時的畫面</small></div><div class="tkGifts">${O.map(spTile).join("")}</div>`:""}${NO.length?`<div class="tkSec no">✖ 不是互動禮物<small>畫面裡看不到動畫，任何剪輯都不會用到（送禮紀錄照常保留、照常統計）</small></div><div class="tkGifts">${NO.map(spTile).join("")}</div>`:""}`;spDock();}
-async function spIa(g){const r=((SP.G||{}).rows||[]).find(x=>x.g===g);const on=!(r&&r.ia);const j=await spPost("/api/pc/gift/ia",{g,on});if(!j||j.ok===false){spToast("沒有成功");return;}
-  if(j.meta)KIT.gm=j.meta;if(r&&SP.G){r.ia=on;SP.G.rows.sort((a,b)=>(b.ia?1:0)-(a.ia?1:0)||b.unit-a.unit||b.n-a.n);}spToast(on?`已標記「${(r&&r.zh)||g}」為互動禮物`:"已取消標記");spGList();}
 function spCount(){if(!SP.G)return 0;return (SP.G.rows||[]).filter(spOn).reduce((a,r)=>a+r.n,0);}
 function spDock(){const d=SP.root&&SP.root.querySelector("#spDock");if(!d||SP.busy)return;const n=spCount(),k=SP.G?(SP.G.rows||[]).filter(spOn).length:0;
   const ready=SP.sel.size&&n>0;
@@ -49832,9 +49829,6 @@ function edmDraw(){const L=EDM.root&&EDM.root.querySelector("#edmL");if(!L)retur
 <span class="tkTag">✂ ${r.segs||r.files} 段</span>${r.busy?'<span class="tkTag">直播中</span>':r.mp4?`<span class="tkTag bad">MP4 ${edSz(r.bytes)}</span>`:'<span class="tkTag ok">MP4 已刪</span>'}<button class="tkBtn sm" data-em="open" data-sid="${r.sid}">開剪輯</button></div></div>`).join("")||'<div class="tkEmpty">還沒有剪輯過的直播。在歷史紀錄或任何場次上長按（電腦按右鍵）→「✂ 剪輯這一場」。</div>';
   const S=R.filter(r=>EDM.sel.has(r.sid)),go=EDM.root.querySelector("#edmGo");go.disabled=!S.length;go.textContent=S.length?`刪除 ${S.length} 場的 MP4`:"刪除勾選場次的 MP4";
   EDM.root.querySelector("#edmSum").textContent=S.length?`會空出 ${edSz(S.reduce((x,r)=>x+r.bytes,0))}`:"";}
-function edmOpen(){let ov=document.getElementById("spOv");if(ov)ov.remove();ov=document.createElement("div");ov.id="spOv";
-  ov.innerHTML=`<div class="vbHd"><b>🗑 刪除已剪輯的 MP4</b><button id="spX">✕ 關閉</button></div><div id="spRoot"></div>`;document.body.appendChild(ov);
-  const close=()=>ov.remove();ov.querySelector("#spX").onclick=close;window.addEventListener("hashchange",close,{once:true});edmMount(ov.querySelector("#spRoot"));}
 /* ED-END */
 /* HT-BEGIN */
 /* ================= V0.6.85 歷史回放的縮圖時間軸（跟剪輯器一樣：紅線固定在中間、拖時間軸找畫面、放大縮小、拖下面的把手調高度；手機／網頁版共用） ================= */
@@ -49987,10 +49981,6 @@ async function lwLvApply(sid,btn){const P=LW.pend||{},ids=Object.keys(P).map(Num
   try{if(typeof lvsSumPaint==="function")lvsSumPaint();}catch(e){}
   lwToast(bad?`✔ 改好 ${ok} 場，✖ ${bad} 場沒改成（還留著，可以再按 ✔）`:`✔ ${ok} 場的等級都改好了`);lwDraw();lwLoad();}
 /* TK_V0.9.39 從 YouTube 排隊「退回分類」：打開整理 MP4 的那一頁、捲到那一場 */
-function lwFocus(sid,lv){LW.hl=+sid;LW.lv=[-2,0,1,2].includes(+lv)?+lv:0;try{localStorage.setItem("tlm_lworg","lv");}catch(e){}
-  if(typeof sysPopOpen==="function"){const w=document.getElementById("sysPop");if(!w)sysPopOpen("lv");else if(w._tab)w._tab("lv");
-    setTimeout(()=>{const o=document.querySelector("#sysPop .lwOrg");if(o){const t=o.querySelector('.lwTabs [data-t="lv"]');if(t&&!t.classList.contains("on"))t.click();}LW.lv=[-2,0,1,2].includes(+lv)?+lv:0;lwDraw();},300);return;}
-  if(typeof go==="function")go(29);}
 async function lwUnLv(sid,btn){const x=LW.R.find(y=>y.sid===sid);if(btn)btn.disabled=true;const j=await lwPost("/api/pc/vb/note",{sid,level:null});
   if(!j||j.ok===false){if(btn)btn.disabled=false;lwToast("✖ "+((j&&j.message)||"沒有改成"));return;}LW.sel.delete(sid);lwToast(`↩ ${x?x.name+" ":""}#${String(sid).padStart(5,"0")} 改回未分類`);
   try{const r=(typeof LVS!=="undefined"&&LVS.all||[]).find(y=>y.sid===sid);if(r){r.lv=null;if(typeof lvsSumPaint==="function")lvsSumPaint();}}catch(e){}lwLoad();}
@@ -50056,14 +50046,6 @@ function lwOrgMount(root,which){root.classList.add("lwOrg");const W=which||(()=>
     if(t==="ed"&&typeof edmMount==="function")edmMount(sub);else lwMount(sub);};
   root.querySelector(".lwTabs").onclick=e=>{const b=e.target.closest("button[data-t]");if(b)go(b.dataset.t);};go(W);}
 /* V0.6.94 手機「工作區」：常用工具放一起（不用再到設定裡找） */
-function wsMount(root){root.classList.add("ws");
-  const T=[["vg","▦","檔案總管","影片快速瀏覽 v2：每幾秒一張圖排滿畫面，選起來初剪",typeof vgOpen==="function"],["sp","✂","批量剪輯","選主播＋禮物，一次剪出很多段",typeof spOpen==="function"],
-    ["stt","🎙","語音轉字幕","下播後自動轉；這裡看進度、設定",true],["bg","🖥","後台狀態","電腦現在在跑什麼、排隊什麼",true]];
-  root.innerHTML=`<div class="wsGrid">${T.filter(x=>x[4]).map(([k,ic,t,sub])=>`<button class="wsCard" data-ws="${k}"><i>${ic}</i><b>${t}</b><small>${sub}</small></button>`).join("")}</div><div class="wsSec">🗂 整理 MP4</div><div id="wsOrg"></div>`;
-  root.querySelector(".wsGrid").onclick=e=>{const b=e.target.closest("[data-ws]");if(!b)return;const k=b.dataset.ws;
-    if(k==="vb")vbOpen();else if(k==="vg"){if(typeof PAGES==="undefined")location.hash="fx";else vgOpen();}else if(k==="sp")spOpen();else if(k==="nv")nvOpen();else if(k==="bg")location.hash="bg";
-    else if(k==="stt"){if(typeof S!=="undefined"){S.stab="set";S.scat="stt";}if(typeof viewSet==="function"){viewSet();if(typeof drawSetCat==="function"){document.querySelectorAll("#stabs button").forEach(x=>x.classList.toggle("on",x.dataset.p==="set"));document.querySelectorAll(".spane").forEach(x=>x.hidden=x.dataset.p!=="set");drawSetCat();}}}};
-  lwOrgMount(root.querySelector("#wsOrg"));}
 /* LW-END */
 /* BG-BEGIN */
 /* ================= V0.6.92 後台狀態：電腦現在在跑什麼、排隊什麼；可以取消的直接取消（手機／網頁版共用） ================= */
@@ -50696,10 +50678,6 @@ function vgFxClick(b,ov){const f=vgFx(),k=b.dataset.k,v=b.dataset.v;
 function vgFxSel(sl,ov){const k=sl.dataset.fxs;if(k==="order"){VG.order=sl.value;vgLS.set("order",VG.order);const o=VG.root&&VG.root.querySelector("#vgO");if(o)o.value=VG.order;vgLoad().then(()=>vgFxRefresh(ov));return;}vgFx()[k]=+sl.value||0;vgFxSave(ov);}
 function vgDoneSheet(){const I=VG.info;if(!I||typeof edSheet!=="function")return;const s=edSheet(`<div class="e2SH"><b>🎞 這場剪好的（含初剪）</b><button class="e2Ic" data-sx="close">✕</button></div><div id="vgClips"></div>`);
   clMount(s.querySelector("#vgClips"),{sid:I.sid,always:true,after:n=>{const b=VG.root&&VG.root.querySelector("#vgDone");if(b){b.hidden=!n;b.textContent=`🎞 ${n}`;}if(VG.info)VG.info.ne=n;}});}
-function vgOpen(){let ov=document.getElementById("vgOv");if(ov)ov.remove();ov=document.createElement("div");ov.id="vgOv";   /* 手機：整頁打開 */
-  ov.innerHTML=`<div class="vgHd"><b>▦ 影片快速瀏覽 v2</b><button id="vgX">✕ 關閉</button></div><div id="vgRoot" class="vgScroll"></div>`;document.body.appendChild(ov);
-  const close=fromBack=>{if(!ov.isConnected)return;clearTimeout(VG.preT);clearTimeout(VG.scT2);if(fromBack===true&&VG.sel.size&&!confirm(`還有 ${VG.sel.size} 張選起來還沒初剪，要離開嗎？`)){vgBackPush(close);return;}VG.gen++;vgStopLoads();if(VG.obs)VG.obs.disconnect();const p=document.getElementById("vgPv");if(p)p.remove();ov.remove();if(fromBack===true)return;if(fromBack==="hash"){vgBackDrop(close);return;}vgBackDone(close);};
-  ov.querySelector("#vgX").onclick=()=>close();window.addEventListener("hashchange",()=>close("hash"),{once:true});vgBackPush(close);vgMount(ov.querySelector("#vgRoot"));}
 /* ---------- 回放頁：這場剪好的影片（左右滑） ---------- */
 async function clMount(host,o){if(!host)return;host.classList.add("cl");let j=null;try{j=await vgGet("/api/pc/edit/list?sid="+o.sid);}catch(e){}if(!host.isConnected)return;
   const L=[];for(const p of ((j&&j.projects)||[]))for(const f of p.files||[])L.push({id:p.id,f:f.f,kind:f.kind,i:f.i,n:f.n,a:f.a,b:f.b,dur:f.kind==="all"?(f.dur||0):((f.b||0)-(f.a||0)),sz:f.sz||0,name:p.name||"",t:p.t||0,grid:!!(p.opt&&p.opt.from==="grid")});
@@ -50859,8 +50837,6 @@ function hlMount(root){HL.root=root;root.classList.add("hl");HL.day="dance";if(H
     const c=e.target.closest(".hlC[data-i]");if(c){const O=hlOrdered(),k=O.findIndex(([x,i])=>i===+c.dataset.i);if(k>=0)hlQStart(O.map(([x])=>x),k,(HL.d||{}).lab);}};
   root.querySelector(".hlUs").onchange=e=>{HL.u=e.target.value;hlDraw();};
   hlLoad();clearInterval(HL.tm);HL.tm=setInterval(()=>{if(!HL.root||!HL.root.isConnected){clearInterval(HL.tm);return;}if(document.hidden)return;hlInfo();if(++HL.tk%4===0)hlLoad(true);},15000);}
-function hlUsers(){const D=HL.d||{},M={};for(const x of D.segs||[]){const z=M[x.u]||(M[x.u]={u:x.u,name:x.name||x.u,n:0,dance:0,best:0});z.n++;z.best=Math.max(z.best,x.sw||x.s||0);if((x.tags||[]).includes("vdance"))z.dance++;}
-  return Object.values(M).sort((a,b)=>(b.dance-a.dance)||(b.n-a.n)||(b.best-a.best));}   /* TK_V0.8.18.010 主播清單：跳舞多的先 */
 function hlOrdered(){const D=HL.d||{segs:[]};const hasU=HL.u&&(D.segs||[]).some(x=>x.u===HL.u);
   return (D.segs||[]).map((x,i)=>[x,i]).filter(([x])=>(!HL.un||!x.seen)&&(!hasU||x.u===HL.u));}   /* V0.8.31 照伺服器排好的場次順序 */
 /* V0.7.42.006 MP4 已經刪掉、但有 YouTube：在 YouTube 打開（從那一段的秒數開始） */
@@ -50875,7 +50851,6 @@ function hlBlockMenu(btn,i){const x=(HL.d&&HL.d.segs||[])[i];if(!x)return;let m=
     const j=b.dataset.k==="u"?await hlBlockPost("u",x.u,true):await hlBlockPost("t",b.dataset.t,true);if(typeof toast==="function")toast((j&&j.ok?"✔ ":"✖ ")+((j&&j.message)||"")+"（精選上面可以取消）");hlLoad();};}
 function hlPlay(x){hlSeen(x);if(x.yt&&!x.mp4){window.open(x.yt,"_blank","noopener");return;}if(typeof openHist==="function"&&typeof PAGES!=="undefined"){openHist(x.sid,x.name,"",x.at,"hl");return;}location.hash=`#rp/${x.sid}/${Math.round(x.at)}/hl`;}
 /* V0.7.42.007 每日精選影片：一天的精彩片段剪成一支，內建播放器＋段落清單 */
-async function hlReelPost(){const d={d:HL.day};if(typeof kPost==="function")return await kPost("/api/pc/reel/build",d);if(typeof post==="function")return await post("/api/pc/reel/build",d);if(typeof deepPost==="function")return await deepPost("/api/pc/reel/build",d);return {};}
 async function hlReelLoad(){const R=HL.root;if(!R)return;if(hlMulti()&&HL.day!=="fav"){const e_=R.querySelector(".hlReel");if(e_)e_.innerHTML="";return;}   /* V0.7.42.023 本週最佳沒有精選影片 */
   const day0_=HL.day;let I=null;try{I=await hlGet("/api/pc/reel/info?d="+encodeURIComponent(HL.day));}catch(e){}if(HL.day!==day0_)return;   /* V0.7.42.025 等回來時已經換天／換成本週最佳就不畫 */HL.reel=I;const el=R.querySelector(".hlReel");if(!el||!I)return;
   const mm=s=>Math.floor(s/60)+" 分"+(Math.round(s%60)?" "+Math.round(s%60)+" 秒":"");
@@ -50884,14 +50859,6 @@ async function hlReelLoad(){const R=HL.root;if(!R)return;if(hlMulti()&&HL.day!==
     :I.building?`<div class="hlRB off"><b>🎬 正在做${FV?" ⭐ 收藏":" "+HL.day.slice(5).replace("-","/")} 的精選影片…</b><span>${hlE(I.msg||"")} ${I.total?`（${I.done}/${I.total}）`:""}</span><i><u style="width:${I.total?Math.round(I.done/I.total*100):3}%"></u></i></div>`
     :`<button class="hlRB off" data-hr="build"${I.busy?" disabled":""}><b>🎬 ${FV?"把收藏做成一支影片":"把這天的精彩片段做成一支影片"}</b><span>${I.busy?`正在做 ${hlE(I.bday==="fav"?"⭐ 收藏":I.bday)} 的，等它做完`:hlE(I.msg||(FV?"最多 60 分鐘、新收藏的在前面；收藏影片最多留最新 5 支":`最長 ${I.max_min} 分鐘，不含 PK；${I.on?"每天早上也會自動做昨天的":""}`))}</span></button>`;
   clearTimeout(HL.rt);if(I.building)HL.rt=setTimeout(hlReelLoad,3000);}
-function hlReelPlay(){const I=HL.reel;if(!I||!I.has)return;let ov=document.getElementById("hlRP");if(ov)ov.remove();ov=document.createElement("div");ov.id="hlRP";
-  const C=I.chap||[],L=(HL.d&&HL.d.lab)||{};
-  ov.innerHTML=`<div class="hlRPw"><div class="hlRPh"><b>✨ ${HL.day==="fav"?"⭐ 我的最愛":HL.day} 精選</b><button data-x="1">✕</button></div><video controls autoplay playsinline preload="metadata" src="${hlB()}/api/pc/reel/file?d=${encodeURIComponent(HL.day)}${HL.day==="fav"&&I.file?"&f="+encodeURIComponent(I.file):""}"></video>
-<div class="hlRPc">${C.map((c,i)=>{const cl=new Date(c.at*1000);return `<button data-c="${i}"><b>${hlE(c.name)}</b><small>${hlP(cl.getHours())}:${hlP(cl.getMinutes())} · ${c.tags.map(t=>(L[t]||["",""])[0]).join("")} · ${hlT(c.dur).replace(/^0:/,"")}</small></button>`;}).join("")}</div></div>`;
-  document.body.appendChild(ov);const v=ov.querySelector("video");
-  const paint=()=>{const t=v.currentTime;let k=-1;C.forEach((c,i)=>{if(t>=c.t-0.2)k=i;});ov.querySelectorAll("[data-c]").forEach((b,i)=>b.classList.toggle("on",i===k));};
-  v.addEventListener("timeupdate",paint);
-  ov.onclick=e=>{if(e.target===ov||e.target.closest("[data-x]")){v.pause();ov.remove();return;}const b=e.target.closest("[data-c]");if(b){v.currentTime=C[+b.dataset.c].t+0.05;v.play().catch(()=>{});}};}
 async function hlLoad(quiet){const R=HL.root;if(!R)return;const L0=R.querySelector(".hlList");if(L0&&!quiet)L0.innerHTML='<div class="hlEmpty">讀取中…</div>';
   const o_=HL.ord;let d_=null;try{d_=await hlGet("/api/pc/hl/day?d="+encodeURIComponent("dance:"+HL.ord));}catch(e){d_=null;}if(HL.ord!==o_)return;
   if(d_&&d_.off){R.innerHTML='<div class="hlOff">⏸ <b>精選目前暫停中</b><br><small>要恢復：設定 → ✨ 精選與自動化 → 把「⏸ 精選暫停」關掉，再重新打開這頁。</small></div>';return;}
@@ -51049,7 +51016,7 @@ async function ytAuthPop(j,demo){YTA.on=true;let ov=document.getElementById("yta
   ov.onclick=async e=>{const b=e.target.closest("[data-ya]");if(!b)return;if(b.dataset.ya==="later"){YTA.skip=!demo;YTA.on=false;clearInterval(YTA.t);ov.remove();return;}if(b.dataset.ya==="new")await ytaGet(true);};
   if(demo){ytaShow({user_code:"TST-DMO-0000",url:"https://www.google.com/device",msg:"（測試預覽：假代碼，不要輸入）"});return;}
   const dv=j.dev;if(dv&&dv.user_code&&dv.exp*1000>Date.now()+60000)ytaShow(dv);else await ytaGet(true);
-  clearInterval(YTA.t);YTA.t=setInterval(ytaPoll,3000);}
+  clearInterval(YTA.t);YTA.t=setInterval(()=>document.hidden||ytaPoll(),3000);}
 async function ytaGet(fresh){const C=document.getElementById("ytaC");if(C)C.innerHTML="<small>拿代碼中…</small>";const r=await ytPost("/api/pc/yt/link",{});
   if(!r||!r.ok){if(C)C.innerHTML=`<small class="bad">✖ ${ytE((r&&r.message)||"拿不到代碼（網路？），按「換一組代碼」再試")}</small>`;return;}ytaShow({user_code:r.user_code,url:r.url,exp:r.exp,msg:"等你在手機輸入代碼…"});}
 function ytaShow(dv){const C=document.getElementById("ytaC");if(!C)return;const u=dv.url||"https://www.google.com/device";
@@ -51742,7 +51709,7 @@ function pfxGuide(){return `<details class="pfC"><summary>📋 第一次設定�
 function pfxHtml(j){const D=j.dev||{},c=j.cur,cf=j.cfg||{},gr=j.gr||{};const gC=u=>gr[u]?`<span class="pfG">${rvE(gr[u])}</span>`:"";
   const devS={ok:`<span class="pfOk">✔ 連上</span> ${rvE(D.model||D.serial||"")} · Android ${rvE(D.andv||"?")}${D.miui?" · "+rvE(D.miui):""}`,notools:`<span class="pfW">還沒裝 scrcpy</span>`,none:`<span class="pfBad">找不到手機</span>（USB 插好了嗎？開發者選項的 USB 偵錯有開嗎？）`,unauth:`<span class="pfW">手機上要按「允許 USB 偵錯」</span>（勾一律允許）`,offline:`<span class="pfBad">手機離線</span>（拔掉重插）`}[D.st]||`<span class="pfBad">${rvE(D.st||"?")}</span> ${rvE(D.msg||"")}`;
   let h=(j.alerts||[]).filter(a=>a[0]!=="info").length?`<div class="pfC" style="border-color:#ff6b6b;background:rgba(255,107,107,.08)">${j.alerts.map(a=>`<div class="${a[0]==="bad"?"pfBad":a[0]==="warn"?"pfW":"pfSub"}">${a[0]==="bad"?"⚠ ":""}${rvE(a[1])}</div>`).join("")}</div>`:"";
-  if((j.unal||[]).length)h+=`<div class="pfC" style="border-color:#f0ad4e;background:rgba(240,173,78,.08)"><div class="pfW">📤 ${j.unal.length} 支上傳的錄屏聲音沒對上，位置是用錄影時間推的（可能不對）：</div><div class="pfR">${j.unal.map(x=>`<button class="pfB" onclick="mxAlign(${x.sid},'${x.id}')">🎯 #${String(x.sid).padStart(5,"0")} ${rvE(x.name).slice(0,40)}</button>`).join("")}</div></div>`;   /* V1.1.82 一鍵進手動對齊 */
+  if((j.unal||[]).length)h+=`<div class="pfC" style="border-color:#f0ad4e;background:rgba(240,173,78,.08)"><div class="pfW">📤 ${j.unal.length} 支上傳的錄屏聲音沒對上，位置是用錄影時間推的（可能不對）：</div><div class="pfR">${j.unal.map(x=>`<button class="pfB" style="max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${rvE(x.name)}" onclick="mxAlign(${x.sid},'${x.id}')">🎯 #${String(x.sid).padStart(5,"0")} ${rvE(x.name).slice(0,40)}</button>`).join("")}</div></div>`;   /* V1.1.82 一鍵進手動對齊 */
   h+=`<div class="pfC"><h4>🔌 狀態</h4><div class="pfR">${j.tools?`<span>scrcpy <span class="pfOk">✔ v${rvE(j.scrv||"?")}</span></span>`:`<span>scrcpy <span class="pfBad">✖ 沒裝</span></span> <button class="pfB go" data-pa="tools" ${j.dl_run?"disabled":""}>⬇ 自動下載（官方 GitHub）</button>`}${j.dl?`<span class="pfSub">${rvE(j.dl)}</span>`:""}</div>
   <div class="pfR" style="margin-top:4px">📱 ${devS}</div>`;
   if(D.st==="ok")h+=`<div class="pfR">${D.bat!=null?`🔋 ${D.bat}%`:""} ${D.temp!=null?`<span class="${D.temp>=(cf.temp_stop||46)?"pfBad":D.temp>=40?"pfW":""}">🌡 ${D.temp.toFixed(1)}°C</span>`:""} <span>TikTok ${D.tiktok?`<span class="pfOk">✔</span>${D.pkg&&D.pkg.indexOf("trill")>=0?' <span class="pfSub">(trill)</span>':""}`:(D.tiktok===false?'<span class="pfBad">✖ 沒裝（要國際版）</span>':'<span class="pfSub">⏳ 查詢中</span>')}</span> <span>安全設定 ${D.inject===false?'<span class="pfW">沒開（也能錄：螢幕要設「充電時螢幕不休眠」、鎖定「無」）</span>':'<span class="pfOk">✔</span>'}</span> ${D.fg?`<span class="pfSub">前景：${rvE(D.fg)}${D.act?" / "+rvE(String(D.act).split(".").pop()):""}</span>`:""} <button class="pfB" data-pa="test">🔔 測試手機</button><button class="pfB" data-pa="reboot">🔄 重開手機</button></div><div class="pfR"><label class="pfSub"><input type="checkbox" data-pa="rb_on" ${cf.rb_on!==false?"checked":""}> 每週二、週五凌晨 3～7 點自動重開（沒在錄、S 級都沒在播時）</label>${cf.rb_last?`<span class="pfSub">上次：${rvE(cf.rb_last)}</span>`:""}</div><div class="pfR"><label class="pfSub"><input type="checkbox" data-pa="idle_off" ${cf.idle_off!==false?"checked":""}> 沒在錄時待機（回桌面、亮度最低，1 分鐘沒人操作就關螢幕），開播自己亮起來、亮度 ${cf.bright??50}%</label>${D.awake===true?'<span class="pfSub">☀ 螢幕亮著</span>':D.awake===false?'<span class="pfSub">🌙 待機中</span>':""}</div>`;
@@ -52403,7 +52370,7 @@ async function lvsWire(root,F){const $r=s=>root.querySelector(s);
       if(e.target.classList.contains("lvsMore"))lvsMore();}},{root:LVS.box,rootMargin:"1600px 0px 1600px 0px",threshold:0});
   let raf=0;LVS.box.onscroll=()=>{if(!raf)raf=requestAnimationFrame(()=>{raf=0;lvsCurCheck();});};
   LVS.sel=null;lvsSelPaint();lvsTileEvents(LVS.box);if($r("#lvsSel"))LVS.root.querySelector("#lvsSel").onclick=lvsSelClick;
-  clearInterval(LVS.rt);LVS.rt=setInterval(lvsRefreshMiss,15000);   /* 還沒有預覽圖的場次：背景做好了就自動補上 */
+  clearInterval(LVS.rt);LVS.rt=setInterval(()=>document.hidden||lvsRefreshMiss(),15000);   /* 還沒有預覽圖的場次：背景做好了就自動補上 */
   lvsGet("/api/pc/novideo").then(j=>{if(j)LVS.cats=j.cats||[];if(LVS.pc&&typeof lvpSum==="function")lvpSum();const c=root.querySelector("#lvsCat");if(!c||!j)return;c.innerHTML=`<option value="*">📁 全部資料夾</option><option value="">📁 未分類</option>`+LVS.cats.map(x=>`<option value="${lvsE(x.id)}">📁 ${lvsE(x.name)}</option>`).join("");c.value=F.cat;if(c.value!==F.cat){c.value="*";}}).catch(()=>{});
   const st0=(typeof VG!=="undefined"&&VG.info)?VG.info.sid:0;const kn=window.LVS_KIND_NEXT;window.LVS_KIND_NEXT=null;   /* TK_V1.0.09 從「今天要處理」點進來 */
   if(kn==="orph"&&typeof orpOpen==="function"){LVS.kind="live";orpOpen(root);return;}LVS.kind=kn==="nv"?"nv":"live";lvsKindChip(root);await lvsLoad(st0);}   /* TK_V0.9.87 進來預設「直播錄影」，左上角按鈕跳浮窗切換 */
@@ -52553,11 +52520,6 @@ const LVS_PRE=10;   /* TK_V0.9.28 長按預覽從那一格的前 10 秒開始播
 function lvsGif(){const S=LVS.sel,G=lvsSegs();if(!S||!G.length){lvsToast("先選要做成 GIF 的地方");return;}const I=S.info;   /* TK_V1.0.73 */
   const segs=G.map(g=>{const r=I.ranges[g.ri];return {k:Math.max(0,r[4]),n:r[2],a:+(g.s-r[0]+(+r[3]||0)).toFixed(3),b:+(g.e-r[0]+(+r[3]||0)).toFixed(3)};});
   g20Sheet({sid:S.sid,segs},`${S.name} 選的 ${G.length} 段`,G.reduce((a,g)=>a+(g.e-g.s),0));}
-function lvsOptShow(){const S=LVS.sel;if(!S||!S.set.size)return;const G=lvsSegs(),tot=G.reduce((a,g)=>a+(g.e-g.s),0);let o=document.getElementById("lvsOpt");if(o)o.remove();   /* TK_V1.0.71 放開手指跳出的剪輯選項 */
-  o=document.createElement("div");o.id="lvsOpt";o.className="lvsOpt";o.innerHTML=`<div class="lvsOptB"><div class="lvsOptT">${lvsE(S.name)} 已選 <b>${S.set.size}</b> 張 → <b>${G.length}</b> 段 · ${lvsDur(tot)}</div>
-  <button data-o="cut" class="pri">✂ 初剪 ${G.length} 段</button><button data-o="play">▶ 看第一段</button><button data-o="gif">🎞 做 GIF（20 張）</button><button data-o="more">＋ 繼續選</button><button data-o="clr">清除選取</button></div>`;
-  try{if(typeof KIT!=="undefined")KIT.swallow=false;}catch(x){}
-  o.onclick=e=>{const b=e.target.closest("[data-o]");if(e.target===o||b)o.remove();if(!b)return;const k=b.dataset.o;if(k==="cut")lvsCut();else if(k==="gif")lvsGif();else if(k==="clr")lvsSelClear();else if(k==="play"){const G2=lvsSegs();if(G2.length)lvsPlayAt(S.sid,S.info,G2[0].ri,G2[0].s,null);}};document.body.appendChild(o);}
 function lvsTileEvents(box){let lp=null,skip=false,drag=null;
   /* TK_V0.8.99 電腦拖曳圈選：放開前隨時可以多選／少選（以按下那格為起點，到滑鼠現在那格之間全部；往下拉＝中間每一行都選滿）；靠近上下邊會自動捲 */
   const tileAt=(x,y)=>{const el=document.elementFromPoint(x,y);return el&&el.closest?el.closest(".lvsT"):null;};
@@ -52799,7 +52761,6 @@ function gfsE(x){return String(x==null?"":x).replace(/[&<>"]/g,c=>({"&":"&amp;",
 function gfsT(s){s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return (h?h+":":"")+String(m).padStart(h?2:1,"0")+":"+String(x).padStart(2,"0");}
 function gfsOpen(u){window.GIFS_U=u;if(typeof PAGES!=="undefined"&&typeof go==="function"){go(54,u);return;}if(location.hash==="#tool/gifs"){const b=document.getElementById("sbody");if(b){gfsMount(b,u);return;}}location.hash="tool/gifs";}
 function gfsRng(){const R=(GFS.info&&GFS.info.ranges)||[];return R.filter(r=>r[4]>=0&&r[1]>r[0]);}
-function gfsSpan(){const R=gfsRng();return R.length?[R[0][0],R[R.length-1][1]]:[0,0];}
 function gfsClamp(t){const R=gfsRng();if(!R.length)return t;const d=GFS.o.dur*GFS.o.spd;let best=null,bd=1e18;for(const r of R){const a=r[0],b=Math.max(r[0],r[1]-d);const c=Math.min(b,Math.max(a,t)),dd=Math.abs(c-t);if(dd<bd){bd=dd;best=c;}}return best;}
 function gfsImg(t){const R=gfsRng();let r=R.find(x=>t>=x[0]&&t<x[1])||R.reduce((a,x)=>!a||Math.abs(x[0]-t)<Math.abs(a[0]-t)?x:a,null);if(!r)return "";const ft=Math.max(0,Math.round(t-r[0]+(+r[3]||0)));return `${gfsB()}/api/pc/vb/thumb?sid=${GFS.sid}&k=${r[4]}&t=${ft}`;}
 function gfsSpread(){const R=gfsRng(),N=GFS.C*GFS.R,d=GFS.o.dur*GFS.o.spd;GFS.ts=[];if(!R.length){gfsSave();return;}   /* 只在「有錄到」的時間裡平均分（中間沒錄的不算） */
@@ -53210,14 +53171,6 @@ async function orpClick(e){const t=e.target;const o=t.closest("[data-o]");if(o){
   const pl=t.closest("[data-play]");if(pl){e.preventDefault();const r=ORP.L[ORP.cur];if(r)orpPlay(r,0);return;}
   const sl=t.closest("#orpSel [data-sl]");if(sl){const k=sl.dataset.sl;if(k==="clr")orpSelClear();else if(k==="cut")orpCut();else if(k==="play"){const G=orpSegs(),r=ORP.L[ORP.cur];if(G.length&&r)orpPlay(r,G[0].s);}return;}
   const ti=t.closest(".orpTi");if(ti){if(orpLpT){orpLpT=false;return;}if(ORP.skip){ORP.skip=false;return;}orpPick(+ti.dataset.q);return;}}
-function orpZoom(r,t){const ar=ORP.ar[r.id]||0.5625,d=document.createElement("div");d.className="oldZ";let cur=t;
-  const paint=()=>{const i=Math.floor(cur/1000)+1,k=(cur/10)%100;d.querySelector(".oldZb").style.backgroundImage=`url('${oldB()}/api/pc/store/oldsheet?id=${r.id}&i=${i}')`;d.querySelector(".oldZb").style.backgroundPosition=`${k%10/9*100}% ${Math.floor(k/10)/9*100}%`;d.querySelector(".oldZt b").textContent=oldT(cur);};
-  d.innerHTML=`<div class="oldZb" style="aspect-ratio:${ar};width:min(92vw,calc(78vh * ${ar}))"></div><div class="oldZt"><b></b> <small>左右鍵／滑動看前後一格 · </small><button class="oldBtn" data-zp="1">▶ 從這裡播</button> <button class="oldBtn" data-zx="1">✕</button></div>`;
-  document.body.appendChild(d);paint();const max=(r.dur?Math.ceil(r.dur/10):(r.pvn||1)*100)-1;
-  const go=dx=>{const n=cur+dx*10;if(n<0||n/10>max)return;cur=n;paint();};const cl=()=>{d.remove();document.removeEventListener("keydown",kd,true);};
-  const kd=e=>{if(e.key==="ArrowRight"){go(1);e.stopPropagation();e.preventDefault();}else if(e.key==="ArrowLeft"){go(-1);e.stopPropagation();e.preventDefault();}else if(e.key==="Escape")cl();};document.addEventListener("keydown",kd,true);
-  let x0=null;d.addEventListener("touchstart",e=>{x0=e.touches[0].clientX;},{passive:true});d.addEventListener("touchend",e=>{if(x0==null)return;const dx=e.changedTouches[0].clientX-x0;x0=null;if(Math.abs(dx)>40)go(dx<0?1:-1);});
-  d.addEventListener("click",e=>{if(e.target.closest("[data-zp]")){cl();orpPlay(r,cur);return;}if(e.target.closest("[data-zx]")||!e.target.closest(".oldZb,.oldZt"))cl();});}
 /* TK_V1.0.20 暫放區：永久刪除（3 次確認、只刪你看到的那批） */
 async function orpHoldPaint(){const el=ORP.root&&ORP.root.querySelector("#orpHold");if(!el)return;let j=null;try{j=await oldGet("/api/pc/store/orphhold");}catch(e){}
   if(!j||!j.ok){el.innerHTML="";return;}const pg=j.pg||{};ORP.hold=j;

@@ -2,10 +2,16 @@
 import json, re
 
 
-def page(win, base, G):
+_PG_C = {}
+
+
+def page(win, base, G):   # V1.1.96 同樣的組合只組一次（送出時也不用重算編碼）
+    h = _sh_html(G); k = (base, G['THEME_MODE'].get('mode', 'dark'), win.pc_role_name(), str(G.get('APP_VERSION', '')), id(h))
+    if _PG_C.get('k') == k: return _PG_C['v']
     themes = json.dumps(G['THEMES'], ensure_ascii=False)
-    return (_sh_html(G).replace('__BASE__', base).replace('__THEMES__', themes).replace('__MODE__', G['THEME_MODE'].get('mode', 'dark'))
+    v = (h.replace('__BASE__', base).replace('__THEMES__', themes).replace('__MODE__', G['THEME_MODE'].get('mode', 'dark'))
             .replace('__PCNAME__', win.pc_role_name()).replace('__APPVER__', str(G.get('APP_VERSION', ''))))
+    _PG_C.clear(); _PG_C.update(k=k, v=v); return v
 
 
 HTML = r'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TikLive Monitor · 網頁版</title><link rel="icon" href="__BASE__/icon-192.png"><style>*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden}
@@ -147,31 +153,9 @@ video.hv{width:100%;height:100%;background:#000;object-fit:contain;border-radius
 
 @@SH9@@
 
-/* HT-CSS-BEGIN */
-/* V0.6.85 歷史回放的縮圖時間軸 */
-.htl{position:relative;height:104px;min-height:56px;flex:none;display:flex;flex-direction:column;background:rgba(0,0,0,.18);border-radius:10px;margin:4px 0;user-select:none;-webkit-user-select:none;overflow:hidden}
-.htl canvas{flex:1;min-height:0;width:100%;display:block;touch-action:none;cursor:grab}
-.htl canvas:active{cursor:grabbing}
-.htlZ{position:absolute;right:6px;top:2px;display:flex;gap:4px}
-.htlZ button{width:26px;height:20px;border-radius:6px;border:1px solid rgba(140,150,165,.35);background:rgba(20,24,32,.75);color:#e6eaf0;font-size:13px;line-height:1;padding:0;cursor:pointer}
-.htlGrip{flex:none;height:18px;display:flex;align-items:center;justify-content:center;cursor:ns-resize;touch-action:none}
-.htlGrip i{width:56px;height:5px;border-radius:2px;background:rgba(140,150,165,.55)}
-/* HT-CSS-END */
+@@SH92@@
 
-/* HA-CSS-BEGIN */
-/* V0.6.86 回放頁的保存等級／只錄聲音／刪除 */
-.haBar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 8px;margin:2px 0;border-radius:10px;background:rgba(128,128,128,.08);font-size:13px}
-.haBar .haT{color:var(--sub,#8b95a5);font-size:12px}
-.haLv{display:flex;gap:4px}
-.haLv button{min-width:34px;height:28px;padding:0 6px;border-radius:999px;border:2px solid var(--c);background:transparent;color:var(--c);font-weight:800;font-size:13px;cursor:pointer}
-.haLv button.on{background:var(--c);color:#111}
-.haBar .haN{font-weight:800;font-size:12.5px;min-width:64px}
-.haBar .haG{flex:1}
-.haBar .haB{height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--line,rgba(140,150,165,.35));background:var(--btn,transparent);color:var(--text,#e6eaf0);font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}
-.haBar .haB.bad{color:#ff6577;border-color:rgba(255,101,119,.5)}
-@media (max-width:520px){.haBar{gap:4px;padding:5px 6px}.haBar .haSel{max-width:30vw;padding:0 6px;font-size:12px}.haBar .haB{padding:0 9px;font-size:12px}.haBar .haG{display:none}}
-.haBar .haSel{height:30px;max-width:min(30vw,240px);min-width:0;flex:0 1 auto;border-radius:999px;border:1px solid var(--line,rgba(140,150,165,.35));background:var(--btn,var(--card,#1c222c));color:var(--text,#e6eaf0);padding:0 10px;font-size:13px;font-weight:700}
-/* HA-CSS-END */
+@@SH75@@
 
 @@SH10@@
 
@@ -179,18 +163,7 @@ video.hv{width:100%;height:100%;background:#000;object-fit:contain;border-radius
 
 @@SH12@@
 
-/* SH-CSS-BEGIN */
-.shp{display:flex;flex-direction:column;gap:8px;font-size:13.5px}
-.shpC{border:1px solid var(--line,rgba(140,150,165,.3));border-radius:12px;padding:10px 12px;background:var(--card,rgba(127,127,127,.05));display:flex;flex-direction:column;gap:8px}
-.shpRow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.shpRow b{font-size:15px}.shpRow .grow{flex:1}
-.shpSt{font-size:12px;padding:2px 8px;border-radius:999px;background:rgba(150,150,150,.2)}.shpSt.on{background:rgba(60,207,142,.18);color:#3ccf8e}
-.shpGo{background:#1f8ef1;border-color:#1f8ef1;color:#fff;font-weight:800}
-.shpNums{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:6px}.shpNums div{background:rgba(127,127,127,.08);border-radius:9px;padding:6px 8px}.shpNums b{display:block;font-size:18px}.shpNums small{font-size:11.5px;opacity:.75}
-.shpCur{color:#3fb6f2;font-weight:700}
-.shpChk{display:flex;align-items:center;gap:6px;font-size:13px}
-.shpH{font-size:12.5px;max-height:150px;overflow:auto;border-top:1px solid rgba(140,150,165,.2);padding-top:4px}.shpH small{opacity:.7}
-.shpN{font-size:12px;opacity:.7;line-height:1.6}
-/* SH-CSS-END */
+@@SH93@@
 
 @@SH13@@
 
@@ -198,21 +171,9 @@ video.hv{width:100%;height:100%;background:#000;object-fit:contain;border-radius
 
 @@SH15@@
 
-/* SOON-CSS-BEGIN */
-.soonBar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 8px;padding:6px 10px;border-radius:12px;border:1px solid rgba(240,173,78,.35);background:rgba(240,173,78,.06);font-size:13px}
-.soonBar>b{white-space:nowrap}.soonL{display:flex;gap:6px;flex-wrap:wrap;min-width:0}
-.soonP{border:1px solid rgba(140,150,165,.35);background:rgba(140,150,165,.1);color:inherit;border-radius:999px;padding:3px 10px;font-size:12.5px;cursor:pointer;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
-.soonP small{opacity:.7}.soonP.soonPri{border-color:rgba(255,77,109,.55)}.soonP.soonNow{background:rgba(240,173,78,.18);border-color:rgba(240,173,78,.6)}.soonM{opacity:.6;font-size:12px;align-self:center}
-/* SOON-CSS-END */
+@@SH94@@
 
-/* SMT-CSS-BEGIN */
-.smtC{border:1px solid rgba(31,142,241,.35);border-radius:12px;padding:8px 10px;margin:4px 0 10px;background:rgba(31,142,241,.05);display:flex;flex-direction:column;gap:2px}
-.smtH{display:flex;align-items:baseline;gap:8px;margin-bottom:2px}.smtH small{opacity:.6;font-size:11.5px}
-.smtR{display:grid;grid-template-columns:22px minmax(80px,auto) minmax(0,1fr) 12px;gap:6px;align-items:center;text-align:left;background:none;border:0;border-top:1px solid rgba(140,150,165,.15);color:inherit;padding:5px 2px;font-size:13px;cursor:pointer;width:100%}
-.smtR:first-of-type{border-top:0}.smtR span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.9}.smtR s{text-decoration:none;opacity:.5}.smtR i{font-style:normal}
-.smtR.smt-ok span{color:#45d483}.smtR.smt-warn span{color:#f0ad4e}.smtR.smt-bad span{color:#ff6577;font-weight:700}.smtR.smt-off span{opacity:.55}
-@media(max-width:520px){.smtR{grid-template-columns:22px minmax(0,1fr) 12px}.smtR span{grid-column:2;white-space:normal;font-size:12px}.smtR s{grid-row:1;grid-column:3}}
-/* SMT-CSS-END */
+@@SH95@@
 
 @@SH16@@
 
@@ -220,40 +181,17 @@ video.hv{width:100%;height:100%;background:#000;object-fit:contain;border-radius
 
 @@SH18@@
 
-/* LEND-CSS-BEGIN */
-#lendBn{position:fixed;left:50%;top:8px;transform:translateX(-50%);z-index:100000;width:min(720px,calc(100vw - 16px));max-height:80vh;overflow:auto;padding:12px 14px;border-radius:14px;
-  background:#2a1418;color:#fff;border:2px solid #ff6577;box-shadow:0 10px 30px rgba(0,0,0,.55);font-size:13.5px;display:flex;flex-direction:column;gap:6px}
-.lendH{font-size:15px;font-weight:bold}.lendW{margin:0;padding-left:18px;line-height:1.6}.lendN{opacity:.8;font-size:12.5px}
-.lendC{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 8px;border-radius:10px;background:rgba(255,255,255,.06)}.lendC.no{opacity:.6}.lendC b{min-width:28px}.lendC span{font-size:12.5px}
-.lendC button,.lendA button{margin-left:auto;width:auto!important;padding:5px 12px!important;border-radius:9px}.lendC em{margin-left:auto;font-style:normal;color:#45d483}
-.lendA{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.lendA button{margin-left:0}
-.emgLend{display:flex;flex-direction:column;gap:6px}
-/* LEND-CSS-END */
+@@SH96@@
 
 @@SH19@@
 
-/* EXP-CSS-BEGIN */
-.exp{display:flex;flex-direction:column;gap:10px}.expH{display:flex;flex-direction:column;gap:3px}.expH b{font-size:18px}.expH span{opacity:.75;font-size:13px}.expE{opacity:.7;padding:14px 4px}
-.expC{display:flex;flex-direction:column;gap:6px;padding:12px;border-radius:12px;background:rgba(140,150,165,.08);border:1px solid rgba(140,150,165,.25)}
-.expC>b{font-size:15px}.expC small{opacity:.6}.expG{font-size:12px;color:#b48cff}.expC ul{margin:0;padding-left:18px;font-size:13px;line-height:1.6}.expD{font-size:13px;opacity:.85}
-.expM{display:flex;gap:6px;flex-wrap:wrap}.expM button{border:1px solid rgba(180,140,255,.6);background:transparent;color:inherit;border-radius:9px;padding:6px 10px;font:inherit;font-size:13px;cursor:pointer}
-.expM button.on{background:#b48cff;color:#111;border-color:transparent;font-weight:700}.expS{font-size:13px;padding:6px 8px;border-radius:8px;background:rgba(77,201,255,.08)}
-/* EXP-CSS-END */
+@@SH97@@
 
 @@SH20@@
 
 @@SH21@@
 
-/* TKD-CSS-BEGIN */
-.tkdEmpty{padding:30px;text-align:center;color:var(--subtext,#8a93a3)}
-.tkdTop{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.tkdTop input{flex:1 1 140px;min-width:0;padding:8px 10px;border-radius:10px;border:1px solid var(--border,#2b313c);background:var(--panel,#1b1f27);color:inherit;font-size:14px}
-.tkdTop select{padding:7px 6px;border-radius:10px;border:1px solid var(--border,#2b313c);background:var(--panel,#1b1f27);color:inherit;font-size:13.5px;max-width:48%}
-.tkdTop button{flex:0 0 auto;padding:7px 14px;border-radius:10px;border:1px solid var(--border,#2b313c);background:var(--panel,#1b1f27);color:inherit;font-size:15px}
-.tkdSub{font-size:11.5px;color:var(--subtext,#8a93a3);margin:6px 0}
-.tkdG{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
-@media (min-width:700px){.tkdG{grid-template-columns:repeat(6,1fr)}}
-.tkdC{cursor:pointer;min-width:0}.tkdC b{display:block;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px}.tkdC small{display:block;font-size:10.5px;color:var(--subtext,#8a93a3)}
+@@SH98@@
 .tkdIm{position:relative;height:0;padding-top:177.78%;background:#14171d;border-radius:8px;overflow:hidden}.tkdIm img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
 @@SH22@@
 
@@ -261,81 +199,16 @@ video.hv{width:100%;height:100%;background:#000;object-fit:contain;border-radius
 .actT{display:flex;gap:6px;margin-bottom:6px}.actT input{flex:1;min-width:0}.actT select{width:auto}.actC{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}.actC button{flex:none;width:auto!important;margin:0;height:32px;padding:0 10px;border-radius:16px;border:1px solid var(--line,rgba(127,127,127,.3));background:transparent;color:inherit;font-size:12.5px;white-space:nowrap}.actC button.on{background:#4dc9ff;color:#06202b;border-color:#4dc9ff}.actC small{opacity:.7}.actN{font-size:12px;opacity:.65;margin:4px 0}.actR{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--line,rgba(127,127,127,.3));font-size:12.5px;line-height:1.5}.actR small{flex:none;opacity:.6;font-variant-numeric:tabular-nums}.actR span{word-break:break-all}   /* TK_V1.0.23 */
 .sbkN{font-size:13px;line-height:1.6;margin-bottom:8px}.sbkN small{opacity:.6;word-break:break-all}.sbkGo{margin:4px 0 10px!important}.sbkR{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line,rgba(127,127,127,.3))}.sbkR b{flex:1}.sbkR span{opacity:.7;font-size:12.5px}.sbkE{opacity:.7;font-size:13px;padding:8px 0}   /* TK_V1.0.16 */
 .lvaW{position:fixed;top:calc(env(safe-area-inset-top,0px) + 40px);right:10px;z-index:2147483240;display:flex;flex-direction:column;gap:6px;max-width:min(360px,calc(100vw - 20px))}   /* TK_V1.0.38 開播提醒 */
-.gfsH{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px}.gfsH b{font-size:16px;flex:1 1 auto}.gfsH select{max-width:100%;padding:7px 8px;border-radius:9px;background:var(--card,#151a21);color:inherit;border:1px solid var(--line,#2a3340)}   /* TK_V1.0.75 GIF 製作 */
-.gfsN{font-size:12.5px;opacity:.8;line-height:1.55;margin:4px 0 8px}.gfsTb,.gfsR,.gfsFine{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0}.gfsTb span,.gfsR span,.gfsFine span{font-size:12.5px;opacity:.75;min-width:56px}
-.gfsTb button,.gfsR button,.gfsFine button{padding:7px 10px;border-radius:9px;border:1px solid var(--line,#2a3340);background:var(--card,#151a21);color:inherit;font:inherit;font-size:13px;font-weight:600;cursor:pointer}.gfsTb button.on,.gfsR button.on{background:rgba(77,201,255,.2);border-color:#4dc9ff;color:#bfeaff}
-.gfsG{display:grid;gap:3px;margin:6px 0;user-select:none;-webkit-user-select:none}.gfsC{position:relative;height:0;padding-top:177.78%;overflow:hidden;border-radius:6px;background:#000;touch-action:pan-y;cursor:ew-resize;outline:2px solid transparent}.gfsC.on{outline-color:#4dc9ff}
-.gfsC img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;-webkit-touch-callout:none}.gfsC b{position:absolute;left:0;right:0;bottom:0;text-align:center;font-size:11.5px;background:rgba(0,0,0,.6);color:#fff;padding:2px 0}.gfsC i{position:absolute;left:4px;top:3px;font-style:normal;font-size:11px;color:#fff;text-shadow:0 0 3px #000}
-.gfsFine{position:sticky;bottom:0;background:var(--panel,#11151b);padding:8px 4px;border-top:1px solid var(--line,#2a3340);z-index:2}.gfsFine button{flex:1 1 0;min-width:0}
-.gfsO{border:1px solid var(--line,#2a3340);border-radius:12px;padding:8px 10px;margin-top:10px}.gfsGo{width:100%;margin-top:6px;padding:12px;border-radius:12px;border:0;background:#ff3d63;color:#fff;font:inherit;font-weight:800;font-size:16px;cursor:pointer}
-.gfsL{margin-top:10px}.gfsJ{border:1px solid var(--line,#2a3340);border-radius:10px;padding:8px 10px;margin:6px 0}.gfsJ.done{border-color:rgba(46,204,113,.5)}.gfsJ.fail{border-color:rgba(255,77,109,.6)}.gfsJ>b{display:block;font-size:13.5px}.gfsJ>small{display:block;font-size:12px;opacity:.75;margin:2px 0}
-.gfsF{display:flex;gap:10px;align-items:center;margin-top:6px}.gfsF img{width:120px;border-radius:6px;background:#000}.gfsF b{display:block;font-size:13px}.gfsF small{display:block;font-size:11.5px;opacity:.7;margin:2px 0 6px}.gfsF a.pill{text-decoration:none;color:inherit}
-.vgPvH .pill{flex:none!important;width:auto!important;max-width:none!important;min-width:0!important;white-space:nowrap!important;overflow:visible!important;text-overflow:clip!important;padding:6px 10px!important}.vgPvH .vgPvT{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.g20B{max-height:86vh;overflow:auto}.g20B .lvsOptT small{font-size:11.5px;opacity:.7;font-weight:400}.g20R{grid-column:1/-1;display:flex;align-items:center;gap:6px;flex-wrap:wrap}.g20R span{font-size:12.5px;opacity:.75;min-width:52px}   /* TK_V1.0.73 GIF */
-.g20R button{padding:7px 10px!important;font-size:13px!important;font-weight:600!important;border-radius:9px!important}.g20R button.on{background:rgba(77,201,255,.2)!important;border-color:#4dc9ff!important;color:#bfeaff!important}
-.g20Cap{grid-column:1/-1;display:flex;gap:8px;align-items:center;font-size:13.5px;padding:4px 2px}.g20Cap input{width:20px;height:20px}
-.g20L{grid-column:1/-1}.g20St{font-size:13px;padding:8px 10px;border-radius:9px;background:rgba(63,182,242,.1);margin-top:4px}.g20St.bad{background:rgba(255,77,109,.12);color:#ff9fb0}
-.g20Ok{display:flex;gap:10px;align-items:center;margin-top:6px}.g20Ok img{width:110px;border-radius:8px;background:#000}.g20Ok b{display:block}.g20Ok small{display:block;font-size:11.5px;opacity:.7;margin:2px 0 6px;word-break:break-all}.g20Ok a.pill{text-decoration:none;color:inherit}
-.g20H{font-size:12px;opacity:.65;margin:10px 0 4px}.g20F{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:4px}.g20F img{width:100%;border-radius:6px;display:block;background:#000}
-.lvsOpt{position:fixed;inset:0;z-index:2147483100;background:rgba(0,0,0,.35);display:flex;align-items:flex-end;justify-content:center}   /* TK_V1.0.71 */
-.lvsOptB{width:min(520px,100%);background:var(--panel,#171a21);border:1px solid var(--line,#2a3340);border-radius:16px 16px 0 0;padding:12px 12px calc(14px + env(safe-area-inset-bottom,0px));display:grid;grid-template-columns:1fr 1fr;gap:8px;animation:lvaIn .18s ease-out}
-.lvsOptT{grid-column:1/-1;font-size:13.5px;opacity:.85;padding:2px 2px 4px}.lvsOptB button{padding:13px 8px;border-radius:12px;border:1px solid var(--line,#2a3340);background:var(--card,#151a21);color:inherit;font:inherit;font-weight:700;font-size:15px}.lvsOptB button.pri{grid-column:1/-1;background:#ff3d63;border-color:#ff3d63;color:#fff;font-size:16px}
-.lvsT{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-.dtlT{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}.dtlT b{font-size:16px}.dtlT .pill{width:auto!important;flex:none;white-space:nowrap;padding:4px 10px!important;min-height:0}.dtlT span{font-size:12px;opacity:.7}   /* TK_V1.0.49 一天的時間軸 */
-.dtlG{font-size:12px}.dtlH,.dtlR{display:grid;grid-template-columns:92px 1fr;gap:6px;align-items:center}.dtlH>div,.dtlR>div{position:relative;height:22px}.dtlH u{position:absolute;text-decoration:none;opacity:.55;font-size:10.5px;transform:translateX(-2px)}
-.dtlR{border-top:1px solid var(--line,rgba(150,160,175,.15))}.dtlR>i{font-style:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;opacity:.9}.dtlR>div{background:repeating-linear-gradient(90deg,transparent 0 calc(12.5% - 1px),rgba(127,127,127,.15) calc(12.5% - 1px) 12.5%)}
-.dtlR s{position:absolute;top:4px;height:14px;border-radius:4px;background:rgba(255,77,109,.35);overflow:hidden;cursor:pointer;box-shadow:inset 0 -3px 0 var(--lc,transparent)}.dtlR s.on{outline:1.5px solid #ff4d6d}.dtlR s b{position:absolute;right:0;top:0;bottom:0;margin-left:auto;display:block;left:auto}
-.dtlR s{display:flex}.dtlR s b{position:static;flex:none;background:transparent}.dtlR s::after{content:"";flex:1;background:#4dc9ff;opacity:.85}
-.dtlR em{position:absolute;top:0;bottom:0;width:2px;background:#ff4d6d;z-index:2}.dtlR .pd{border:1.5px dashed rgba(180,140,255,.85);background:rgba(180,140,255,.15)!important;box-shadow:none!important;cursor:default}.dtlP i{opacity:.65;font-style:italic}.dtlN .k3{display:inline-block;width:14px;height:8px;border:1.5px dashed rgba(180,140,255,.85);margin:0 3px;vertical-align:middle}   .dtlR .pd::after{display:none}   /* TK_V1.0.60 */
-.dtlN{font-size:11.5px;opacity:.7;margin-top:10px;line-height:1.6}.dtlN b{display:inline-block;width:14px;height:8px;border-radius:2px;vertical-align:middle;margin:0 3px}.dtlN .k1{background:#4dc9ff}.dtlN .k2{background:rgba(255,77,109,.35)}
-.hoH{display:flex;gap:12px;align-items:center;margin:4px 0 10px}.hoH img{width:56px;height:56px;border-radius:50%;object-fit:cover;background:rgba(127,127,127,.2)}.hoH b{font-size:18px;display:block}.hoH small{font-size:12px;opacity:.7}.hoLive{font-size:12px;color:#ff4d6d}   /* TK_V1.0.42 主播總覽 */
-.hoNx{margin:10px 0 0;padding:8px 10px;border-radius:10px;background:rgba(180,140,255,.1);border:1px solid rgba(180,140,255,.35);font-size:13px;line-height:1.55}.hoNx small{display:block;font-size:11.5px;opacity:.75}   /* TK_V1.0.48 */
-.pf2Ho{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
-.hoWk{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;align-items:end;height:76px}.hoWk div{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:2px}.hoWk s{display:block;width:70%;border-radius:4px 4px 0 0;background:#ffb547}.hoWk small{font-size:9.5px;opacity:.6}   /* TK_V1.0.61 */
-.hoGs{font-size:12px;opacity:.8;margin:8px 0 2px}.hoGf{display:flex;align-items:center;gap:8px;width:100%;padding:6px 4px;border:0;border-bottom:1px solid var(--line,rgba(150,160,175,.15));background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}.hoGf i{font-style:normal;width:18px;opacity:.6;font-size:12px}.hoGf b{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.hoGf small{font-size:11px;opacity:.6}.hoGf em{font-style:normal;font-size:12px;color:#ffb547;min-width:70px;text-align:right}
-.hoNt span{white-space:normal;line-height:1.45}
-.hoPq{width:100%;padding:9px 12px;margin:6px 0 10px;border-radius:10px;border:1px solid var(--line,rgba(150,160,175,.35));background:transparent;color:inherit;font-size:15px}.hoPk{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}.hoPk button{display:flex;flex-direction:column;align-items:center;gap:3px;padding:10px 6px;border-radius:12px;border:1px solid var(--line,rgba(150,160,175,.25));background:rgba(127,127,127,.06);color:inherit;font:inherit;cursor:pointer}.hoPk img{width:44px;height:44px;border-radius:50%;object-fit:cover}.hoPk b{font-size:13px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hoPk small{font-size:11px;opacity:.6}   /* TK_V1.0.66 */
-.hoCal{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;max-width:420px}.hoCal u{text-decoration:none;font-size:10.5px;opacity:.55;text-align:center}.hoCal s{text-decoration:none;font-size:10.5px;text-align:center;padding:5px 0;border-radius:5px;background:rgba(127,127,127,.08)}.hoCal s.fu{opacity:.25}.hoCal s.td{outline:1.5px solid #ff4d6d}   /* TK_V1.0.68 */
+@@SH76@@
 @@SH23@@
-.hpTop{padding:12px 14px;border-radius:12px;margin:4px 0 10px;border:1px solid}.hpTop b{display:block;font-size:17px}.hpTop small{font-size:12px;opacity:.7}.hpTop.ok{border-color:rgba(46,204,113,.55);background:rgba(46,204,113,.1)}.hpTop.warn{border-color:rgba(255,181,71,.6);background:rgba(255,181,71,.1)}.hpTop.bad{border-color:rgba(255,77,109,.65);background:rgba(255,77,109,.12)}   /* TK_V1.0.69 */
-.hpI{display:flex;align-items:center;gap:10px;width:100%;padding:9px 6px;border:0;border-bottom:1px solid var(--line,rgba(150,160,175,.18));background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}.hpI>span{width:24px;text-align:center;font-size:17px}.hpI div{flex:1;min-width:0}.hpI b{display:block;font-size:14px}.hpI small{display:block;font-size:12px;opacity:.75;line-height:1.45}.hpI i{font-style:normal;opacity:.4}.hpI.bad b{color:#ff8c9f}.hpI.warn b{color:#ffc46b}
-.hpX{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}.hpX div{border:1px solid var(--line,rgba(150,160,175,.25));border-radius:10px;padding:8px 10px}.hpX small{display:block;font-size:11px;opacity:.65}.hpX b{font-size:14px}
-.hoK{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.hoK div{border:1px solid var(--line,rgba(150,160,175,.3));border-radius:10px;padding:8px 4px;text-align:center}.hoK b{display:block;font-size:18px}.hoK small{font-size:11px;opacity:.7}
-.hoT{font-size:13px;font-weight:700;margin:14px 0 6px;opacity:.9;cursor:pointer;user-select:none}.hoT::after{content:" ▾";opacity:.5;font-weight:400}.hoT.hoTc::after{content:" ▸ 已收合（點一下打開）";font-size:11px}.hoHm{max-width:560px;display:grid;grid-template-columns:18px repeat(24,1fr);gap:2px;font-size:10px}.hoHm i{font-style:normal;opacity:.6;text-align:center}.hoHm u{text-decoration:none;opacity:.5;font-size:9.5px}.hoHm s{display:block;aspect-ratio:1;border-radius:2px;background:#4dc9ff}
-.hoLv{display:flex;height:22px;border-radius:7px;overflow:hidden;font-size:11px;font-weight:700;color:#111}.hoLv span{display:flex;align-items:center;justify-content:center;white-space:nowrap;overflow:hidden}
-.hoChip{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.hoChip span{font-size:12px;padding:3px 9px;border-radius:12px;background:rgba(127,127,127,.14)}
-.hoS{display:flex;align-items:center;gap:8px;width:100%;padding:8px 4px;border:0;border-bottom:1px solid var(--line,rgba(150,160,175,.2));background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}.hoS b{font-size:13px;min-width:56px}.hoS span{flex:1;font-size:12.5px;opacity:.85}.hoS small{font-size:12px;opacity:.7}.hoS em{font-style:normal;font-size:11px;font-weight:800;color:#111;padding:1px 6px;border-radius:6px;min-width:30px;text-align:center}.hoB{margin:12px 0;display:flex;flex-wrap:wrap;gap:6px}.hoB a.pill{text-decoration:none;color:inherit}.hoB .pill{flex:1 1 44%;min-width:0;width:auto;max-width:none;white-space:normal;overflow:visible;text-overflow:clip;height:auto;min-height:36px;padding:8px 10px;text-align:center;line-height:1.3}
-.dhhD{border:1px solid var(--line,rgba(150,160,175,.3));border-radius:12px;padding:10px 12px;margin:8px 0}.dhhH{display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px}.dhhH span{font-size:12px;opacity:.7}   /* TK_V1.0.40 */
-.dhhR{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:3px 0}.dhhR small{font-size:12px;opacity:.85}.dhhR .bad{color:#ff4d6d}.dhhSv{width:220px;max-width:55%;height:40px}.dhhNo{font-size:12px;opacity:.5}
-.dhhA{font-size:13px;padding:7px 10px;border-radius:9px;margin:6px 0;background:rgba(255,181,71,.12);border:1px solid rgba(255,181,71,.5)}.dhhA.bad{background:rgba(255,77,109,.12);border-color:rgba(255,77,109,.6)}.dhhW{font-size:12px;color:#ffb547;margin-left:8px}
+@@SH77@@
 .khpBox{width:min(720px,100%)}.khpT{display:flex;justify-content:space-between;align-items:center;font-weight:800;font-size:16px;padding:12px 16px;border-bottom:1px solid var(--line,rgba(150,160,175,.3))}.khpT button{background:transparent;border:0;color:inherit;font-size:15px;cursor:pointer}   /* TK_V1.0.39 */
 .khpL{overflow:auto;padding:8px 16px 14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:4px 22px}.khpG>b{display:block;font-size:13px;opacity:.75;margin:10px 0 4px}.khpR{display:flex;gap:10px;align-items:baseline;padding:3px 0;font-size:13px}.khpR kbd{flex:none;min-width:118px;font:600 12px ui-monospace,monospace;padding:2px 7px;border-radius:6px;border:1px solid var(--line,rgba(150,160,175,.4));background:rgba(127,127,127,.12)}
-.lvaI{display:flex;align-items:center;gap:8px;padding:9px 10px 9px 12px;border-radius:12px;background:rgba(20,24,32,.95);border:1px solid #ff4d6d;color:#fff;box-shadow:0 6px 20px rgba(0,0,0,.5);cursor:pointer;animation:lvaIn .25s ease-out}
-.lvaI b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw}.lvaI small{font-size:12px;opacity:.75;flex:1;white-space:nowrap}.lvaI button{background:transparent;border:0;color:#aaa;font-size:14px;cursor:pointer;padding:0 2px;width:auto;min-height:0}
-@keyframes lvaIn{from{transform:translateY(-8px);opacity:0}to{transform:none;opacity:1}}
+@@SH78@@
 
-.qsOv{position:fixed;inset:0;z-index:2147483250;background:rgba(0,0,0,.55);display:flex;justify-content:center;align-items:flex-start;padding:8vh 12px 12px}   /* TK_V1.0.35 快速找 */
-.qsBox{width:min(620px,100%);max-height:80vh;display:flex;flex-direction:column;background:var(--panel,#171a21);border:1px solid var(--line,rgba(150,160,175,.3));border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.6);overflow:hidden}
-.qsBox input{font-size:16px;padding:14px 16px;border:0;border-bottom:1px solid var(--line,rgba(150,160,175,.3));background:transparent;color:inherit;outline:none}
-.qsL{overflow:auto;padding:4px 0}.qsH{font-size:11.5px;opacity:.6;padding:8px 16px 3px}.qsE{opacity:.65;font-size:13px;padding:14px 16px;line-height:1.6}
-.qsI{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:9px 16px;border:0;background:transparent;color:inherit;cursor:pointer;font:inherit}.qsI span{width:22px;text-align:center}.qsI b{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}.qsI small{opacity:.6;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
-.qsI.on,.qsI:hover{background:rgba(77,201,255,.14)}.qsF{font-size:11px;opacity:.5;padding:6px 16px;border-top:1px solid var(--line,rgba(150,160,175,.2))}
-.qsBtnPc{display:flex;justify-content:space-between;align-items:center;width:100%;margin:0 0 8px;padding:7px 10px;border-radius:9px;border:1px solid var(--line,rgba(150,160,175,.3));background:rgba(127,127,127,.08);color:var(--subtext,#9aa3b2);font:inherit;font-size:13px;cursor:pointer}.qsBtnPc small{opacity:.6;font-size:11px}
-.qsBtn{background:transparent;border:0;color:inherit;font-size:17px;padding:2px 6px;cursor:pointer}
-
-.hvSt{font-size:12.5px;opacity:.8;margin:4px 0 8px}.hvR{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:6px 0}.hvR div{border:1px solid var(--line);border-radius:10px;padding:8px;display:flex;flex-direction:column;align-items:center}.hvR b{font-size:16px}.hvR small{font-size:11px;opacity:.7}.hvE{font-size:13px;line-height:1.6;margin:6px 0}.hvI{display:grid;grid-template-columns:1fr 1fr;gap:6px}.hvI figure{margin:0}.hvI img{width:100%;border-radius:8px;background:#000}.hvI figcaption{text-align:center;font-size:12px;opacity:.75}   /* TK_V1.0.32 */
-/* LVS-CSS-BEGIN */
-.lvsPage{display:flex;flex-direction:column;min-height:0}
+@@SH99@@
 @@SH24@@
-.lvsKindOv{position:fixed;inset:0;z-index:9700;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:14px}
-.lvsKindW{background:var(--panel,#161a21);color:var(--text,#e8ecf1);border-radius:16px;width:min(520px,100%);max-height:92vh;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
-.lvsKindH{display:flex;align-items:center;justify-content:space-between;gap:8px}.lvsKindH b{font-size:16px}.lvsKindH .pill{flex:none;width:auto}
-.lvsKindI{display:flex;gap:12px;align-items:center;text-align:left;padding:12px 14px;border-radius:12px;border:1.5px solid var(--border,#2b313c);border-left:5px solid var(--c);background:var(--bg,#0f1115);color:inherit;cursor:pointer}
-.lvsKindI:hover,.lvsKindI.on{border-color:var(--c)}.lvsKindI i{font-style:normal;font-size:26px;flex:none}.lvsKindI b{display:block;font-size:15px;color:var(--c)}.lvsKindI small{display:block;font-size:12px;color:var(--subtext,#8a93a3);line-height:1.45;margin-top:2px}.lvsKindI .lvsKn{color:var(--text,#e8ecf1);font-weight:700}
-.lvsKindB{flex:none;height:34px;padding:0 10px;border-radius:9px;border:1.5px solid var(--c);background:transparent;color:var(--c);font-weight:800;font-size:13px;white-space:nowrap;cursor:pointer;margin-right:6px}   /* TK_V0.9.80 */
-.lvpTop{flex-wrap:wrap}.lvpTop>b{white-space:nowrap}.lvpTop>#lvsCnt{flex-basis:100%}
-.lvsPage [data-orph]{display:none!important}   /* TK_V0.9.81 冗餘改從「要看哪一種」進去 */
-/* LVS-CSS-END */
+@@SH79@@
 
 /* LVP-CSS-BEGIN */
 .lvpPage{height:100%;min-height:0}
@@ -383,17 +256,7 @@ video.hv{width:100%;height:100%;background:#000;object-fit:contain;border-radius
 .lvpL{border-right:0!important;padding-right:2px!important}
 /* LVP-CSS-END */
 
-/* CLP-CSS-BEGIN */
-.clpPage{display:flex;flex-direction:column}
-.clpG{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));grid-auto-rows:max-content;gap:6px;padding:2px}
-.clpC{border-radius:8px;overflow:hidden;background:var(--panel,#161a21);border:1px solid var(--border,#2b313c);cursor:pointer}
-.clpIm{position:relative;height:0;padding-bottom:133%;background:#14171d;overflow:hidden}.clpIm img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-.clpIm i{position:absolute;left:3px;top:3px;font-style:normal;font-size:10px;padding:0 4px;border-radius:5px;background:#2ecc71;color:#111;font-weight:800}
-.clpIm b{position:absolute;right:3px;bottom:3px;font-size:10px;padding:0 4px;border-radius:4px;background:rgba(0,0,0,.65);color:#fff}
-.clpNm{font-size:11.5px;font-weight:700;padding:2px 4px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.clpC small{display:block;font-size:10px;color:var(--subtext,#8a93a3);padding:0 4px 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.clpC small u{text-decoration:none;color:#ffc94d;font-weight:800}
-.clpMore{grid-column:1/-1;text-align:center;padding:14px;color:var(--subtext,#8a93a3)}
-/* CLP-CSS-END */
+@@SH80@@
 
 @@SH25@@
 
@@ -406,24 +269,7 @@ video.hv{width:100%;height:100%;background:#000;object-fit:contain;border-radius
 @@SH28@@
 .cuBox{padding:10px 12px;border:1px solid #3a7bd5;border-radius:12px;background:rgba(58,123,213,.08);line-height:1.55}.cuS{opacity:.7;font-size:12px}.cuT{margin-top:4px}.cuN{margin-top:4px;font-size:13px;opacity:.9}.cuW{color:#f0ad4e}.cuR{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin-top:8px}.cuBar{height:6px;border-radius:3px;background:rgba(127,127,127,.25);margin:6px 0 4px;overflow:hidden}.cuBar i{display:block;height:100%;background:#3a7bd5}
 #migFab{position:fixed;left:10px;bottom:14px;z-index:9680;max-width:min(92vw,420px);padding:8px 14px;border-radius:14px;background:#1d4f7a;color:#fff;box-shadow:0 6px 22px rgba(0,0,0,.45);cursor:pointer;display:flex;flex-direction:column;gap:2px;font-size:14px}#migFab small{opacity:.85;font-size:12px}#migFab.ok{background:#1f7a4a}
-.mrgHead{margin-bottom:10px}.mrgBox{padding:10px 12px;border-radius:12px;background:rgba(127,127,127,.12);margin:8px 0}.mrgBox.ok{background:rgba(69,212,131,.14)}.mrgBox.bad{background:rgba(255,80,80,.14)}.mrgBar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0}.mrgBar span{flex:1 1 100%}.mrgBar .btn{flex:0 0 auto;width:auto;max-width:none;min-width:0;white-space:nowrap;overflow:visible;padding:6px 12px}.mrgBar .btn.start{margin-left:auto}.mrgG{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid rgba(127,127,127,.25);border-radius:12px;margin:6px 0;cursor:pointer}.mrgG.on{border-color:#3a7bd5;background:rgba(58,123,213,.08)}.mrgG input{margin-top:4px;transform:scale(1.3)}.mrgT{line-height:1.5}.mrgS{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12.5px;opacity:.85;margin-top:3px}
-.ruHead{margin-bottom:10px}.ruQ{width:100%;box-sizing:border-box;margin:8px 0;padding:9px 12px;border-radius:12px;border:1px solid var(--line,rgba(127,127,127,.3));background:transparent;color:inherit;font:inherit}
-.ruToc{display:flex;flex-wrap:wrap;gap:6px}.ruToc button{border:1px solid var(--c);background:transparent;color:inherit;border-radius:16px;padding:4px 10px;font:inherit;font-size:13px;cursor:pointer}
-.ruC{border:1px solid rgba(127,127,127,.25);border-left:4px solid var(--c);border-radius:12px;margin:10px 0;overflow:hidden;scroll-margin-top:8px}
-.ruC h3{margin:0;padding:10px 12px;display:flex;gap:8px;align-items:center;cursor:pointer;font-size:16px;background:rgba(127,127,127,.06)}.ruC h3 em{margin-left:auto;font-style:normal;font-size:12px;opacity:.6}.ruC h3 i{font-style:normal;opacity:.6}
-.ruB{display:none;padding:2px 12px 10px}.ruC.on .ruB{display:block}
-.ruI{padding:8px 0;border-bottom:1px dashed rgba(127,127,127,.2)}.ruI:last-child{border-bottom:0}.ruI h4{margin:4px 0 6px;font-size:14.5px;color:var(--c)}
-.ruI ul{margin:4px 0;padding-left:20px;line-height:1.65}.ruI li{margin:2px 0}
-.ruFlow{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:6px 0 8px}.ruChip{border:1px solid var(--c,#888);background:color-mix(in srgb,var(--c,#888) 14%,transparent);border-radius:10px;padding:5px 9px;font-size:13px;font-weight:700}.ruAr{font-style:normal;opacity:.6}
-.ruBar{display:flex;border-radius:10px;overflow:hidden;margin:6px 0 8px;font-size:12px;font-weight:700}.ruBar span{background:color-mix(in srgb,var(--c) 35%,transparent);padding:6px 8px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ruT{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}.ruT th,.ruT td{border:1px solid rgba(127,127,127,.25);padding:5px 7px;text-align:left;vertical-align:top}.ruT th{background:rgba(127,127,127,.1)}
-.ruG{display:inline-block;min-width:26px;text-align:center;border-radius:7px;padding:1px 5px;margin-right:6px;background:var(--c);color:#111;font-weight:900}
-.ruLv{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}.ruLv span{border:2px solid var(--c);border-radius:10px;padding:5px 12px;font-weight:800}
-.ruQuad{display:grid;grid-template-columns:1fr 1fr;gap:4px;max-width:300px;margin:6px 0}.ruQuad span{border:1px solid rgba(127,127,127,.35);border-radius:8px;padding:8px;text-align:center;font-size:12.5px}
-.ruNone{padding:20px;text-align:center;opacity:.7}
-.ruV{display:inline-flex;align-items:center;gap:3px;border-bottom:1px dashed var(--c,#888);cursor:pointer;padding:0 2px;border-radius:4px}.ruV:hover{background:rgba(127,127,127,.15)}.ruV i{font-style:normal;font-size:11px;opacity:.55}.ruV small{font-size:11px;opacity:.6;font-weight:400}.ruV.ed{background:rgba(58,123,213,.15);padding:2px 6px;border-bottom:0;cursor:default}.ruV.done{background:rgba(69,212,131,.3)}.ruIn{width:84px;padding:3px 6px;border-radius:6px;border:1px solid #3a7bd5;background:transparent;color:inherit;font:inherit;font-weight:800}.ruCk{display:inline-flex;align-items:center;gap:3px;font-size:12.5px;opacity:.5;white-space:nowrap}.ruCk.go{opacity:1;color:#45d483;font-weight:800}.ruCk input{transform:scale(1.25)}.ruX{border:0;background:transparent;color:inherit;cursor:pointer;opacity:.6}
-.ytInf{margin:8px 0;padding:8px 12px;border-radius:10px;border:1px solid rgba(77,201,255,.4);background:rgba(77,201,255,.07);line-height:1.6}.ytInf small{opacity:.7}.ytInf .w,.ytEta .w{color:#f0ad4e}
-.ruWarn{border:2px solid #ff4d6d;background:rgba(255,77,109,.1);border-radius:10px;padding:8px 12px;margin:6px 0 8px;line-height:1.6}
+@@SH81@@
 .lvsColW{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}.lvsColW input[type=range]{width:120px}.lvsColW input[type=number]{width:52px;padding:2px 4px;border-radius:6px;border:1px solid var(--line,#444);background:transparent;color:inherit;font:inherit;text-align:center}.lvsColB{padding:2px 8px}
 .lvsDense .lvsT span{font-size:9px;transform:scale(.85);transform-origin:left bottom}.lvsDense2 .lvsT span{display:none}
 </style></head>
@@ -434,35 +280,14 @@ video.hv{width:100%;height:100%;background:#000;object-fit:contain;border-radius
 <script>const THEMES=__THEMES__;const THEME0="__MODE__";
 "use strict";
 /* ================= V0.6.01 TikLive Monitor 網頁版（電腦版介面） ================= */
-const B="__BASE__";
-/* V1.1.49 🚀 圖片快速通道：同一個區網、http 時，截圖／預覽大圖／縮圖改從「網頁的埠 +1」那個多執行緒小伺服器拿（不排主程式的隊）；連不到就照原本 */
-window.FASTB=window.FASTB||"";function imgB(b){return window.FASTB||b;}
-/* V1.1.60 主程式重開後快速通道換了鑰匙：圖片 404 → 重新拿一次鑰匙（10 秒最多一次），這張改用新的（拿不到就走原本的） */
-let FASTFIX=null,FASTFT=0;function fastFix(){if(FASTFIX)return FASTFIX;if(Date.now()-FASTFT<10000)return Promise.resolve();FASTFT=Date.now();
-  FASTFIX=(async()=>{try{const b=typeof B==="string"?B:"";const j=await fetch(b+"/api/pc/fastimg",{cache:"no-store"}).then(r=>r.json());let nb="";if(j&&j.ok&&j.on&&j.port&&j.key){const fb=`http://${location.hostname}:${j.port}/${j.key}`;for(let i=0;i<7&&!nb;i++){try{const p=await fetch(fb+"/ping",{cache:"no-store"});if(p.ok)nb=fb;}catch(e){}}}window.FASTB=nb;}catch(e){window.FASTB="";}})().finally(()=>{FASTFIX=null;});return FASTFIX;}   /* 舊連線會回 503 並關掉：多試幾次就連到新的 */
-window.addEventListener("error",e=>{const t=e.target;try{if(!t||t.tagName!=="IMG"||(t._fr||0)>=2)return;const src=t.getAttribute("src")||"",m=/^https?:\/\/[^/]+:\d+\/[A-Za-z0-9_-]{16,}(\/(?:snap|avatar|media|api)\/.*)$/.exec(src);if(!m||!window.FASTP)return;
-  t._fr=(t._fr||0)+1;const rest=m[1],n=t._fr;fastFix().then(()=>{t.src=(n<2&&window.FASTB?window.FASTB:(typeof B==="string"?B:""))+rest;});}catch(x){}},true);   /* 第二次還不行就走原本的 */
+@@SH82@@
 (function(){if(window._fjw)return;window._fjw=1;const of0=window.fetch.bind(window),FJ=/\/api\/(replay\?id=|sessions\?|pc\/vg\/sheetinfo\?|pc\/vg\/info\?|pc\/hist\/strip\?|pc\/edit\/list\?|pc\/vb\/note\?|pc\/stt\/sub\?id=\d+$)/;   /* V1.1.50 唯讀資料走快速通道 */
   window.fetch=function(u,o){try{const url=typeof u==="string"?u:"",m=String((o&&o.method)||"GET").toUpperCase(),b=typeof B==="string"?B:"";
     if(m==="GET"&&!window.FASTB&&window.FASTP&&!window.FASTD&&url&&FJ.test(url))return Promise.race([window.FASTP,new Promise(r=>setTimeout(r,700))]).then(()=>{window.FASTD=1;return window.fetch(u,o);});
     if(m==="GET"&&window.FASTB&&url&&FJ.test(url)&&(url.startsWith(b+"/api/")||url.startsWith("/api/"))){const p=url.slice(url.indexOf("/api/"));return of0(window.FASTB+p,{cache:"no-store"}).then(r=>r.ok?r:of0(u,o)).catch(()=>of0(u,o));}}catch(e){}return of0(u,o);};})();
 @@SH29@@
 setTimeout(()=>{const sd=document.getElementById("side");if(sd&&!document.getElementById("qsBtn")){const b=document.createElement("button");b.id="qsBtn";b.className="qsBtnPc";b.innerHTML="🔍 快速找 <small>Ctrl+K · ? 快速鍵</small>";b.onclick=qsOpen;sd.insertBefore(b,sd.firstChild);}},0);
-/* QSK-END */
-/* LVA-BEGIN TK_V1.0.38 開播提醒：重點主播（或全部）開播時跳一條提示＋震動；頁面開著就會提醒（在別的分頁也會） */
-const LVA={prev:null,t:0};
-function lvaMode(){try{return localStorage.getItem("lva_mode")||"pri";}catch(e){return "pri";}}
-async function lvaTick(){clearTimeout(LVA.t);LVA.t=setTimeout(lvaTick,document.hidden?90000:30000);const md=lvaMode();if(md==="off"){LVA.prev=null;return;}
-  let j=null;try{const r=await fetch(B+"/api/pc/livenow",{cache:"no-store"});j=r.ok?await r.json():null;}catch(e){}if(!j||!j.live)return;
-  const now=new Set(j.live.map(x=>x[0]));if(LVA.prev===null){LVA.prev=now;return;}
-  const nw=j.live.filter(x=>!LVA.prev.has(x[0])&&(md==="all"||x[2]));LVA.prev=now;if(!nw.length)return;
-  try{if(navigator.vibrate)navigator.vibrate([120,60,120]);}catch(e){}
-  for(const x of nw.slice(0,3))lvaShow(x);}
-function lvaShow(x){let w=document.getElementById("lvaW");if(!w){w=document.createElement("div");w.id="lvaW";w.className="lvaW";document.body.appendChild(w);}
-  const d=document.createElement("div");d.className="lvaI";d.innerHTML=`<span>🔴</span><b>${esc(x[1]||x[0])}</b><small>${x[2]?"⭐ 重點主播 · ":""}開播了</small><button data-x="1">✕</button>`;
-  d.onclick=e=>{d.remove();if(e.target.closest("[data-x]"))return;if(typeof PAGES!=="undefined"&&typeof go==="function")go(0);else location.hash="live";};w.appendChild(d);setTimeout(()=>d.remove(),20000);}
-document.addEventListener("visibilitychange",()=>{if(!document.hidden)lvaTick();});setTimeout(lvaTick,3000);
-/* LVA-END */
+@@SH83@@
 /* TK_V1.0.55 電腦網頁：分頁標題前面顯示待處理數（跟手機紅點同一套） */
 const PC_TODO_K=["nvexp","orphm","pup","ytauth","mem","guard","err","dhealth","pfx"];
 async function pcTodo(){clearTimeout(window._pcTodoT);window._pcTodoT=setTimeout(pcTodo,300000);if(document.hidden)return;let j=null;try{j=await api("/api/pc/smart/sum");}catch(e){}if(!j||!j.items)return;
@@ -479,16 +304,7 @@ function khpOpen(){if(document.getElementById("khpOv"))return;const o=document.c
 document.addEventListener("keydown",e=>{const t=e.target,ed=t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));if(ed)return;
   if(e.key==="?"&&!e.ctrlKey&&!e.altKey){e.preventDefault();const o=document.getElementById("khpOv");if(o)o.remove();else khpOpen();}else if(e.key==="Escape"){const o=document.getElementById("khpOv");if(o)o.remove();}});
 /* KHP-END */
-/* TK_V1.0.27 電腦已經熱更新、這頁還是舊版：上方出現提示（不自動重新整理，免得中斷上傳／播放） */
-const PAGEV="__APPVER__";
-async function verWatch(){clearTimeout(window._verT);window._verT=setTimeout(verWatch,60000);if(document.hidden||PAGEV.startsWith("__"))return;let j=null;
-  try{const r=await fetch(B+"/api/update/status",{cache:"no-store"});if(!r.ok)return;j=await r.json();}catch(e){return;}
-  if(!j||!j.current||j.current===PAGEV)return;let b=document.getElementById("verBar");
-  if(!b){b=document.createElement("div");b.id="verBar";b.className="verBar";document.body.appendChild(b);
-    b.onclick=e=>{if(e.target.closest("[data-vx]")){b.remove();clearTimeout(window._verT);window._verT=setTimeout(verWatch,30*60000);return;}
-      if(typeof PUP!=="undefined"&&PUP.run&&!confirm("手機還在上傳，重新整理會中斷（之後再選一次檔案會接著傳）。確定要重新整理？"))return;location.reload();};}
-  b.innerHTML=`<span>🆕 電腦已經更新到 <b>V${j.current}</b>（這頁還是 V${PAGEV}）</span><button>重新整理</button><button data-vx="1" title="30 分鐘後再提醒">✕</button>`;}
-setTimeout(verWatch,20000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)setTimeout(verWatch,2000);});
+@@SH100@@
 
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -714,36 +530,11 @@ setTimeout(()=>{try{pcUpdFab();}catch(e){}},2000);
 (function(){if(document.getElementById("minicss"))return;const st=document.createElement("style");st.id="minicss";
 st.textContent=".pcst{display:grid;grid-auto-flow:column;grid-auto-columns:max-content;justify-content:end;gap:0 10px;font-size:11px;line-height:1.45;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--sub,var(--subtext,#8b98a8));flex:none}.pcst>span{display:flex;align-items:baseline;gap:3px}.pcst i{font-style:normal;font-size:10px;letter-spacing:.3px;opacity:.85}.pcst b{display:inline;font-size:11.5px;font-weight:800;color:var(--strong,var(--text,#e8eef5));overflow:visible}.pcst small{font-size:9.5px;color:var(--sub,var(--subtext,#8b98a8));opacity:.8;margin-left:1px}.pcst .w{color:#f0ad4e}.pcst .x{color:#ff5c5c}.pcst .pg1{color:#45d483}#miniS:empty{display:none}.pcst.one{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:max-content;gap:0 9px}.pcst.one>span{min-width:0;gap:3px}.pcst.one>span:empty{display:none}.rpdel{flex:none;width:34px;height:34px;border-radius:10px;border:1px solid #c62845;background:transparent;color:#ff6577;font-size:16px;margin-left:6px}.rph .pcst{margin-left:auto;padding-left:8px;border-left:1px solid var(--line,#2a3340)}";
 document.head.appendChild(st);})();
-const MINI={t:null,busy:false,h:""};
-function miniHtml(m){const c=(p,w,x)=>p==null?"":p>=x?"x":p>=w?"w":"",cell=(k,v,cls)=>`<span><i>${k}</i><b class="${cls||""}">${v}</b></span>`,T=[];   // V0.6.21 只留 5 項、一列
-  for(const r of m.rows||[]){if(/^(CPU|RAM|GPU)$/.test(r.k))T.push(cell(r.k,r.p!=null?r.p+"%":"—",c(r.p,70,90)));
-    else T.push(cell(String(r.k).replace(":","")+"忙",r.busy!=null?r.busy+"%":"—",c(r.busy,60,90)));}
-  return T.join("");}
-function miniTick(){clearTimeout(MINI.t);MINI.t=null;const el=document.getElementById("miniS");if(!el)return;
-  if(MINI.h&&!el.innerHTML)el.innerHTML=MINI.h;
-  if(!document.hidden&&!MINI.busy){MINI.busy=true;(typeof api==="function"?api:J)("/api/pc/mini").then(m=>{if(m&&m.rows){MINI.h=miniHtml(m);const e=document.getElementById("miniS");if(e)e.innerHTML=MINI.h;}}).catch(()=>{}).finally(()=>{MINI.busy=false;});}
-  MINI.t=setTimeout(miniTick,3000);}
-function miniStart(){if(!MINI.t)miniTick();else{const el=document.getElementById("miniS");if(el&&!el.innerHTML&&MINI.h)el.innerHTML=MINI.h;}}
+@@SH101@@
 function miniSync(){const w=document.getElementById("miniW");if(!w)return;const on=S.page===7||!!(S.tab&&S.tab.k==="hist");
   if(on&&!document.getElementById("miniS")){w.innerHTML='<div id="miniS" class="pcst"></div>';miniStart();}else if(!on&&w.innerHTML)w.innerHTML="";}
 
-/* V0.6.27 自我檢查狀態＋重新啟動主程式（手機與電腦網頁版共用） */
-function healthHtml(H){if(!H||!H.t)return '<div style="opacity:.7;margin-bottom:6px">🩺 自我檢查：第一次檢查中…</div>';
-  const db=H.ok?`<b style="color:#45d483">資料庫寫入正常</b>（${H.ms} ms）`:`<b style="color:#ff4d6d">資料庫寫不進去 ${H.blocked_min} 分鐘</b>（${esc(H.err||"")}）`;
-  const cn=H.conn==="bad"?`<b style="color:#f0ad4e">連線一直失敗</b>：${esc(H.conn_msg||"")}`:`<b style="color:#45d483">連線正常</b>`;
-  const t=new Date(H.t*1000),hm=String(t.getHours()).padStart(2,"0")+":"+String(t.getMinutes()).padStart(2,"0");
-  return `<div style="margin-bottom:8px;line-height:1.6">🩺 自我檢查（每分鐘，${hm}）：${db} · ${cn}${H.cg?`<div>${cgLine(H.cg)}</div>`:""}${(H.actions||[]).length?`<div style="font-size:.88em;opacity:.8">`+H.actions.slice(-3).map(a=>{const d=new Date(a.t*1000);return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")} ${esc(a.msg)}`;}).join("<br>")+`</div>`:""}
-<div style="margin-top:6px"><button class="pill" data-restart="1" style="border-color:#c62845;color:#ff6577">🔄 重新啟動主程式</button> <span style="font-size:.85em;opacity:.7">卡住時用，效果跟重開機一樣；大約 20 秒後自動開回來${H.restart_min>0?`（資料庫寫不進去 ${H.restart_min} 分鐘會自動做）`:""}</span></div></div>`;}
-document.addEventListener("click",async e=>{const b=e.target.closest("[data-restart]");if(!b)return;
-  if(!confirm("確定要重新啟動主程式嗎？\n\n監控和錄影會中斷約 20～30 秒，之後自動開回來並繼續監控。"))return;
-  const pf=typeof post==="function"?(u,d)=>post(u,d):(u,d)=>deepPost(u,d);let j=await pf("/api/pc/app/restart",{});
-  if(j&&j.guard){if(!confirm(j.message))return;j=await pf("/api/pc/app/restart",{force:1});}   // V0.6.47 重開沒有幫助時先提醒
-  (typeof toast==="function"?toast:alert)(j&&j.ok?"🔄 "+(j.message||"重新啟動中"):"✖ "+((j&&j.message)||"沒有成功"));});
-
-/* V0.6.47 連線管控一行摘要（自我檢查、側欄共用） */
-function cgLine(I){if(!I)return "";const col=["#45d483","#f0ad4e","#ff6577"][I.level]||"#45d483",S=I.sign||{};
-  return `🚦 連線管控：<b style="color:${col}">${I.on?esc(I.level_name):"關閉"}</b> · 每分鐘 ${I.att_min}/${I.rate_now} 次檢查 · TikTok 拒絕 ${I.block_pct}% · 排隊 ${(I.q||[]).reduce((a,b)=>a+b,0)}`+
-    (S.limited?` · <b style="color:#ff6577">簽章額度用完</b>`:` · 今天簽章 ${S.n||0} 次`)+` <a href="javascript:void(0)" onclick="cgOpen()" style="color:var(--vline,#4dc9ff)">詳細 →</a>`;}
+@@SH84@@
 
 @@SH32@@
 
@@ -761,36 +552,7 @@ function cgLine(I){if(!I)return "";const col=["#45d483","#f0ad4e","#ff6577"][I.l
 
 @@SH39@@
 
-/* KIT-BEGIN */
-/* ================= V0.6.76 共用小工具（手機／網頁版）：禮物官方中文名稱、禮物圖示、長按／右鍵的場次選單 ================= */
-const KIT={gm:null,gmT:0,lp:null,swallow:false,swT:0};
-const kB=()=>(typeof B==="string"?B:"");
-const kE=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const kToast=m=>(typeof toast==="function"?toast(m):alert(m));
-async function kGet(p){const r=await fetch(kB()+p,{cache:"no-store"});return r.json();}
-async function kPost(p,d){if(typeof post==="function")return await post(p,d);if(typeof deepPost==="function")return await deepPost(p,d);return {};}
-async function kGiftMeta(force){if(!force&&KIT.gm&&Date.now()-KIT.gmT<300e3)return KIT.gm;try{KIT.gm=await kGet("/api/pc/gift/meta");KIT.gmT=Date.now();}catch(e){KIT.gm=KIT.gm||{zh:{},ia:[]};}return KIT.gm;}
-function kGN(n){const z=KIT.gm&&KIT.gm.zh;const k=String(n||"").trim().toLowerCase();return (z&&z[k])||String(n||"");}
-function kIA(n){const a=KIT.gm&&KIT.gm.ia;return !!(a&&a.indexOf(String(n||"").trim().toLowerCase().replace(/\s+/g," "))>=0);}
-function kGIcon(n,cls){return `<span class="${cls||"tkGi"}"><img src="${kB()}/api/pc/gfx/icon?k=${encodeURIComponent(n)}" alt="" loading="lazy" onerror="this.parentNode.textContent='🎁'"></span>`;}
-kGiftMeta();
-/* 長按（手機）或右鍵（電腦）任何認得出場次的格子 → 選單：✂ 剪輯這一場 */
-function kSidOf(t){if(!t||!t.closest)return 0;if(t.closest("#edOv,.tkMenu,input,textarea,select,video,.lvsT,#lvsOpt"))return 0;   /* TK_V1.0.71 檔案總管的縮圖：按住是圈選／預覽，不要跳「剪輯這一場」選單 */
-  const a=t.closest("[data-sid]");if(a&&+a.dataset.sid>0)return +a.dataset.sid;const h=t.closest(".hr[data-id]");if(h&&+h.dataset.id>0)return +h.dataset.id;return 0;}
-function kMenu(items,x,y){document.querySelectorAll(".tkMenu").forEach(m=>m.remove());const m=document.createElement("div");m.className="tkMenu tk";
-  m.innerHTML=items.map((it,i)=>it.hd?`<div class="hd">${kE(it.hd)}</div>`:`<button data-i="${i}">${kE(it.label)}</button>`).join("");document.body.appendChild(m);
-  const W=window.innerWidth,H=window.innerHeight,r=m.getBoundingClientRect();m.style.left=Math.max(8,Math.min(x,W-r.width-8))+"px";m.style.top=Math.max(8,Math.min(y,H-r.height-8))+"px";
-  const close=()=>{m.remove();document.removeEventListener("pointerdown",out,true);};const out=e=>{if(!m.contains(e.target))close();};
-  setTimeout(()=>document.addEventListener("pointerdown",out,true),0);
-  m.onclick=e=>{const b=e.target.closest("button[data-i]");if(!b)return;close();const it=items[+b.dataset.i];if(it&&it.act)it.act();};}
-function kSidMenu(sid,x,y){kMenu([{hd:`場次 #${String(sid).padStart(5,"0")}`},{label:"✂ 剪輯這一場",act:()=>{if(typeof edOpen==="function")edOpen(sid);}}],x,y);}
-document.addEventListener("contextmenu",e=>{if(e.defaultPrevented)return;const sid=kSidOf(e.target);if(!sid)return;e.preventDefault();clearTimeout(KIT.lp);KIT.lp=null;if(KIT.swT&&Date.now()-KIT.swT<1500&&document.querySelector(".tkMenu"))return;if(e.pointerType==="touch"){KIT.swallow=true;KIT.swT=Date.now();}kSidMenu(sid,e.clientX,e.clientY);});
-document.addEventListener("pointerdown",e=>{if(KIT.swallow&&Date.now()-KIT.swT>400)KIT.swallow=false;if(e.pointerType==="mouse")return;const sid=kSidOf(e.target);if(!sid)return;const x=e.clientX,y=e.clientY;clearTimeout(KIT.lp);
-  KIT.lp=setTimeout(()=>{KIT.lp=null;KIT.swallow=true;KIT.swT=Date.now();if(navigator.vibrate)navigator.vibrate(15);kSidMenu(sid,x,y);},600);
-  const mv=ev=>{if(Math.abs(ev.clientX-x)>10||Math.abs(ev.clientY-y)>10)stop();};const stop=()=>{clearTimeout(KIT.lp);document.removeEventListener("pointermove",mv,true);};
-  document.addEventListener("pointermove",mv,true);document.addEventListener("pointerup",stop,{once:true,capture:true});document.addEventListener("pointercancel",stop,{once:true,capture:true});},true);
-document.addEventListener("click",e=>{if(KIT.swallow){KIT.swallow=false;if(Date.now()-KIT.swT<1500){e.preventDefault();e.stopPropagation();}}},true);   /* 長按後放開的那一下不要當成點擊（Android 不會送，下一次按下就清掉） */
-/* KIT-END */
+@@SH85@@
 
 @@SH40@@
 
@@ -820,16 +582,7 @@ document.addEventListener("click",e=>{if(KIT.swallow){KIT.swallow=false;if(Date.
 
 @@SH53@@
 
-/* SMT-BEGIN */
-/* V0.7.42.026 智慧功能狀態卡：智慧排程、錄製檢討、今天漏開頭、精選、每日精選影片、YouTube、硬碟，一行一項；點一行跳到那一頁（各介面自己定義 smtGo）. 只讀，1 分鐘更新 */
-const smtE=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-async function smtLoad(el){if(!el)return;if(!el._smt){el._smt=1;el.addEventListener("click",e=>{const r=e.target.closest("[data-smt]");if(!r)return;if(typeof tapGuard==="function"&&tapGuard())return;if(typeof smtGo==="function")smtGo(r.dataset.smt);});}
-  if(!el.innerHTML)el.innerHTML='<div class="smtC"><b>🤖 智慧功能狀態</b> <small>讀取中…</small></div>';let d=null;
-  try{const r=await fetch((typeof B==="string"?B:"")+"/api/pc/smart/sum",{cache:"no-store"});d=await r.json();}catch(e){}
-  if(!el.isConnected)return;clearTimeout(el._tm);el._tm=setTimeout(()=>{if(el.isConnected)smtLoad(el);},60000);   /* V0.7.42.030 失敗也 1 分鐘後再試 */
-  if(!d||!Array.isArray(d.items)){if(!el._ok)el.innerHTML="";return;}el._ok=1;
-  el.innerHTML=`<div class="smtC"><div class="smtH"><b>🤖 智慧功能狀態</b><small>點一行看詳細</small></div>${d.items.map(x=>`<button type="button" class="smtR smt-${smtE(x.lv||"n")}" data-smt="${smtE(x.k)}"><i>${smtE(x.ic)}</i><b>${smtE(x.t)}</b><span>${smtE(x.v)}</span><s>›</s></button>`).join("")}</div>`;}
-/* SMT-END */
+@@SH86@@
 
 @@SH54@@
 
@@ -857,18 +610,9 @@ async function rvClick(e){const t=e.target;if(t.closest("[data-gset]")){rvGset()
 function lvsFSet(f){try{localStorage.setItem("lvs_f",JSON.stringify(f));}catch(e){}}
 async function lvsMount(root,opt){if(opt&&opt.pc&&typeof lvpMount==="function")return lvpMount(root);   /* TK_V0.8.97 網頁版：照 VideoSift 檔案總管的版面 */
   LVS.pc=false;LVS.root=root;LVS.auto=0;LVS.autoL=[];LVS.cur=-1;root.classList.add("lvsPage");const F=lvsF();LVS.F=F;
-  root.innerHTML=`<div class="lvsTop lvsTopM"><button class="lvsNav" data-a="prev" title="上一場">◀</button><button class="lvsCurN" id="lvsCurN" title="點開看全部場次"><b>讀取中…</b><small></small></button><button class="lvsNav orpB" data-orph="1" title="只看放超過 14 天、沒有場次資料的純 MP4（冗餘檔）">冗餘</button><button class="lvsNav" data-a="next" title="下一場">▶</button><span class="lvsAuto" id="lvsAuto"></span></div>
-<div class="lvsTool lvsToolM"><input id="lvsQ" class="lvsQ" placeholder="🔍 直播間名稱" value="${lvsE(F.q)}"><select id="lvsO">${LVS_ORD.map(([v,t])=>`<option value="${v}"${(LVS.kind==="nv"&&(F.o==="new"||!F.o)?"exp":F.o)===v?" selected":""}>${t}</option>`).join("")}</select><select id="lvsCat"><option value="*">📁 全部資料夾</option></select></div>
-<div class="lvsTool lvsToolM"><span class="lvsGr" id="lvsGr">${LVS_GR.map(([v,t])=>`<button data-g="${v}" class="${F.g.includes(v)?"on":""}">${t}</button>`).join("")}</span><button class="lvsPv${F.pv?" on":""}" id="lvsPv" title="還沒做好預覽圖的場次先不列（背景照樣在做，做好就會出現）">✔ 跳過沒好的</button><select id="lvsStep" title="間隔">${LVS_STEPS.map(([v,t])=>`<option value="${v}"${+lvsPref("step",0)===v?" selected":""}>⏱ ${t}</option>`).join("")}</select><select id="lvsCols" title="一列幾張">${[3,4,5,6,7,8,10,12,14,16,18,20,24,30,36].map(n=>`<option value="${n}"${lvsColsN()===n?" selected":""}>▦ ${n}</option>`).join("")}</select><small id="lvsCnt" class="lvsCntM">讀取中…</small></div>
+@@SH87@@
 <div class="lvsStrip" id="lvsStrip"></div><div class="lvsCurB" id="lvsCurB">${["-2","0","1","2"].map(k=>`<button data-v="${k}" style="--c:${LVSC[k][2]}"><span><b>${LVSC[k][0]}</b> ${LVSC[k][1]}</span><small data-gb="${k}">…</small></button>`).join("")}<button data-clip="1" class="clipB" style="--c:#9aa3b2"><span>✂ 初剪</span><small id="lvsClipGB">…</small></button></div><div class="lvsBox" id="lvsBox"></div><div class="lvsSel" id="lvsSel" hidden></div>`;   /* TK_V0.9.15 手機版：名字放最上面、等級一排放在場次小圖下面，上面盡量壓扁 */
-  root.querySelector("[data-a=prev]").onclick=()=>lvsGoTo(LVS.cur-1);root.querySelector("[data-a=next]").onclick=()=>lvsGoTo(LVS.cur+1);root.querySelector("#lvsCurN").onclick=lvsList;   /* TK_V0.9.17 名字＝下拉選場次；◀ ▶＝上一場／下一場 */
-  root.querySelector("#lvsCurB").onclick=e=>{if(e.target.closest("[data-clip]")){location.hash="clips";return;}const b=e.target.closest("[data-v]");if(!b)return;const s=LVS.box&&LVS.box.querySelector(`.lvsS[data-i="${LVS.cur}"]`);if(s)lvsSet(s,+b.dataset.v,false);};
-  if(root.querySelector("#lvsSum"))root.querySelector("#lvsSum").onclick=e=>{const b=e.target.closest("[data-k]");if(!b)return;F.lvf=F.lvf===b.dataset.k?"":b.dataset.k;lvsFSet(F);lvsApply(0);};   /* TK_V0.9.14 點等級＝只看那一種，再點一次取消 */
-  await lvsWire(root,F);}
-/* 兩種版面共用：篩選、捲動、選取、背景補圖 */
-async function lvsWire(root,F){const $r=s=>root.querySelector(s);
-  LVS.box=root.querySelector("#lvsBox");LVS.strip=root.querySelector("#lvsStrip");
-  if($r("[data-a=back]"))root.querySelector("[data-a=back]").onclick=()=>{window.lvsList=true;if(typeof PAGES==="undefined")location.hash="fx";else if(typeof go==="function")go(31);};   /* 回一般檔案總管（這次開著就不再自動跳回來） */
+@@SH102@@
   root.querySelector("#lvsStep").onchange=e=>{lvsPrefSet("step",e.target.value);lvsRebuild();};lvsColWire(root);
 @@SH66@@
   const L=(LVS.all||[]).filter(r=>qs?String(r.sid)===qs:(!sk||!lvsGd(r))&&(!q||String(r.name||"").toLowerCase().includes(q)||String(r.u||"").toLowerCase().includes(q)||String(r.sid)===q.replace(/^#0*/,""))
@@ -989,357 +733,7 @@ function lvpSelPaint(){const b=LVS.root&&LVS.root.querySelector("#lvpCut");if(!b
 
 @@SH74@@
 
-/* SN-BEGIN */
-/* ================= V0.6.62 只錄聲音的快照：放在影片的位置，跟著播放時間換；‹ › 翻上一張／下一張（手機回放、網頁版歷史回放共用） ================= */
-const SN={L:[],sid:0,box:null,seek:null,clk:null,cur:-1,t:0,view:0,lay:[4,5],mp4:false,time:true,fy:0,u:""};
-const snB=()=>(typeof B==="string"?B:"");
-const snHms=s=>{s=Math.max(0,Math.floor(+s||0));const p=n=>String(n).padStart(2,"0");return `${Math.floor(s/3600)}:${p(Math.floor(s%3600/60))}:${p(s%60)}`;};
-function snUrl(i){const x=SN.L[i];return x?`${imgB(snB())}/snap/${SN.sid}/${x[1]}`:"";}
-/* V1.1.51 總覽格子用縮小版（快速通道才有；原圖留給放大看、下載） */
-function snW(){const c=(SN.lay&&SN.lay[1])||5,px=(window.innerWidth||800)/c*(window.devicePixelRatio||1);return px<=260?240:px<=380?360:px<=520?480:720;}
-function snUrlS(i){const u=snUrl(i);return u&&window.FASTB?u+"?w="+snW():u;}
-function snIdx(t){const L=SN.L;let lo=0,hi=L.length;while(lo<hi){const m=(lo+hi)>>1;if(L[m][0]<=t+1)lo=m+1;else hi=m;}return Math.max(0,lo-1);}
-function snMount(box,sid,L,seek,clk,lay){SN.L=(L||[]).slice();SN.sid=sid;SN.seek=seek;SN.clk=clk;SN.cur=-1;SN.t=0;SN.box=box;SN.view=0;SN.lay=(lay&&lay.length===2)?lay:[4,5];SN.mp4=false;if(!box)return false;
-  try{const t=localStorage.getItem("tlm_sntime");SN.lab=t==="0"||t==="n"?"n":t==="x"?"x":"t";SN.gap=+(localStorage.getItem("tlm_sngap")??2);if(!isFinite(SN.gap))SN.gap=2;SN.zh=localStorage.getItem("tlm_snzh")||"r";SN.zv=localStorage.getItem("tlm_snzv")||"d";}catch(e){SN.lab="t";SN.gap=2;SN.zh="r";SN.zv="d";}
-  SN.time=SN.lab==="t";
-  let w=box.querySelector(".snv");if(!SN.L.length){if(w)w.remove();   /* TK_V0.9.93 這場沒有截圖：也給一個「截圖」入口（有完整 MP4 才能截），不然 MP4/JPG 按鈕不見、找不到地方截 */
-    w=document.createElement("div");w.className="snv snEmpty";box.insertBefore(w,box.firstChild);
-    w.innerHTML=`<div class="snEm"><b>📷 這場目前沒有截圖</b><span class="snEmT">檢查中…</span><button class="snPkGo" data-st="regen" hidden>▦ 從影片截圖</button></div>`;
-    w.querySelector("[data-st=regen]").onclick=e=>{e.stopPropagation();snPick();};snInfo(sid);return true;}
-  if(!w){w=document.createElement("div");w.className="snv";box.insertBefore(w,box.firstChild);}
-  /* V0.6.98 照片／影片切換：照片第一頁是全覽（一列 5 張），往右滑一張一張看、下載；影片＝這場剪好的（含初剪） */
-  w.innerHTML=`<div class="snTabs" hidden><button data-sm="p" class="on">📷 照片 <b class="snNP">${SN.L.length}</b></button><button data-sm="v" hidden>✂ 剪輯 <b class="snNV">0</b></button></div>
-<div class="snPg"></div><div class="snVid" hidden></div><button class="snBack" title="回到照片">📷 回到照片</button><button class="snHome" hidden title="回到全覽（最前面那一頁）">▦ 回總覽</button><div class="snGrip" title="上下拖：調整照片大小（點兩下恢復）"><i></i></div><button class="snb snp" title="上一張">‹</button><button class="snb snn" title="下一張">›</button><div class="snl" hidden></div>
-<div class="snTool"><span class="snFy" title="臉偏上／偏下：每一格的中心一起往上／往下移（▲▼ 一次 1、▴▾ 一次 0.1；這位主播會記住）"><button data-st="up">▲</button><button data-st="up1">▴</button><em class="snFyV">0</em><button data-st="dn1">▾</button><button data-st="dn">▼</button></span><button data-st="strip" title="確定這個裁切可以：每一張照全覽現在的比例、▲▼ 位置，一張一張往右滑著看">↔ 展開</button><button data-st="clips" hidden title="這場剪好的影片">✂ <span class="snNV2">0</span></button><button data-st="swap" title="欄列對調（例如 6×10 ⇄ 10×6）">⇄</button><button data-st="opt" title="版面：每格下面顯示什麼（時間／編號／不顯示）、圖跟圖的間距（可以負數重疊）、誰疊在誰上面">⚙ 版面</button><button data-st="regen" title="重新截圖：選幾列 × 幾欄（新的截好才換掉現在的照片；要有完整的原檔 MP4）">▦ <span class="snLay"></span></button><button data-st="dl" title="把現在看到的全覽合成一張大圖下載（原圖大小）">⬇ 下載</button><button data-st="mos" title="照現在的排版，每一格播那一刻往後幾秒、同時播放，做成 MP4 或 GIF">🎞 動圖</button><button data-st="nvk" class="snNvk" hidden></button></div>`;
-  w.querySelector(".snTool").onclick=e=>{const b=e.target.closest("[data-st]");if(!b)return;e.stopPropagation();const a=b.dataset.st;
-    if(a==="up"||a==="dn"||a==="up1"||a==="dn1"){snFySet(SN.fy+({up:1,dn:-1,up1:0.1,dn1:-0.1})[a]);return;}
-    if(a==="strip"){snCrop(true);snGo(1);return;}   /* V0.7.13 展開：照全覽現在的裁切，一張一張往右滑 */
-    if(a==="opt"){snOpt(b);return;}if(a==="swap"){const LY=snLayEff();snLaySet([LY[1],LY[0]]);return;}if(a==="clips"){snMode("v");return;}if(a==="nvk"){snNvtKeep(b);return;}
-    if(a==="regen")snPick();else if(a==="dl")snMerge();else if(a==="mos")snMosOpen();};
-  snInfo(sid);
-  w.querySelector(".snp").onclick=e=>{e.stopPropagation();snGo(SN.view-1);};w.querySelector(".snn").onclick=e=>{e.stopPropagation();snGo(SN.view+1);};
-  w.querySelector(".snBack").onclick=e=>{e.stopPropagation();snMode("p");};
-  {const hm=w.querySelector(".snHome");["pointerdown","touchstart","mousedown"].forEach(ev=>hm.addEventListener(ev,e=>e.stopPropagation()));hm.onclick=e=>{e.stopPropagation();e.preventDefault();snGo(0);};}   /* V0.7.21 單張左上角：回到全覽 */
-  w.querySelector(".snTabs").onclick=e=>{const b=e.target.closest("[data-sm]");if(b){e.stopPropagation();snMode(b.dataset.sm);}};
-  const pg=w.querySelector(".snPg");snBuild();snGripInit(w);
-  pg.addEventListener("scroll",()=>{clearTimeout(SN.st);SN.st=setTimeout(()=>{const v=Math.round(pg.scrollLeft/Math.max(1,pg.clientWidth));if(v!==SN.view){SN.view=v;snLabel();snLoadNear();
-    if(v>0&&SN.user){const x=SN.L[v-1];if(x&&SN.seek){SN.lock=Date.now();SN.seek(Math.max(0,x[0]));}}}SN.user=false;},120);},{passive:true});
-  pg.addEventListener("pointerdown",()=>{SN.user=true;},{passive:true});pg.addEventListener("touchstart",()=>{SN.user=true;},{passive:true});pg.addEventListener("wheel",()=>{SN.user=true;},{passive:true});
-  pg.onclick=e=>{const g=e.target.closest("[data-gi]");if(g){if(SN.strip){const x=SN.L[+g.dataset.gi];if(x&&SN.seek)SN.seek(Math.max(0,x[0]));return;}SN.user=true;snCrop(false);snGo(+g.dataset.gi+1,true);return;}const d=e.target.closest("[data-sd]");if(d){e.stopPropagation();snDel();return;}
-    const dl=e.target.closest("a.snDl");if(dl&&SN.crop){e.preventDefault();e.stopPropagation();snCropDl(SN.view-1);}};   /* 展開（裁切）時下載：照畫面上的裁切、原圖解析度 */
-  if(typeof clMount==="function"){const vb=w.querySelector(".snVid");clMount(vb,{sid,always:true,pause:()=>{},after:n=>{const t=w.querySelector("[data-st=clips]");if(!t)return;t.hidden=!n;t.querySelector(".snNV2").textContent=n;   /* V0.7.12 上面的「照片／剪輯」拿掉：剪好的改成右下角一顆按鈕 */
-    }});}   /* V0.7.08 一律先看照片 */
-  snLabel();return true;}
-/* V0.7.08 照片可以上下拖放大縮小：全覽每張一列 5 張、左右一定填滿；放大到夠高就是完整的 9:16，縮小時圖片置中裁切 */
-function snVis(c,r,C,R,cw,th,gp){const x=c*(cw+gp),y=r*(th+gp);let vx=x,vw=cw,vy=y,vh=th;   /* 疊在一起時，這張沒被蓋住的那一塊 */
-  if(gp<0){if(SN.zh==="r"){if(c<C-1)vw=cw+gp;}else{if(c>0){vx=x-gp;vw=cw+gp;}}if(SN.zv==="d"){if(r<R-1)vh=th+gp;}else{if(r>0){vy=y-gp;vh=th+gp;}}}
-  return {x:vx,y:vy,w:Math.max(8,vw),h:Math.max(8,vh)};}
-function snCrop(on){SN.crop=!!on;const w=SN.box&&SN.box.querySelector(".snv");if(w)w.querySelector(".snPg").classList.toggle("crop",SN.crop);}
-function snCropDl(i){const x=SN.L[i];if(!x)return;const im=new Image();if(window.FASTB)im.crossOrigin="anonymous";im.onload=()=>{const ar=(SN.cw||9)/(SN.th||16),nw=im.naturalWidth,nh=im.naturalHeight;let cw,ch;if(nw/nh>ar){ch=nh;cw=Math.round(nh*ar);}else{cw=nw;ch=Math.round(nw/ar);}
-  const sx=(nw-cw)/2,sy=(nh-ch)*(50-SN.fy)/100,cv=document.createElement("canvas");cv.width=cw;cv.height=ch;cv.getContext("2d").drawImage(im,sx,sy,cw,ch,0,0,cw,ch);
-  cv.toBlob(b=>{const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=(x[1]||"snap.jpg").split("/").pop().replace(/\.jpg$/i,"_裁切.jpg");document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},4000);},"image/jpeg",0.92);};im.src=snUrl(i);}
-function snZ(c,r){return 1+(SN.zv==="d"?r:500-r)*200+(SN.zh==="r"?c:199-c);}   /* 誰疊在誰上面：下搭上／上搭下、右搭左／左搭右 */
-function snFit(){const w=SN.box&&SN.box.querySelector(".snv");if(!w)return;const pg=w.querySelector(".snPg"),g=w.querySelector(".snGrid");if(!pg||!g)return;
-  const N=SN.L.length,gp=+SN.gap||0,W=pg.clientWidth||300,H=pg.clientHeight||300;let C,R,cw,th;   /* V0.7.12 自己排位置：間距可以負數（重疊） */
-  if(SN.strip){R=1;C=Math.max(1,N);th=Math.max(30,H-2);cw=Math.max(20,th/(SN.ratio||16/9));}
-  else{const LY=snLayEff();C=Math.max(1,LY[1]);R=Math.max(1,Math.ceil(N/C));const Rv=Math.max(1,Math.min(LY[0],R));cw=Math.max(10,(W-(C-1)*gp)/C);th=Math.max(28,Math.min(cw*16/9,(H-(Rv-1)*gp)/Rv));}
-  SN.th=th;SN.cw=cw;const T=g.children;
-  for(let i=0;i<T.length;i++){const el=T[i];if(!el.classList.contains("snG"))continue;const c=i%C,r=Math.floor(i/C);el.style.left=(c*(cw+gp))+"px";el.style.top=(r*(th+gp))+"px";el.style.width=cw+"px";el.style.height=th+"px";el.style.zIndex=snZ(c,r);}
-  g.querySelectorAll(".snLb").forEach(el=>{const i=+el.dataset.li,c=i%C,r=Math.floor(i/C),v=snVis(c,r,C,R,cw,th,gp);   /* 字一律浮在最上面，放在這張「露出來」的那一塊的下緣 */
-    el.style.left=(SN.lab==="t"?v.x+v.w/2:v.x+3)+"px";el.style.top=(v.y+v.h-3)+"px";});
-  const tw=C*cw+(C-1)*gp,thh=R*th+(R-1)*gp;g.style.width=(SN.strip?tw:W)+"px";g.style.height=Math.max(0,thh)+"px";g.style.marginTop=(!SN.strip&&thh<H)?((H-thh)/2)+"px":"0";
-  {const ar=cw/th,bw=Math.min(W,H*ar);pg.style.setProperty("--snbw",bw+"px");pg.style.setProperty("--snbh",(bw/ar)+"px");pg.style.setProperty("--snfy",(50-SN.fy)+"%");}
-  const ly=w.querySelector(".snLay");if(ly){const LY=snLayEff();ly.textContent=`${LY[0]}×${LY[1]}`;}const rg=w.querySelector("[data-st=regen]");if(rg)rg.hidden=!SN.mp4;
-  const vd=w.querySelector(".snVid");if(vd&&!w.closest(".snHost"))vd.style.minHeight=H+"px";}
-/* TK_V0.9.23 看的排列（不用重新截圖）：照張數列出剛好排滿的組合（60 張＝2×30、3×20、4×15、5×12、6×10…），也可以欄列對調；這台裝置記住（照張數分開記） */
-function snLayEff(){const N=SN.L.length,ex=snLayPairs(N).length>0;try{const v=JSON.parse(localStorage.getItem("tlm_snlay_"+N)||"null");if(v&&v.length===2&&v[0]>0&&v[1]>0&&(ex?v[0]*v[1]===N:v[0]*v[1]>=N))return v;}catch(e){}   /* TK_V0.9.92 排得滿的張數：只用剛好排滿的版面（42 張不會變 6×8 空 6 格） */
-  const L=SN.lay;if(ex&&L[0]*L[1]!==N){const P=snLayPairs(N);return P.reduce((a,b)=>Math.abs(b[1]-L[1])<Math.abs(a[1]-L[1])?b:a);}return L;}
-function snLaySet(v){try{localStorage.setItem("tlm_snlay_"+SN.L.length,JSON.stringify(v));}catch(e){}snFit();const o=document.getElementById("snOpt");if(o&&o._draw)o._draw();}
-function snLayPairs(N){const P=[];for(let r=2;r<=N/2;r++)if(N%r===0&&N/r>=2&&N/r<=30&&r<=40)P.push([r,N/r]);return P;}
-function snOpt(btn){let ov=document.getElementById("snOpt");if(ov){ov.remove();return;}ov=document.createElement("div");ov.id="snOpt";
-  const seg=(k,L)=>`<div class="snOS">${L.map(([v,t])=>`<button data-k="${k}" data-v="${v}"${String(SN[k])===String(v)?' class="on"':""}>${t}</button>`).join("")}</div>`;
-  const draw=()=>{ov.innerHTML=`<div class="snOR"><b>每格下面</b>${seg("lab",[["t","時間"],["n","編號"],["x","不顯示"]])}</div>
-<div class="snOR"><b>間距</b><div class="snOS"><button data-g="-5">−5</button><button data-g="-1">−1</button><em>${SN.gap}</em><button data-g="1">＋1</button><button data-g="5">＋5</button><button data-g="0r">預設</button></div></div><div class="snOH">負數＝圖跟圖疊在一起</div>
-${(()=>{const N=SN.L.length,LY=snLayEff(),P=snLayPairs(N);return P.length?`<div class="snOR"><b>排列</b><div class="snOS snOLy">${P.map(([r,c])=>`<button data-ly="${r}x${c}"${LY[0]===r&&LY[1]===c?' class="on"':""}>${r}×${c}</button>`).join("")}<button data-ly="swap">⇄ 欄列對調</button></div></div><div class="snOH">${N} 張剛好排滿的組合（列×欄）；只換看的方式，不用重新截圖</div>`:"";})()}
-<div class="snOR"><b>左右疊</b>${seg("zh",[["r","右搭左"],["l","左搭右"]])}</div><div class="snOR"><b>上下疊</b>${seg("zv",[["d","下搭上"],["u","上搭下"]])}</div>`;};
-  ov._draw=draw;draw();document.body.appendChild(ov);const rc=btn.getBoundingClientRect();ov.style.right=Math.max(6,window.innerWidth-rc.right)+"px";ov.style.bottom=Math.max(6,window.innerHeight-rc.top+6)+"px";
-  ov.onclick=e=>{e.stopPropagation();const b=e.target.closest("button");if(!b)return;
-    if(b.dataset.ly){if(b.dataset.ly==="swap"){const LY=snLayEff();snLaySet([LY[1],LY[0]]);}else{const [r,c]=b.dataset.ly.split("x").map(Number);snLaySet([r,c]);}draw();return;}
-    if(b.dataset.g){SN.gap=b.dataset.g==="0r"?2:Math.max(-80,Math.min(40,SN.gap+(+b.dataset.g)));try{localStorage.setItem("tlm_sngap",SN.gap);}catch(x){}snFit();draw();return;}
-    const k=b.dataset.k,v=b.dataset.v;if(!k)return;SN[k]=v;try{localStorage.setItem(k==="lab"?"tlm_sntime":k==="zh"?"tlm_snzh":"tlm_snzv",v);}catch(x){}if(k==="lab"){SN.time=v==="t";snBuild();}else snFit();draw();};
-  const off=e=>{if(!ov.isConnected){document.removeEventListener("pointerdown",off,true);return;}if(!ov.contains(e.target)&&!btn.contains(e.target)){ov.remove();document.removeEventListener("pointerdown",off,true);}};setTimeout(()=>document.addEventListener("pointerdown",off,true),0);}
-function snGripInit(w){const gr=w.querySelector(".snGrip"),pg=w.querySelector(".snPg");if(!gr||!pg)return;
-  try{const h=+localStorage.getItem("tlm_snh");if(h>=140&&!w.closest(".snHost"))pg.style.height=Math.min(window.innerHeight*0.92,h)+"px";}catch(e){}
-  let d=null;gr.onpointerdown=e=>{gr.setPointerCapture(e.pointerId);d={y:e.clientY,h:pg.getBoundingClientRect().height};e.preventDefault();gr.classList.add("on");e.stopPropagation();};
-  gr.onpointermove=e=>{if(!d)return;const h=Math.max(140,Math.min(window.innerHeight*0.92,d.h+e.clientY-d.y));pg.style.height=h+"px";d.nh=h;snFit();};
-  gr.onpointerup=gr.onpointercancel=()=>{gr.classList.remove("on");if(d&&d.nh)try{localStorage.setItem("tlm_snh",Math.round(d.nh));}catch(e){}d=null;snGo(SN.view,false,true);};
-  gr.ondblclick=()=>{pg.style.height="";try{localStorage.removeItem("tlm_snh");}catch(e){}snFit();snGo(SN.view,false,true);};
-  try{SN.ro&&SN.ro.disconnect();SN.ro=new ResizeObserver(()=>snFit());SN.ro.observe(pg);}catch(e){}}
-/* ---------- V0.7.09 版面、重新截圖、合成一張大圖 ---------- */
-/* TK_V0.9.75 只錄聲音的場次：MP4 暫存 5 天（沒按「📌 留下」到期自動刪） */
-async function snNvt(sid){let j=null;try{j=await fetch(`${snB()}/api/pc/nvtmp?sid=${sid}`,{cache:"no-store"}).then(r=>r.json());}catch(e){}if(SN.sid!==sid)return;const b=SN.box&&SN.box.querySelector(".snv [data-st=nvk]");if(!b)return;
-  if(!j||!j.on||!j.has){b.hidden=true;return;}b.hidden=false;b.classList.toggle("on",!!j.keep);
-  b.textContent=j.keep?"📌 已留下":`🕔 暫存 剩 ${j.left<1?Math.max(0,Math.round(j.left*24))+" 小時":Math.ceil(j.left)+" 天"} · 📌 留下`;b.title=j.keep?"這場只錄聲音的 MP4 已經留下，不會自動刪（點一下取消留下）":`只錄聲音的場次：MP4 暫存 ${j.days} 天，到期沒留下就自動刪（截圖照留）。點一下留下這場的 MP4`;}
-async function snNvtKeep(b){const keep=!b.classList.contains("on");const P_=typeof kPost==="function"?kPost:(typeof post==="function"?post:null);let j=null;try{j=P_?await P_("/api/pc/nvtmp",{sid:SN.sid,keep:keep?1:0}):null;}catch(e){}
-  if(j&&j.message)(typeof toast==="function"?toast:alert)(j.message);snNvt(SN.sid);}
-async function snInfo(sid){let j=null;try{j=await fetch(`${snB()}/api/pc/snap/info?sid=${sid}`,{cache:"no-store"}).then(r=>r.json());}catch(e){}if(!j||!j.ok||SN.sid!==sid)return;
-  const ch=JSON.stringify(j.layout)!==JSON.stringify(SN.lay);SN.lay=j.layout||SN.lay;SN.mp4=!!j.mp4;SN.mp4why=j.mp4why||"";const R=j.regen||{};
-  {const em=SN.box&&SN.box.querySelector(".snEmpty");if(em){if((j.snaps||[]).length&&!R.running&&!(R.pickL&&R.pickL.length)){SN.L=j.snaps.slice();em.remove();snMount(SN.box,sid,SN.L,SN.seek,SN.clk,j.layout);return;}
-    const t=em.querySelector(".snEmT"),bt=em.querySelector("[data-st=regen]");if(R.running){t.textContent=`截圖中 ${R.done||0}/${R.total||0}…`;clearTimeout(SN.rt);SN.rt=setTimeout(()=>snInfo(sid),1500);SN.regenOn=true;}
-    else{t.textContent=SN.mp4?"按下面的按鈕從影片截（可以多截一倍讓你挑）":((SN.mp4why||"這場沒有完整的原檔 MP4")+"，沒辦法截");bt.hidden=!SN.mp4;}
-    if(R.pickL&&R.pickL.length&&!document.getElementById("snSel"))snSelOpen(sid,R);return;}}
-  if(!SN._nvq||SN._nvq!==sid){SN._nvq=sid;snNvt(sid);}
-  if(j.u&&j.u!==SN.u){SN.u=j.u;try{const v=localStorage.getItem("tlm_snfy_"+SN.u);SN.fy=v==null?0:+v||0;}catch(e){}snFyApply();}
-  const b=SN.box&&SN.box.querySelector(".snv [data-st=regen]");
-  if(R.running){if(b)b.innerHTML=`⏳ ${R.done||0}/${R.total||0}`;clearTimeout(SN.rt);SN.rt=setTimeout(()=>snInfo(sid),1500);SN.regenOn=true;return;}
-  if(R.pickL&&R.pickL.length){if(b)b.innerHTML=`▦ <span class="snLay">${snLayEff().join("×")}</span>`;SN.regenOn=false;if(!document.getElementById("snSel"))snSelOpen(sid,R);return;}   /* TK_V0.9.91 截好了：等你挑 */
-  if(SN.regenOn){SN.regenOn=false;SN.L=(j.snaps||[]).slice();SN.view=0;snBuild();(typeof toast==="function"?toast:alert)((R.ok?"✔ ":"✖ ")+(R.msg||""));}
-  if(b)b.innerHTML=`▦ <span class="snLay">${snLayEff().join("×")}</span>`;if(ch)snBuild();else snFit();}
-const SN_LAYS=[[6,10],[10,6],[5,12],[4,15],[3,20],[2,5],[3,5],[4,5],[5,5],[6,5],[8,5],[10,5],[3,4],[4,4],[6,4],[8,4],[3,6],[4,6],[5,6],[6,6],[8,6],[10,6],[3,7],[4,7],[6,7],[8,7],[4,8],[6,8],[8,8],[12,8],[5,10],[8,10],[10,10],[12,10],[10,15],[12,15],[10,20],[15,20]];
-/* V0.7.10 臉偏上／偏下：每一格的中心點一起往上／下移（正數＝往上看多一點），這位主播記住 */
-function snFySet(v){SN.fy=Math.round(Math.max(-50,Math.min(50,v))*10)/10;try{if(SN.u)localStorage.setItem("tlm_snfy_"+SN.u,SN.fy);}catch(e){}snFyApply();}
-function snFyApply(){const w=SN.box&&SN.box.querySelector(".snv");if(!w)return;const g=w.querySelector(".snGrid");if(g)g.style.setProperty("--snfy",(50-SN.fy)+"%");const pg0=w.querySelector(".snPg");if(pg0){pg0.style.setProperty("--snfy",(50-SN.fy)+"%");pg0.classList.toggle("crop",!!SN.crop);}
-  const e=w.querySelector(".snFyV");if(e)e.textContent=(SN.fy>0?"+":"")+(Number.isInteger(SN.fy)?SN.fy:SN.fy.toFixed(1));}
-function snPick(){if(!SN.mp4){(typeof toast==="function"?toast:alert)((SN.mp4why||"這場已經沒有完整的原檔 MP4")+"，不能重新截圖（現在的照片只能換版面）");return;}let ov=document.getElementById("snPick");if(ov)ov.remove();ov=document.createElement("div");ov.id="snPick";
-  ov.innerHTML=`<div class="snPkW"><div class="snPkH"><b>重新截圖：幾列 × 幾欄</b><button data-pk="x">✕</button></div><div class="snPkN">剛好排滿：一列幾張＝欄。重新截圖會<b>清掉這場現在的 ${SN.L.length} 張照片</b>（挑剩的也一起清），再從 MP4 平均截。</div>
-<div class="snPkG">${SN_LAYS.map(([r,c])=>`<button data-r="${r}" data-c="${c}"${r===SN.lay[0]&&c===SN.lay[1]?' class="on"':""}>${r}×${c}<small>${r*c} 張</small></button>`).join("")}</div>
-<div class="snPkC">自訂：<input type="number" id="snPkR" min="1" max="40" value="${SN.lay[0]}"> 列 × <input type="number" id="snPkCo" min="1" max="30" value="${SN.lay[1]}"> 欄 <span id="snPkT"></span><button data-pk="go" class="snPkGo">重新截圖</button></div>
-<label class="snPkM"><input type="checkbox" id="snPkM" checked> 多截一倍讓我挑（例如要 20 張就截 40 張，有擋住、拍糊的不要選；挑好之前現在的照片都不動）</label></div>`;
-  document.body.appendChild(ov);const r_=ov.querySelector("#snPkR"),c_=ov.querySelector("#snPkCo"),t_=ov.querySelector("#snPkT");const upd=()=>{const n=(+r_.value||0)*(+c_.value||0);t_.textContent=`＝ ${n} 張`;};upd();r_.oninput=c_.oninput=upd;
-  ov.onclick=async e=>{if(e.target===ov||e.target.closest("[data-pk=x]")){ov.remove();return;}const b=e.target.closest("[data-r]");if(b){r_.value=b.dataset.r;c_.value=b.dataset.c;upd();ov.querySelectorAll(".snPkG .on").forEach(x=>x.classList.remove("on"));b.classList.add("on");return;}
-    if(e.target.closest("[data-pk=go]")){const R=Math.max(1,Math.min(40,+r_.value||4)),C=Math.max(1,Math.min(30,+c_.value||5));if(R*C>600){(typeof toast==="function"?toast:alert)("最多 600 張");return;}   /* TK_V0.8.95 欄上限 12→30、總數 240→600 */
-      const M=ov.querySelector("#snPkM").checked?2:1;   /* TK_V0.9.91 */
-      if(M===1&&!confirm(`重新截 ${R}×${C}＝${R*C} 張？\n\n這場現在的 ${SN.L.length} 張照片會全部清掉，不能復原。`))return;
-      const P=typeof kPost==="function"?kPost:(typeof post==="function"?post:(typeof deepPost==="function"?deepPost:null));if(!P)return;const j=await P("/api/pc/snap/regen",{sid:SN.sid,rows:R,cols:C,mult:M});
-      (typeof toast==="function"?toast:alert)((j&&j.ok?"✔ ":"✖ ")+((j&&j.message)||"沒有成功"));if(j&&j.ok){ov.remove();SN.regenOn=true;SN.lay=[R,C];setTimeout(()=>snInfo(SN.sid),800);}}};}
-async function snMerge(){const w=SN.box&&SN.box.querySelector(".snv");if(!w||!SN.L.length)return;const T=m=>(typeof toast==="function"?toast(m):0);T("合成中…");
-  const N=SN.L.length,C=SN.strip?N:Math.max(1,snLayEff()[1]),R=Math.ceil(N/C),ratio=(SN.th||100)/(SN.cw||56);   /* 跟畫面上一樣：比例、間距（負數重疊）、誰疊誰、▲▼、時間／編號，原圖大小 */
-  const imgs=await Promise.all(SN.L.map((x,i)=>new Promise(res=>{const im=new Image();if(window.FASTB)im.crossOrigin="anonymous";im.onload=()=>res(im);im.onerror=()=>res(null);im.src=snUrl(i);})));
-  const nat=imgs.find(Boolean);if(!nat){T("✖ 讀不到照片");return;}let tw=nat.naturalWidth||720,k=tw/(SN.cw||56),gs=(+SN.gap||0)*k,th=Math.round(tw*ratio);
-  let CW=C*tw+(C-1)*gs,CH=R*th+(R-1)*gs;const f=Math.min(1,16000/Math.max(CW,CH));if(f<1){tw*=f;th*=f;gs*=f;CW*=f;CH*=f;}
-  const cv=document.createElement("canvas");cv.width=Math.max(1,Math.round(CW));cv.height=Math.max(1,Math.round(CH));const g=cv.getContext("2d");g.fillStyle="#000";g.fillRect(0,0,cv.width,cv.height);
-  const ord=imgs.map((im,i)=>({im,i,c:i%C,r:Math.floor(i/C)})).sort((a,b)=>snZ(a.c,a.r)-snZ(b.c,b.r));
-  for(const {im,i,c,r} of ord){const x=c*(tw+gs),y=r*(th+gs);if(im){const s=Math.max(tw/im.naturalWidth,th/im.naturalHeight),dw=im.naturalWidth*s,dh=im.naturalHeight*s;g.save();g.beginPath();g.rect(x,y,tw,th);g.clip();g.drawImage(im,x+(tw-dw)/2,y+(th-dh)*(50-SN.fy)/100,dw,dh);g.restore();}
-  }
-  if(SN.lab!=="x")for(let i=0;i<N;i++){const c=i%C,r=Math.floor(i/C),v=snVis(c,r,C,R,tw,th,gs),tx=SN.lab==="t"?(SN.clk?SN.clk(SN.L[i][0]):snHms(SN.L[i][0])):String(i+1),fs=Math.max(14,Math.round(Math.min(tw,th)*0.07));g.font=`700 ${fs}px system-ui,sans-serif`;
-      const mw=g.measureText(tx).width+fs*0.8,bx=SN.lab==="t"?v.x+(v.w-mw)/2:v.x+fs*0.3,by=v.y+v.h-fs*1.6;g.fillStyle="rgba(0,0,0,.55)";g.fillRect(bx,by,mw,fs*1.3);g.fillStyle="#fff";g.textBaseline="middle";g.fillText(tx,bx+fs*0.4,by+fs*0.65);}
-  cv.toBlob(b=>{if(!b){T("✖ 合成失敗（圖太大）");return;}const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=`#${String(SN.sid).padStart(5,"0")}_${SN.strip?"展開":"全覽"}_${R}x${C}.jpg`;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},4000);T(`✔ 已合成 ${C}×${R}（${cv.width}×${cv.height}）`);},"image/jpeg",0.9);}
-function snImgErr(im){const k=+(im.dataset.r||0);if(k>=3)return;im.dataset.r=k+1;setTimeout(()=>{if(im.isConnected)im.src=im.src.split("?")[0]+"?r="+Date.now();},2000*(k+1));if(k===1&&SN.sid)snRefresh(SN.sid);}
-async function snRefresh(sid){if(SN._rf&&Date.now()-SN._rf<5000)return;SN._rf=Date.now();let j=null;try{j=await fetch(`${snB()}/api/pc/snap/info?sid=${sid}`,{cache:"no-store"}).then(r=>r.json());}catch(e){}
-  if(!j||!j.ok||SN.sid!==sid)return;const L=j.snaps||[];if(JSON.stringify(L.map(x=>x[1]))!==JSON.stringify(SN.L.map(x=>x[1]))){SN.L=L.slice();SN.lay=j.layout||SN.lay;SN.view=0;if(L.length)snBuild();}}   /* TK_V0.9.92 截圖資料夾剛被搬走／換掉：自己再讀一次 */
-function snBuild(){const w=SN.box&&SN.box.querySelector(".snv");if(!w)return;const pg=w.querySelector(".snPg"),L=SN.L,lab=x=>{const pm=/_p(\d+)\.jpg$/.exec(x[1]||"");return `${SN.clk?SN.clk(x[0]):snHms(x[0])}${pm?" · "+pm[1]+"%":""}`;};
-  pg.innerHTML=`<div class="snSl snAll${SN.strip?" strip":""}"><div class="snGrid${SN.strip?" strip":""}">${L.map((x,i)=>`<div class="snG" data-gi="${i}"><img alt="" loading="lazy" src="${snUrlS(i)}" onerror="snImgErr(this)"></div>`).join("")}${SN.lab==="x"?"":L.map((x,i)=>`<b class="snLb${SN.lab==="t"?" tm":""}" data-li="${i}">${SN.lab==="t"?(SN.clk?SN.clk(x[0]):snHms(x[0])):i+1}</b>`).join("")}</div></div>`
-    +(SN.strip?"":L.map((x,i)=>`<div class="snSl"><div class="snCrop"><img alt="" draggable="false" data-src="${snUrl(i)}"></div><div class="snSB"><span>📷 ${lab(x)} · ${i+1} / ${L.length}</span><a class="snDl" href="${snUrl(i)}" download="${(x[1]||"snap.jpg").split("/").pop()}" title="下載這一張">⬇ 下載</a><button class="snDl bad" data-sd="1" title="刪除這一張（不用確認）">🗑</button></div></div>`).join(""))   /* V0.7.11 展開時：只留往右排開的那一排 */;
-  const n=w.querySelector(".snNP");if(n)n.textContent=L.length;snLabel();snGo(Math.min(SN.view,L.length),false,true);snFit();snFyApply();}
-function snLoadNear(){const w=SN.box&&SN.box.querySelector(".snv");if(!w)return;const sl=w.querySelectorAll(".snPg .snSl");for(let k=SN.view-1;k<=SN.view+1;k++){const im=sl[k]&&sl[k].querySelector("img[data-src]");if(im&&!im.src)im.src=im.dataset.src;}}
-function snLabel(){const w=SN.box&&SN.box.querySelector(".snv");if(!w)return;const l=w.querySelector(".snl"),vid=!w.querySelector(".snVid").hidden;
-  l.hidden=true;const tl=w.querySelector(".snTool");if(tl)tl.hidden=vid||SN.view>0;const hm=w.querySelector(".snHome");if(hm)hm.hidden=vid||SN.view<=0;w.querySelector(".snp").hidden=vid||SN.view<=0;w.querySelector(".snn").hidden=vid||SN.strip||SN.view>=SN.L.length;}
-function snGo(v,seek,inst){const w=SN.box&&SN.box.querySelector(".snv");if(!w)return;v=Math.max(0,Math.min(SN.L.length,v));const pg=w.querySelector(".snPg");SN.view=v;
-  pg.scrollTo({left:v*pg.clientWidth,behavior:inst?"auto":"smooth"});snLoadNear();snLabel();if(seek&&v>0&&SN.seek){const x=SN.L[v-1];SN.lock=Date.now();SN.seek(Math.max(0,x[0]));}if(v>0)SN.cur=v-1;}
-function snMode(m,auto){const w=SN.box&&SN.box.querySelector(".snv");if(!w)return;const v=m==="v";w.querySelectorAll(".snTabs [data-sm]").forEach(b=>b.classList.toggle("on",b.dataset.sm===m));
-  w.querySelector(".snPg").hidden=v;w.querySelector(".snVid").hidden=!v;w.classList.toggle("vid",v);if(!auto)try{localStorage.setItem("tlm_snmode",m);}catch(e){}
-  if(!v){w.querySelectorAll(".snVid video").forEach(x=>{try{x.pause();}catch(e){}});snGo(SN.view,false,true);}snLabel();}
-function snPaint(t){SN.t=+t||0;if(!SN.L.length||!SN.box)return;SN.cur=snIdx(SN.t);}   /* V0.7.08 看照片不受時間軸影響（不會自己換張） */
-function snStep(d){if(!SN.L.length)return;snGo(SN.view+d,true);}
-/* V0.6.93 刪掉目前看的這一張（不用確認），接著顯示下一張 */
-async function snDel(){const i=SN.view-1;if(i<0||!SN.L[i])return;const x=SN.L[i],sid=SN.sid;
-  const P=typeof kPost==="function"?kPost:(typeof post==="function"?post:(typeof deepPost==="function"?deepPost:null));if(!P)return;
-  const j=await P("/api/pc/snap/del",{sid,name:x[1]});const T=m=>(typeof toast==="function"?toast(m):0);
-  if(!j||j.ok===false){T("✖ "+((j&&j.message)||"沒有刪掉"));return;}if(SN.sid!==sid)return;
-  const k=SN.L.indexOf(x);if(k>=0)SN.L.splice(k,1);const w=SN.box&&SN.box.querySelector(".snv");
-  if(!SN.L.length){if(w)w.remove();T("已刪除，這場沒有截圖了");return;}
-  SN.view=Math.min(k+1,SN.L.length);SN.cur=-1;snBuild();T(`已刪除（剩 ${SN.L.length} 張）`);}
-function snStop(){SN.L=[];SN.box=null;SN.cur=-1;SN.t=0;SN.view=0;}
-/* TK_V0.9.64 🎞 動態拼貼：照現在全覽的排版（欄列、比例、間距、▲▼、誰疊誰），每一格播那一刻往後 N 秒，同時播放；背景做成 MP4／GIF */
-function snMosParams(){const N=SN.L.length,C=SN.strip?N:Math.max(1,snLayEff()[1]),R=Math.ceil(N/C),ratio=(SN.th||100)/(SN.cw||56),gap=(+SN.gap||0)/(SN.cw||56);
-  const ord=SN.L.map((x,i)=>({i,c:i%C,r:Math.floor(i/C)})).sort((a,b)=>snZ(a.c,a.r)-snZ(b.c,b.r)).map(o=>o.i);return {N,C,R,ratio,gap,ord};}
-function snMosSize(P,long){const gw=P.C+(P.C-1)*P.gap,gh=P.R*P.ratio+(P.R-1)*P.gap,k=long/Math.max(gw,gh),cw=Math.max(16,Math.round(k/2)*2),ch=Math.max(16,Math.round(k*P.ratio/2)*2),gp=Math.round(P.gap*k);
-  return [Math.floor((P.C*cw+(P.C-1)*gp)/2)*2,Math.floor((P.R*ch+(P.R-1)*gp)/2)*2,cw,ch];}
-function gifCap(){try{return localStorage.getItem("tlm_gifcap")==="1";}catch(e){return false;}}   /* TK_V1.0.75 LINE 上限 */
-function gifCapSet(v){try{localStorage.setItem("tlm_gifcap",v?"1":"0");}catch(e){}}
-function snMosOpen(){if(!SN.L.length)return;const P=snMosParams();let ov=document.getElementById("snMos");if(ov)ov.remove();ov=document.createElement("div");ov.id="snMos";ov.className="snMos";
-  let sv={};try{sv=JSON.parse(localStorage.getItem("tlm_mos")||"{}")||{};}catch(e){}const st={dur:sv.dur||5,f:new Set(sv.f||["mp4"]),long:sv.long||1280,spd:sv.spd||1};
-  const save=()=>{try{localStorage.setItem("tlm_mos",JSON.stringify({dur:st.dur,f:[...st.f],long:st.long,spd:st.spd}));}catch(e){}};
-  const draw=()=>{const [W,H,cw,ch]=snMosSize(P,st.long);ov.querySelector(".snMosInfo").innerHTML=`${P.C} 欄 × ${P.R} 列、${P.N} 格 → 輸出 <b>${W}×${H}</b>（每格 ${cw}×${ch}）· 每格播 <b>${st.dur} 秒</b>${st.spd>1?`（×${st.spd} 加速＝每格 ${st.dur*st.spd} 秒的實際畫面）`:""} · ${[...st.f].map(x=>x.toUpperCase()).join("＋")||"（至少選一種格式）"}${st.f.has("gif")&&st.long>1280?"<br>⚠ GIF 檔會很大，建議長邊 960 以下":""}<br><small>同一個排版做過「一樣大或更大」的，會直接縮，不用重抓；要更大才重抓每一格。</small>`;
-    ov.querySelectorAll("[data-md]").forEach(b=>b.classList.toggle("on",+b.dataset.md===st.dur));ov.querySelectorAll("[data-mf]").forEach(b=>b.classList.toggle("on",st.f.has(b.dataset.mf)));
-    ov.querySelectorAll("[data-ml]").forEach(b=>b.classList.toggle("on",+b.dataset.ml===st.long));{const cb=ov.querySelector("[data-mcap]");if(cb){cb.classList.toggle("on",gifCap());cb.textContent=(gifCap()?"☑":"☐")+" LINE 用（GIF ≤ 19.9 MB）";}}ov.querySelectorAll("[data-ms]").forEach(b=>b.classList.toggle("on",+b.dataset.ms===st.spd));save();};
-  ov.innerHTML=`<div class="snMosB"><div class="snMosH"><b>🎞 輸出動圖</b><span style="flex:1"></span><button class="pill snGaB" data-mga="1">🎁 禮物陣列</button><button class="pill" data-mx="1">✕</button></div>
-<div class="snMosN">照現在全覽的排版（欄列、比例、間距、▲▼ 位置、誰疊誰）做；每一格從那張照片的時間開始播，全部一起播。很吃電腦，所以在背景一件一件做（電腦忙會先等），做好在下面預覽、下載，也存到剪輯資料夾的「動態拼貼」。</div>
-<div class="snMosR"><span>每格幾秒</span>${[3,5,8,10].map(d=>`<button data-md="${d}">${d} 秒</button>`).join("")}</div>
-<div class="snMosR"><span>加速</span>${[1,2,4,8].map(v=>`<button data-ms="${v}">${v===1?"原速":"×"+v}</button>`).join("")}</div>
-<div class="snMosR"><span>格式（可複選）</span><button data-mf="mp4">MP4</button><button data-mf="gif">GIF</button><button data-mcap="1" title="打勾：GIF 超過 19.9 MB 會自動降每秒張數和尺寸（顏色不減、紅色保住），直到放得下（LINE 上限 20 MB）">☐ LINE 用（GIF ≤ 19.9 MB）</button></div>
-<div class="snMosR"><span>長邊</span>${[720,960,1280,1920,2560].map(v=>`<button data-ml="${v}">${v}</button>`).join("")}</div>
-<div class="snMosInfo"></div><div class="snMosR"><button class="snMosGo" data-mgo="1">▶ 開始輸出</button></div><div class="snMosL"></div></div>`;
-  document.body.appendChild(ov);draw();
-  ov.onclick=async e=>{const t=e.target;if(t===ov||t.closest("[data-mx]")){clearTimeout(ov._pt);ov.remove();return;}
-    const pv=t.closest("[data-mpv]");if(pv){snMosPv(pv.dataset.mpv);return;}
-    if(t.closest("[data-mga]")){clearTimeout(ov._pt);ov.remove();gaOpen(SN.sid);return;}
-    const d=t.closest("[data-md]");if(d){st.dur=+d.dataset.md;draw();return;}const sp=t.closest("[data-ms]");if(sp){st.spd=+sp.dataset.ms;draw();return;}
-    const f=t.closest("[data-mf]");if(f){const k=f.dataset.mf;if(st.f.has(k)){if(st.f.size>1)st.f.delete(k);}else st.f.add(k);draw();return;}const l=t.closest("[data-ml]");if(l){st.long=+l.dataset.ml;draw();return;}if(t.closest("[data-mcap]")){gifCapSet(!gifCap());draw();return;}
-    if(t.closest("[data-mgo]")){const P2=snMosParams(),body={sid:SN.sid,C:P2.C,R:P2.R,ts:SN.L.map(x=>x[0]),dur:st.dur,spd:st.spd,fmts:[...st.f],long:st.long,ratio:P2.ratio,gap:P2.gap,fy:SN.fy||0,ord:P2.ord,cap:gifCap()?1:0};
-      const P_=typeof kPost==="function"?kPost:(typeof post==="function"?post:null);let j=null;try{j=P_?await P_("/api/pc/mosaic",body):null;}catch(x){}(typeof toast==="function"?toast:alert)((j&&j.ok?"✔ ":"✖ ")+((j&&j.message)||"沒有送出"));snMosPoll(ov);}};
-  snMosPoll(ov);}
-function snMosUrl(f){return `${typeof B==="string"?B:""}/api/pc/mosaic/file?f=${encodeURIComponent(f)}`;}
-function snMosPv(f){const d=document.createElement("div");d.className="snMosPv";const gif=/\.gif$/i.test(f);
-  d.innerHTML=`<div class="snMosPvB">${gif?`<img alt="" src="${snMosUrl(f)}&pv=1">`:`<video src="${snMosUrl(f)}&pv=1" autoplay loop muted playsinline controls></video>`}<div class="snMosPvT"><span>${f}</span><button class="pill">✕ 關閉</button></div></div>`;
-  document.body.appendChild(d);const cl=()=>{const v=d.querySelector("video");if(v){try{v.pause();v.removeAttribute("src");v.load();}catch(e){}}d.remove();};d.querySelector("button").onclick=cl;d.onclick=e=>{if(e.target===d)cl();};}
-function snMosFile(x){return `<div class="snMosF"><span>${String(x.fmt||"").toUpperCase()} · ${x.w}×${x.h} · ${(x.size/1e6).toFixed(1)} MB</span><button class="pill" data-mpv="${x.file}">▶ 預覽</button><a class="pill" href="${snMosUrl(x.file)}" download="${x.file}">⬇ 下載</a></div>`;}
-async function snMosPoll(ov){clearTimeout(ov._pt);if(!ov.isConnected)return;let j=null;try{j=await fetch((typeof B==="string"?B:"")+"/api/pc/mosaic?sid="+SN.sid,{cache:"no-store"}).then(r=>r.json());}catch(e){}
-  const el=ov.querySelector(".snMosL");if(!el)return;const L=(j&&j.jobs)||[],O=(j&&j.old)||[];
-  el.innerHTML=(L.length?L.map(x=>`<div class="snMosJ ${x.state}"><b>${x.state==="done"?"✔":x.state==="fail"?"✖":"⏳"} ${x.C}×${x.R} · ${x.dur} 秒${x.spd>1?` ×${x.spd}`:""} · ${(x.fmts||[]).map(f=>f.toUpperCase()).join("＋")} · ${x.w}×${x.h}</b><small>${x.msg||""}${x.state==="run"&&x.total>1?`（${x.done}/${x.total}）`:""}</small>${(x.files||[]).map(snMosFile).join("")}</div>`).join(""):"")
-    +(O.length?`<div class="snMosN">這場以前做的：</div>`+O.map(x=>`<div class="snMosJ done"><b>${x.C}×${x.R} · ${x.dur} 秒${x.spd>1?` ×${x.spd}`:""}</b>${snMosFile(x)}</div>`).join(""):"")||'<div class="snMosN">這場還沒做過動圖</div>';
-  if(L.some(x=>x.state==="run"||x.state==="wait"))ov._pt=setTimeout(()=>snMosPoll(ov),2500);}
-/* TK_V0.9.69 🎁 禮物陣列：這場標成互動禮物的每一次，一格一格；每格對齊「爆點」（動畫最精彩那一下），取爆點前 X 秒～後 Y 秒，同時播放輸出（用動態拼貼的引擎） */
-const GA={sid:0,d:null,cur:0,C:0,st:null};
-function gaB(){return typeof B==="string"?B:"";}
-function gaE(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
-function gaT(s){s=Math.max(0,+s||0);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=(s%60).toFixed(1).padStart(4,"0");return (h?h+":"+String(m).padStart(2,"0"):m)+":"+x;}
-function gaMap(L){const R=GA.d.rng||[];const r=R.find(x=>L>=x[0]-1&&L<=x[1]+1)||null;return r&&r[2]>=0?{k:r[2],pos:Math.max(0,L-r[0]+r[3]),r}:null;}
-/* TK_V0.9.70 預設不放的禮物種類（例如 Heart Me）：記在這台；那幾格放到「湊數用」，要用再一格一格勾 */
-function gaOffSet(){try{const v=JSON.parse(localStorage.getItem("tlm_ga_off")||"null");if(Array.isArray(v))return new Set(v);}catch(e){}return new Set(["heart me"]);}
-function gaOffSave(S){try{localStorage.setItem("tlm_ga_off",JSON.stringify([...S]));}catch(e){}}
-function gaUse(it){const u=(GA.d.use||{})[it.id];return u!=null?!!u:!gaOffSet().has(String(it.g).toLowerCase());}
-function gaUsed(){const I=GA.d.items||[],off=gaOffSet(),main=I.filter(it=>gaUse(it)&&!off.has(String(it.g).toLowerCase())),fill=I.filter(it=>gaUse(it)&&off.has(String(it.g).toLowerCase()));return main.concat(fill);}   /* 湊數用的排在最後 */
-function gaHit(it){return it.hit!=null?it.hit:(GA.d.off!=null?it.L0+GA.d.off:it.L0);}
-async function gaPost(body){const P_=typeof kPost==="function"?kPost:(typeof post==="function"?post:null);try{return P_?await P_("/api/pc/garr",body):null;}catch(e){return null;}}
-async function gaOpen(sid){GA.sid=sid;let ov=document.getElementById("gaOv");if(ov)ov.remove();ov=document.createElement("div");ov.id="gaOv";ov.className="snMos gaOv";
-  ov.innerHTML=`<div class="snMosB gaB"><div class="snMosH"><b>🎁 禮物陣列</b><span style="flex:1"></span><button class="pill" data-gx="1">✕</button></div><div class="snMosN">讀取這場的互動禮物…</div></div>`;document.body.appendChild(ov);
-  let d=null;try{d=await fetch(gaB()+"/api/pc/garr?sid="+sid,{cache:"no-store"}).then(r=>r.json());}catch(e){}
-  if(!ov.isConnected)return;if(!d||!d.ok){ov.querySelector(".snMosN").textContent="讀取失敗";return;}GA.d=d;GA.cur=0;
-  ov.onclick=gaClick;gaDraw();}
-function gaLayouts(N){const o=[];for(let C=2;C<=10;C++){const R=Math.ceil(N/C);if(R<1)continue;o.push({C,R,fill:C*R-N});}return o.sort((a,b)=>a.fill-b.fill||Math.abs(a.C-a.R*0.6)-Math.abs(b.C-b.R*0.6)).slice(0,6);}
-function gaLay(){let v={};try{v=JSON.parse(localStorage.getItem("tlm_ga_lay")||"null")||{};}catch(e){}   /* TK_V0.9.71 排版：間距（負＝交疊）、誰疊誰、▲▼，預設照截圖全覽的設定 */
-  const cw=SN.cw||56;return {gap:v.gap!=null?v.gap:(+SN.gap||0)/cw,zh:v.zh||SN.zh||"r",zv:v.zv||SN.zv||"d",fy:v.fy!=null?v.fy:(SN.fy||0),ratio:v.ratio||16/9};}   /* TK_V0.9.72 格子形狀：預設直式 9:16，可以拉 */
-function gaRt(r){return r>=1?`寬 1：高 ${r.toFixed(2)}`:`寬 ${(1/r).toFixed(2)}：高 1`;}
-function gaLaySet(o){const L=Object.assign(gaLay(),o);try{localStorage.setItem("tlm_ga_lay",JSON.stringify({gap:L.gap,zh:L.zh,zv:L.zv,fy:L.fy,ratio:L.ratio}));}catch(e){}return L;}
-function gaZ(c,r,L){return 1+(L.zv==="d"?r:500-r)*200+(L.zh==="r"?c:199-c);}
-function gaDraw(){const ov=document.getElementById("gaOv"),d=GA.d;if(!ov||!d)return;const I=d.items||[],N=I.length;
-  let sv={};try{sv=JSON.parse(localStorage.getItem("tlm_mos")||"{}")||{};}catch(e){}GA.st=GA.st||{f:new Set(sv.f||["mp4"]),long:sv.long||1280,spd:1};
-  const U=gaUsed(),NU=U.length,OFF=gaOffSet();
-  if(!N){ov.querySelector(".gaB").innerHTML=`<div class="snMosH"><b>🎁 禮物陣列</b><span style="flex:1"></span><button class="pill" data-gx="1">✕</button></div><div class="snMosN">這場沒有標成「互動禮物」的禮物。<br>到「批量剪輯」點禮物左上角 🎬 看畫面、標記互動禮物後再來。</div>`;return;}
-  if(!ov.querySelector(".gaPl")){   /* 播放器只建一次（之後只換下面），兩個 video：一個在播、一個先把下一格讀好 */
-    ov.querySelector(".gaB").innerHTML=`<div class="snMosH"><b class="gaTi"></b><span style="flex:1"></span><button class="pill" data-gx="1">✕</button></div>
-<div class="gaPl"><div class="vgPvS gaV"><video class="gaVa act" playsinline controls preload="auto"></video><video class="gaVa" playsinline preload="auto" muted></video>${typeof LVS_SWH!=="undefined"?LVS_SWH:""}</div>
-<div class="gaPI" id="gaPI"></div>
-<div class="snMosR gaCtl"><button data-gj="-1">−1 秒</button><button data-gj="-0.2">−0.2</button><button data-gp="1">▶／⏸</button><button data-gj="0.2">+0.2</button><button data-gj="1">+1 秒</button><button class="gaSet" data-gset="1">📍 設為爆點</button><button data-gnx="1">下一個 ▶</button></div></div><div class="gaBody"></div>`;
-    const VP=new Proxy({},{get:(o,k)=>{const v=gaVid();const x=v[k];return typeof x==="function"?x.bind(v):x;},set:(o,k,val)=>{gaVid()[k]=val;return true;}});
-    if(typeof lvsSwipe==="function")lvsSwipe(ov.querySelector(".gaPl"),VP,null);ov.querySelectorAll(".gaVa").forEach(v=>v.addEventListener("timeupdate",()=>{if(v===gaVid())gaInfo();}));
-    GA.needLoad=true;}
-  ov.querySelector(".gaTi").textContent=`🎁 禮物陣列 · ${d.name} · ${N} 個`;
-  const L=gaLayouts(Math.max(1,NU));if(!GA.C||!L.some(x=>x.C===GA.C))GA.C=L[0].C;const al=I.filter(x=>x.hit!=null&&gaUse(x)).length;
-  const types={};I.forEach(it=>{const k=String(it.g).toLowerCase();(types[k]=types[k]||{g:it.g,zh:it.zh,n:0}).n++;});
-  const card=(it)=>{const i=I.indexOf(it),use=gaUse(it);return `<div class="gaC${i===GA.cur?" on":""}${it.hit!=null?" ok":""}${use?"":" off"}" data-gi="${i}"><span class="gaU${use?" y":""}" data-gu="${i}" title="${use?"放進陣列（點一下拿掉）":"沒放進陣列（點一下加進去，排在最後湊數）"}">${use?"✓":"＋"}</span>${typeof kGIcon==="function"?kGIcon(it.g):"🎁"}<b>${gaE(it.zh||it.g)}</b><small>${gaE(it.user)}${it.cnt>1?" ×"+it.cnt:""}</small><small>${gaT(gaHit(it))}${it.hit!=null?" ✔":d.off!=null?" ≈":" ?"}</small></div>`;};
-  const mainI=I.filter(it=>!OFF.has(String(it.g).toLowerCase())),fillI=I.filter(it=>OFF.has(String(it.g).toLowerCase()));
-  const body=ov.querySelector(".gaBody"),sy=body.parentElement.scrollTop;
-  body.innerHTML=`<div class="snMosR"><span>每格</span>爆點前 <input class="gaIn" id="gaPre" type="number" step="0.5" min="0" max="8" value="${d.pre}"> 秒，後 <input class="gaIn" id="gaPost" type="number" step="0.5" min="0.5" max="12" value="${d.post}"> 秒</div>
-<div class="snMosR gaTy"><span>禮物種類</span>${Object.entries(types).map(([k,t])=>`<button data-gty="${gaE(k)}" class="${OFF.has(k)?"off":"on"}" title="${OFF.has(k)?"預設不放（點一下改成預設要放）":"預設要放（點一下改成預設不放、只拿來湊數）"}">${gaE(t.zh||t.g)} ${t.n}</button>`).join("")}</div>
-<div class="snMosR"><span>對齊</span><b class="gaAl">陣列 ${NU} 格 · ${al} 個已手動對齊</b>${al?`<button data-gavg="1">套用平均延遲到沒對齊的${d.off!=null?`（現在 ${d.off>=0?"+":""}${d.off.toFixed(1)} 秒）`:""}</button>`:`<small>先對齊兩三個，就能把平均延遲套到其他格</small>`}</div>
-<div class="gaGrid">${mainI.map(card).join("")}</div>${fillI.length?`<div class="snMosN gaFillH">🧩 湊數用（${fillI.length} 個，預設不放；點右上角 ＋ 挑幾個放進去，會排在最後）</div><div class="gaGrid">${fillI.map(card).join("")}</div>`:""}
-<div class="snMosR"><span>加速</span>${[1,2,4].map(v=>`<button data-gs="${v}" class="${GA.st.spd===v?"on":""}">${v===1?"原速":"×"+v}</button>`).join("")}<span style="min-width:0;margin-left:8px">格式</span><button data-gf="mp4" class="${GA.st.f.has("mp4")?"on":""}">MP4</button><button data-gf="gif" class="${GA.st.f.has("gif")?"on":""}">GIF</button><button data-gau="1" class="${GA.st.aud!==false?"on":""}" title="每格的聲音全部疊在一起（GIF 沒有聲音）">${GA.st.aud!==false?"🔊 有聲音":"🔇 無聲"}</button><button data-gcap="1" class="${gifCap()?"on":""}" title="GIF 超過 19.9 MB 自動縮（LINE 上限 20 MB）">${gifCap()?"☑":"☐"} LINE 用 ≤19.9MB</button></div>
-<div class="snMosR"><span>長邊</span>${[720,960,1280,1920].map(v=>`<button data-gl="${v}" class="${GA.st.long===v?"on":""}">${v}</button>`).join("")}</div>
-<div class="snMosN">先按「👁 預覽排版」：每格用爆點那一張圖排出來，可以比較 3×6、6×3、交疊方式；確定後再輸出影片（回原影片用原畫質重抓）。空的格子先放黑畫面。</div>
-<div class="snMosR"><button data-gpv="1">👁 預覽排版</button><button class="snMosGo" data-ggo="1">▶ 輸出禮物陣列</button></div>`;
-  body.parentElement.scrollTop=sy;
-  ov.querySelector("#gaPre").onchange=e=>{d.pre=Math.max(0,Math.min(8,+e.target.value||0));gaPost({sid:GA.sid,pre:d.pre});};ov.querySelector("#gaPost").onchange=e=>{d.post=Math.max(0.5,Math.min(12,+e.target.value||4));gaPost({sid:GA.sid,post:d.post});};
-  if(GA.needLoad){GA.needLoad=false;gaLoad();}}
-function gaVid(){const ov=document.getElementById("gaOv");return ov&&ov.querySelector(".gaVa.act");}
-function gaNext(i){const I=GA.d.items;for(let j=i+1;j<I.length;j++)if(gaUse(I[j]))return j;return Math.min(I.length-1,i+1);}   /* 下一個要放進陣列的 */
-function gaTarget(i){const it=GA.d.items[i];if(!it)return null;const m=gaMap(gaHit(it)-1.5);if(!m)return null;return {m,src:`${gaB()}/api/pc/vb/file?sid=${GA.sid}&k=${m.k}`};}
-function gaLoad(){const ov=document.getElementById("gaOv");if(!ov)return;const it=GA.d.items[GA.cur],T=gaTarget(GA.cur);if(!it)return;
-  if(!T){ov.querySelector("#gaPI").textContent="這一格找不到影片（MP4 刪了？）";return;}GA.m=T.m;
-  const V=[...ov.querySelectorAll(".gaVa")],a=V.find(v=>v.classList.contains("act")),o=V.find(v=>v!==a);
-  let v=a;if(o&&o.dataset.src===T.src&&Math.abs(+o.dataset.pos-T.m.pos)<0.6&&o.readyState>=2){v=o;a.classList.remove("act");a.pause();a.muted=true;a.controls=false;o.classList.add("act");o.controls=true;}   /* 下一格已經讀好：直接換上 */
-  v.muted=false;v.controls=true;
-  if(v.dataset.src!==T.src){v.dataset.src=T.src;v.src=T.src;v.addEventListener("loadedmetadata",()=>{try{v.currentTime=T.m.pos;}catch(e){}v.play().catch(()=>{});},{once:true});}
-  else{if(Math.abs(v.currentTime-T.m.pos)>0.3){try{v.currentTime=T.m.pos;}catch(e){}}v.play().catch(()=>{});}
-  v.dataset.pos=T.m.pos;
-  ov.querySelectorAll(".gaC").forEach(b=>b.classList.toggle("on",+b.dataset.gi===GA.cur));const b=ov.querySelector(`.gaC[data-gi="${GA.cur}"]`);if(b)b.scrollIntoView({block:"nearest"});gaInfo();
-  const nx=gaNext(GA.cur),N=nx!==GA.cur?gaTarget(nx):null,ob=V.find(x=>x!==v);   /* 下一格先讀：另一個 video 先跳到那裡（靜音、不播） */
-  if(N&&ob){ob.muted=true;ob.pause();const go=()=>{try{ob.currentTime=N.m.pos;}catch(e){}ob.dataset.pos=N.m.pos;};if(ob.dataset.src!==N.src){ob.dataset.src=N.src;ob.src=N.src;ob.addEventListener("loadedmetadata",go,{once:true});}else go();}}
-function gaNowL(){const v=gaVid();if(!v||!GA.m)return null;const r=GA.m.r;return v.currentTime-r[3]+r[0];}
-function gaInfo(){const ov=document.getElementById("gaOv");if(!ov)return;const it=GA.d.items[GA.cur],el=ov.querySelector("#gaPI");if(!it||!el)return;const L=gaNowL();
-  el.innerHTML=`第 ${GA.cur+1}/${GA.d.items.length} 格 · <b>${gaE(it.zh||it.g)}</b> · ${gaE(it.user)} · 送出 ${gaT(it.L0)} · 爆點 ${gaT(gaHit(it))}${it.hit!=null?" ✔":""}${L!=null?` · 現在 <b>${gaT(L)}</b>（${L-it.L0>=0?"+":""}${(L-it.L0).toFixed(1)} 秒）`:""}`;}
-async function gaClick(e){const t=e.target,ov=document.getElementById("gaOv"),d=GA.d;if(!ov)return;
-  if(t===ov||t.closest("[data-gx]")){ov.querySelectorAll("video").forEach(v=>{try{v.pause();v.removeAttribute("src");v.load();}catch(x){}});ov.remove();return;}
-  const v=gaVid();
-  if(t.closest("[data-gpv]")){gaPv();return;}
-  const gu=t.closest("[data-gu]");if(gu){const it=d.items[+gu.dataset.gu];if(!it)return;const nv=!gaUse(it),def=!gaOffSet().has(String(it.g).toLowerCase());d.use=d.use||{};const U={};
-    if(nv===def){delete d.use[it.id];U[it.id]=null;}else{d.use[it.id]=nv;U[it.id]=nv;}gaPost({sid:GA.sid,use:U});gaDraw();return;}
-  const gty=t.closest("[data-gty]");if(gty){const S=gaOffSet(),k=gty.dataset.gty;S.has(k)?S.delete(k):S.add(k);gaOffSave(S);gaDraw();return;}
-  const gi=t.closest("[data-gi]");if(gi){GA.cur=+gi.dataset.gi;gaLoad();return;}
-  const gj=t.closest("[data-gj]");if(gj&&v){try{v.pause();v.currentTime=Math.max(0,v.currentTime+(+gj.dataset.gj));}catch(x){}return;}
-  if(t.closest("[data-gp]")&&v){v.paused?v.play().catch(()=>{}):v.pause();return;}
-  if(t.closest("[data-gnx]")){GA.cur=gaNext(GA.cur);gaLoad();return;}
-  if(t.closest("[data-gset]")){const L=gaNowL(),it=d.items[GA.cur];if(L==null||!it)return;it.hit=+L.toFixed(2);const H={};H[it.id]=it.hit;const j=await gaPost({sid:GA.sid,hit:H});
-    if(!j||j.ok===false){ov.querySelector("#gaPI").innerHTML='<b style="color:#ff4d6d">✖ 沒存到（可能要網頁密碼）</b>';return;}GA.cur=gaNext(GA.cur);gaDraw();gaLoad();return;}
-  if(t.closest("[data-gavg]")){const A=d.items.filter(x=>x.hit!=null).map(x=>x.hit-x.L0).sort((a,b)=>a-b);if(!A.length)return;const med=A[Math.floor(A.length/2)];d.off=+med.toFixed(2);await gaPost({sid:GA.sid,off:d.off});gaDraw();return;}
-  const gs=t.closest("[data-gs]");if(gs){GA.st.spd=+gs.dataset.gs;gaDraw();return;}
-  if(t.closest("[data-gau]")){GA.st.aud=GA.st.aud===false;gaDraw();return;}if(t.closest("[data-gcap]")){gifCapSet(!gifCap());gaDraw();return;}
-  const gf=t.closest("[data-gf]");if(gf){const k=gf.dataset.gf;if(GA.st.f.has(k)){if(GA.st.f.size>1)GA.st.f.delete(k);}else GA.st.f.add(k);gaDraw();return;}
-  const gl=t.closest("[data-gl]");if(gl){GA.st.long=+gl.dataset.gl;gaDraw();return;}
-  if(t.closest("[data-ggo]")){const I=gaUsed();if(!I.length){ov.querySelector("#gaPI").innerHTML="<b>沒有要放的格子</b>";return;}const C=GA.C,R=Math.ceil(I.length/C),dur=Math.max(1,Math.min(15,(+d.pre||0)+(+d.post||4)));
-    const body={sid:GA.sid,C,R,ts:I.map(it=>+(gaHit(it)-(+d.pre||0)).toFixed(1)),dur,spd:GA.st.spd,aud:GA.st.aud!==false?1:0,fmts:[...GA.st.f],cap:gifCap()?1:0,long:GA.st.long,ratio:gaLay().ratio,gap:gaLay().gap,fy:gaLay().fy,ord:I.map((x,i)=>({i,z:gaZ(i%C,Math.floor(i/C),gaLay())})).sort((a,b)=>a.z-b.z).map(o=>o.i)};   /* TK_V0.9.71 跟預覽一樣的交疊 */
-    const P_=typeof kPost==="function"?kPost:(typeof post==="function"?post:null);let j=null;try{j=P_?await P_("/api/pc/mosaic",body):null;}catch(x){}
-    const msg=(j&&j.ok?"✔ ":"✖ ")+((j&&j.message)||"沒有送出");ov.querySelector("#gaPI").innerHTML=`<b>${gaE(msg)}</b>`;
-    if(j&&j.ok){setTimeout(()=>{ov.querySelectorAll("video").forEach(vv=>{try{vv.pause();vv.removeAttribute("src");vv.load();}catch(x){}});ov.remove();const pv=document.getElementById("gaPvOv");if(pv)pv.remove();snMosOpen();},1500);}return;}}
-/* TK_V0.9.71 👁 預覽排版：每格用爆點那一張圖（電腦先做好縮圖），照設定的間距／交疊／▲▼ 排出來，可以切換欄列比較；確定後直接輸出 */
-function gaPv(){const I=gaUsed();if(!I.length)return;let pv=document.getElementById("gaPvOv");if(pv)pv.remove();pv=document.createElement("div");pv.id="gaPvOv";pv.className="gaPvOv";document.body.appendChild(pv);
-  const draw=()=>{const L=gaLay(),N=I.length,LY=gaLayouts(N);if(!LY.some(x=>x.C===GA.C))GA.C=LY[0].C;const C=GA.C,R=Math.ceil(N/C);
-    const W=Math.min(innerWidth-44,900),cw=W/(C+(C-1)*L.gap),ch=cw*L.ratio,gp=L.gap*cw,TW=C*cw+(C-1)*gp,TH=R*ch+(R-1)*gp;
-    pv.innerHTML=`<div class="gaPvB"><div class="gaPvH"><b>👁 ${C}×${R}</b><span style="flex:1"></span><button class="gaPvGo" data-pgo="1">▶ 就這樣輸出</button><button class="pill" data-px="1">✕</button></div>
-<div class="gaPvC" style="width:${TW}px;height:${TH}px">${I.map((it,i)=>{const c=i%C,r=Math.floor(i/C);return `<div class="gaPvT" style="left:${c*(cw+gp)}px;top:${r*(ch+gp)}px;width:${cw}px;height:${ch}px;z-index:${gaZ(c,r,L)}"><img loading="lazy" alt="" style="object-position:50% ${50-L.fy}%" src="${imgB(gaB())}/api/pc/vg/thumb?sid=${GA.sid}&t=${gaHit(it).toFixed(1)}&h=360&p=1"></div>`;}).join("")}</div><div class="gaPvDr" data-pdrag="1">⇕ 按住上下拉調高矮（${gaRt(L.ratio)}）</div>
-<div class="gaPvK"><div class="snMosR"><span>排版</span>${LY.map(x=>`<button data-pc="${x.C}" class="${x.C===C?"on":""}">${x.C}×${x.R}${x.fill?`（空 ${x.fill}）`:""}</button>`).join("")}</div>
-<div class="snMosR"><span>形狀</span>${[[16/9,"直 9:16"],[4/3,"3:4"],[1,"1:1"],[3/4,"4:3"],[9/16,"橫 16:9"]].map(([v,t])=>`<button data-prt="${v}" class="${Math.abs(L.ratio-v)<0.02?"on":""}">${t}</button>`).join("")}</div>
-<div class="snMosR"><span>間距</span><input type="range" min="-40" max="20" step="1" value="${Math.round(L.gap*100)}" data-pg="1"><b>${Math.round(L.gap*100)}%</b><small>負的＝交疊</small></div>
-<div class="snMosR"><span>交疊</span><button data-pz="zh" class="on">${L.zh==="r"?"右疊左":"左疊右"}</button><button data-pz="zv" class="on">${L.zv==="d"?"下疊上":"上疊下"}</button></div><div class="snMosR"><span>構圖</span><button data-pf="1" title="全部一起往上 1">▲</button><button data-pf="0.1" title="微調 0.1">˄</button><b class="gaPvFy">${L.fy>0?"+":""}${L.fy}</b><button data-pf="-0.1" title="微調 0.1">˅</button><button data-pf="-1" title="全部一起往下 1">▼</button><button data-pf="0">置中</button><small>或在圖上按住上下拖</small></div>
-</div></div>`;
-    /* TK_V0.9.74 整個預覽縮到一個畫面內（下面的按鈕永遠按得到）：量出其他東西的高度，剩下的給格子 */
-    const Bx=pv.querySelector(".gaPvB"),G=pv.querySelector(".gaPvC"),other=Bx.scrollHeight-G.offsetHeight,avail=Math.max(120,innerHeight*0.96-other-6);
-    if(TH>avail){const k=avail/TH,cw2=cw*k,ch2=ch*k,gp2=gp*k;G.style.width=(C*cw2+(C-1)*gp2)+"px";G.style.height=(R*ch2+(R-1)*gp2)+"px";
-      G.querySelectorAll(".gaPvT").forEach((t,i)=>{const c=i%C,r=Math.floor(i/C);t.style.left=c*(cw2+gp2)+"px";t.style.top=r*(ch2+gp2)+"px";t.style.width=cw2+"px";t.style.height=ch2+"px";});}};
-  draw();
-  pv.addEventListener("input",e=>{if(e.target.dataset.pg){gaLaySet({gap:(+e.target.value)/100});const b=e.target.nextElementSibling;if(b)b.textContent=e.target.value+"%";clearTimeout(pv._t);pv._t=setTimeout(draw,150);}});
-  pv.addEventListener("pointerdown",e=>{const gC=e.target.closest(".gaPvC");if(gC){e.preventDefault();   /* TK_V0.9.73 在圖上按住上下拖＝全部一起調構圖（跟截圖全覽一樣） */
-      const y0=e.clientY,f0=gaLay().fy,ims=[...gC.querySelectorAll("img")],im=ims.find(x=>x.naturalWidth),T=gC.querySelector(".gaPvT");let f=f0,mv2=false;
-      const sl=im&&T?Math.max(30,im.naturalHeight*T.offsetWidth/im.naturalWidth-T.offsetHeight):T?T.offsetHeight:100;   /* 能上下移動的空間（px） */
-      const mv=ev=>{const dy=ev.clientY-y0;if(Math.abs(dy)>3)mv2=true;f=Math.round(Math.max(-50,Math.min(50,f0+dy/sl*100))*10)/10;ims.forEach(x=>x.style.objectPosition=`50% ${50-f}%`);const b=pv.querySelector(".gaPvFy");if(b)b.textContent=(f>0?"+":"")+f;};
-      const up=()=>{removeEventListener("pointermove",mv);removeEventListener("pointerup",up);removeEventListener("pointercancel",up);if(mv2)gaLaySet({fy:f});};
-      addEventListener("pointermove",mv);addEventListener("pointerup",up);addEventListener("pointercancel",up);return;}
-    const h=e.target.closest(".gaPvDr");if(!h)return;e.preventDefault();   /* 按住上下拉：往下拉變高（直），往上拉變扁 */
-    const y0=e.clientY,r0=gaLay().ratio,g=pv.querySelector(".gaPvC"),tiles=[...g.querySelectorAll(".gaPvT")],L=gaLay(),C=GA.C,cw=tiles[0]?tiles[0].offsetWidth:100,R=Math.ceil(tiles.length/C);let r=r0,moved=false;
-    const mv=ev=>{const dy=ev.clientY-y0;if(Math.abs(dy)>4)moved=true;r=Math.max(0.3,Math.min(3,r0+dy/(cw*R*0.8)));const ch=cw*r,gp=L.gap*cw;tiles.forEach((t,i)=>{t.style.top=(Math.floor(i/C)*(ch+gp))+"px";t.style.height=ch+"px";});g.style.height=(R*ch+(R-1)*gp)+"px";const d=pv.querySelector(".gaPvDr");if(d)d.textContent=`⇕ 按住上下拉調高矮（${gaRt(r)}）`;};
-    const up=()=>{removeEventListener("pointermove",mv);removeEventListener("pointerup",up);removeEventListener("pointercancel",up);if(moved){gaLaySet({ratio:+r.toFixed(3)});draw();}};
-    addEventListener("pointermove",mv);addEventListener("pointerup",up);addEventListener("pointercancel",up);});
-  pv.onclick=e=>{const t=e.target;if(t===pv||t.closest("[data-px]")){pv.remove();return;}
-    const pr=t.closest("[data-prt]");if(pr){gaLaySet({ratio:+pr.dataset.prt});draw();return;}const pc=t.closest("[data-pc]");if(pc){GA.C=+pc.dataset.pc;draw();return;}
-    const pz=t.closest("[data-pz]");if(pz){const L=gaLay();if(pz.dataset.pz==="zh")gaLaySet({zh:L.zh==="r"?"l":"r"});else gaLaySet({zv:L.zv==="d"?"u":"d"});draw();return;}
-    const pf=t.closest("[data-pf]");if(pf){const L=gaLay(),v=+pf.dataset.pf;gaLaySet({fy:v===0?0:Math.round(Math.max(-50,Math.min(50,L.fy+v))*10)/10});draw();return;}
-    if(t.closest("[data-pgo]")){pv.remove();const go=document.querySelector('#gaOv [data-ggo]');if(go)go.click();}};}
-/* TK_V0.9.91 多截的一批：點一下選／取消，挑好按「用這幾張」，之後照樣可以排版、做動圖 */
-function snFitLay(n,c0){const P=snLayPairs(n);if(P.length){const b=P.reduce((a,x)=>Math.abs(x[1]-c0)<Math.abs(a[1]-c0)||(Math.abs(x[1]-c0)===Math.abs(a[1]-c0)&&x[1]>a[1])?x:a);return [b[0],b[1]];}return [Math.max(1,Math.ceil(n/c0)),c0];}
-function snSelOpen(sid,R){const L=R.pickL,need=R.need||Math.round(L.length/2),cols=R.cols||5,sel=new Set();const st=L.length/need;for(let i=0;i<need;i++)sel.add(Math.min(L.length-1,Math.floor(i*st+st/2)));
-  const ov=document.createElement("div");ov.id="snSel";ov.className="snSelOv";document.body.appendChild(ov);const T=m=>(typeof toast==="function"?toast(m):alert(m));
-  const P=typeof kPost==="function"?kPost:(typeof post==="function"?post:(typeof deepPost==="function"?deepPost:null));
-  const tm=x=>SN.clk?SN.clk(x[0]):snHms(x[0]);
-  const draw=()=>{const k=sel.size,rows=Math.max(1,Math.ceil(k/cols));
-    ov.innerHTML=`<div class="snSelW"><div class="snSelH"><b>挑截圖：要 ${need} 張</b><span class="${k===need?"ok":"warn"}">已選 ${k} / ${need}</span><button data-ss="x">✕</button></div>
-<div class="snSelN">已經先平均選好 ${need} 張（亮的）。點一下取消有擋住、拍糊的，再點旁邊的補上。${k!==need?`<br>選 ${k} 張也可以：版面會變成 ${snFitLay(k,cols).join(" 列 × ")} 欄${snFitLay(k,cols)[0]*snFitLay(k,cols)[1]>k?"（排不滿，最後一列會空）":"（剛好排滿）"}，之後還能換。`:""}</div>
-<div class="snSelG">${L.map((x,i)=>`<div class="snSelC${sel.has(i)?" on":""}" data-si="${i}"><img loading="lazy" alt="" src="${imgB(snB())}/snap/${sid}/${x[1]}"><b>${tm(x)}</b>${sel.has(i)?"<i>✔</i>":""}</div>`).join("")}</div>
-<div class="snSelB"><button data-ss="all">全選</button><button data-ss="none">全不選</button><button data-ss="even">平均選 ${need} 張</button><span style="flex:1"></span><button data-ss="cancel">不挑了</button><button class="snPkGo" data-ss="go"${k?"":" disabled"}>✔ 用這 ${k} 張</button></div></div>`;};
-  draw();
-  ov.onclick=async e=>{const c=e.target.closest("[data-si]");if(c){const i=+c.dataset.si;if(sel.has(i))sel.delete(i);else sel.add(i);   /* TK_V1.0.74 只改這一格（不整片重畫：手機上 200 多張不會閃、不會重新載圖） */
-      const on=sel.has(i);c.classList.toggle("on",on);const ic=c.querySelector("i");if(on&&!ic)c.insertAdjacentHTML("beforeend","<i>✔</i>");if(!on&&ic)ic.remove();const k=sel.size;
-      const hs=ov.querySelector(".snSelH span");if(hs){hs.className=k===need?"ok":"warn";hs.textContent=`已選 ${k} / ${need}`;}const gb=ov.querySelector('[data-ss="go"]');if(gb){gb.disabled=!k;gb.textContent=`✔ 用這 ${k} 張`;}
-      const nn=ov.querySelector(".snSelN");if(nn){const fl=snFitLay(k,cols);nn.innerHTML=`已經先平均選好 ${need} 張（亮的）。點一下取消有擋住、拍糊的，再點旁邊的補上。${k!==need?`<br>選 ${k} 張也可以：版面會變成 ${fl.join(" 列 × ")} 欄${fl[0]*fl[1]>k?"（排不滿，最後一列會空）":"（剛好排滿）"}，之後還能換。`:""}`;}return;}
-    const b=e.target.closest("[data-ss]");if(!b)return;const a=b.dataset.ss;const keepY=()=>{const g=ov.querySelector(".snSelG");return g?g.scrollTop:0;};
-    if(a==="x"){ov.remove();return;}   /* 先關掉：下次打開這場會再問 */
-    if(a==="all"){L.forEach((_,i)=>sel.add(i));const y=keepY();draw();ov.querySelector(".snSelG").scrollTop=y;return;}
-    if(a==="none"){sel.clear();const y=keepY();draw();ov.querySelector(".snSelG").scrollTop=y;return;}
-    if(a==="even"){sel.clear();for(let i=0;i<need;i++)sel.add(Math.min(L.length-1,Math.floor(i*st+st/2)));const y=keepY();draw();ov.querySelector(".snSelG").scrollTop=y;return;}
-    if(a==="cancel"){if(!confirm("不挑了？這批截的會丟掉，現在的照片不動。"))return;const j=P&&await P("/api/pc/snap/pickx",{sid});T((j&&j.ok?"✔ ":"✖ ")+((j&&j.message)||""));ov.remove();return;}
-    if(a==="go"){const names=[...sel].sort((p,q)=>p-q).map(i=>L[i][1].replace(/^pk_/,""));if(!confirm(`用這 ${names.length} 張？\n\n這場現在的 ${SN.L.length} 張照片會換掉，不能復原。`))return;b.disabled=true;b.textContent="換上去中…";
-      const j=P&&await P("/api/pc/snap/pick",{sid,names,cols});T((j&&j.ok?"✔ ":"✖ ")+((j&&j.message)||"沒有成功"));if(j&&j.ok){ov.remove();if(SN.sid===sid){SN.lay=[j.rows,j.cols];SN.regenOn=true;snInfo(sid);}}else{b.disabled=false;b.textContent=`✔ 用這 ${names.length} 張`;}}};}
-/* SN-END */
+@@SH88@@
 
 /* ================= 場次資料（直播中＝每秒增量；歷史＝一次載入） ================= */
 const TK=["c","g","j","l","s","v"];
@@ -1711,7 +1105,7 @@ PAGES[12]={render(pg){pg.innerHTML=`<div class="pg fill"><div class="row"><h1 cl
     this.d=new VT($("#exD"),{key:"exD",filter:false,cols:[TC(0,"主播",150),TC(1,"@帳號",150),TC(2,"場次",60,{al:"c"}),TC(3,"完成時間",140,{al:"c"}),TC(4,"音訊大小",90,{al:"r"}),TC(5,"音訊",240),TC(6,"影片",260)],
       onDbl:r=>+r[2]&&openHist(+r[2],r[0]),onCtx:(r,e)=>+r[2]&&menu([{label:`🔍 查看歷史紀錄（開啟場次 ${r[2]} 的分頁）`,act:()=>openHist(+r[2],r[0])},{label:"✂ 剪輯這一場",act:()=>edOpen(+r[2])}],e.clientX,e.clientY)});
     this.poll();},leave(){clearTimeout(this.pt);},
-  async poll(){const j=await api("/api/pc/rec");if(!$("#exA"))return;$("#exLive").textContent=j.live_state;$("#exVid").textContent=j.video_state;this.a.setRows(j.active);if(this.d.rows.length!==j.done.length||JSON.stringify(this.d.rows[0])!==JSON.stringify(j.done[0]))this.d.setRows(j.done);
+  async poll(){if(document.hidden){this.pt=setTimeout(()=>this.poll(),4000);return;}let j=null;try{j=await api("/api/pc/rec");}catch(e){}if(!$("#exA"))return;if(!j||!Array.isArray(j.active)||!Array.isArray(j.done)){this.pt=setTimeout(()=>this.poll(),4000);return;}   /* V1.1.96 讀不到不會整個停掉、背景不輪詢 */$("#exLive").textContent=j.live_state;$("#exVid").textContent=j.video_state;this.a.setRows(j.active);if(this.d.rows.length!==j.done.length||JSON.stringify(this.d.rows[0])!==JSON.stringify(j.done[0]))this.d.setRows(j.done);
     const L=$("#exL"),end=L.scrollTop+L.clientHeight>=L.scrollHeight-20;if(L.textContent!==j.log){L.textContent=j.log;if(end)L.scrollTop=1e9;}this.pt=setTimeout(()=>this.poll(),2000);}};
 /* ================= 19 FLV 待處理 ================= */
 PAGES[19]={render(pg){pg.innerHTML=`<div class="pg fill"><h1 class="title">FLV 待處理</h1><div class="sub" id="fvIntro">這裡列出所有還沒轉成 MP4 的 FLV（以前累積的、轉檔失敗的）。程式<b>不會自動</b>處理它們，勾選後按「處理勾選的」才會開始；其餘放著不動。處理方式：FLV 從 HDD 一次複製到 SSD → 在 SSD 轉 MP4（同時複製下一部）→ MP4 一次搬回 HDD，確認無誤才刪 HDD 上的 FLV。</div>
@@ -1830,9 +1224,7 @@ PAGES[16]={render(pg){pg.innerHTML=`<div class="pg"><div class="row"><h1 class="
     if(data.d)tips.push(`${data.d} 硬碟最近 5 分鐘平均忙碌 ${Math.round(b5)}%${b5>=70?"：很忙":b5>=45?"：中等":"：還很輕鬆"}。`);if(L.length)tips.push(`轉檔排隊 ${L.length} 部，全部做完還要約 ${fmtDur(M.all_left)}。`);
     $("#pfAdv").innerHTML="<ul style='margin:4px 0;padding-left:18px;line-height:1.7'>"+tips.map(t=>`<li>${t}</li>`).join("")+"</ul>";
     {const h=`🩺 自我檢查、網路狀態、觀察到的異常 → 移到左邊「<a href="javascript:void(0)" onclick="go(22)">LOG 與問題</a>」${(P.anom||[]).length?`（最近 7 天 ${(P.anom||[]).length} 項）`:""}${P.health&&P.health.t&&!P.health.ok?` <b style="color:#ff4d6d">資料庫寫不進去 ${P.health.blocked_min} 分鐘</b>`:""}`;const el=$("#pfAn");if(el&&el._h!==h){el._h=h;el.innerHTML=h;}}}};
-function anomHtml(L){if(!L||!L.length)return '<span style="color:#45d483">✔ 最近 7 天沒有觀察到異常（CPU、記憶體、硬碟忙碌、溫度、空間、資料庫與紀錄檔大小、主程式記憶體、畫面卡住都會自動盯著）</span>';
-  const f=t=>{const d=new Date(t*1000);return (d.getMonth()+1)+"/"+d.getDate()+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");};
-  return L.slice(0,30).map(e=>`<div style="margin:4px 0"><b style="color:${e.level==="bad"?"#ff4d6d":"#f0ad4e"}">⚠ ${esc(e.title||"")}</b> <span style="opacity:.65;font-size:.9em">${f(e.t)}${(e.n||1)>1?` → ${f(e.last).slice(-5)}，${e.n} 次`:""}</span><br>${esc(e.detail||"")}${e.tip?`<br><span style="opacity:.65;font-size:.9em">${esc(e.tip)}</span>`:""}</div>`).join("");}
+@@SH103@@
 
 function pfWho(M){if(!M||!M.who)return;const all=M.who.reduce((a,w)=>a+w.mp4+w.m4a+w.flv,0)||1;
   dialog("各主播占用（大 → 小）",`<div style="max-height:68vh;overflow:auto"><table style="width:100%;font-size:12.5px;border-collapse:collapse"><tr class="sub" style="position:sticky;top:0;background:var(--panel)"><td>主播</td><td align="right">MP4</td><td align="right">影片數</td><td align="right">M4A</td><td align="right">錄音數</td><td align="right">合計</td><td align="right">占比</td><td>分類／舊檔</td></tr>`+
@@ -2091,358 +1483,14 @@ PAGES[35]={render(pg){pg.innerHTML=`<div class="pg"><div id="pf2Root"></div></di
 /* TK_V1.0.30 自動處理紀錄、小檔備份（跟手機同一套） */
 async function actMount(root){const A={cat:"",q:"",days:3};
   const L=async()=>{const j=await api(`/api/pc/actlog?cat=${A.cat}&days=${A.days}&q=${encodeURIComponent(A.q)}`);if(!j)return;const ic=Object.fromEntries((j.cats||[]).map(c=>[c.k,c.ic]));
-    root.querySelector("#actC").innerHTML=`<button class="${A.cat?"":"on"}" data-ac="">全部</button>`+(j.cats||[]).map(c=>`<button class="${A.cat===c.k?"on":""}" data-ac="${c.k}">${c.ic} ${esc(c.nm)} <small>${c.n}</small></button>`).join("");
-    root.querySelector("#actL").innerHTML=(j.rows||[]).map(r=>`<div class="actR"><small>${esc(r.t.slice(5,16))}</small><span>${r.m.startsWith(ic[r.k]||"\u0000")?"":(ic[r.k]||"")+" "}${esc(r.m)}</span></div>`).join("")||`<div class="sbkE">這幾天沒有這類紀錄</div>`;
-    root.querySelector("#actN").textContent=`最近 ${j.days} 天 · ${j.n} 筆${j.n>400?"（只列最新 400 筆）":""}`;};
-  root.innerHTML=`<div class="actT"><input id="actQ" placeholder="🔍 找字（例如 #04315、小宅宅）"><select id="actD"><option value="1">1 天</option><option value="3" selected>3 天</option><option value="7">7 天</option><option value="14">14 天</option></select></div><div class="actC" id="actC"></div><div class="actN" id="actN"></div><div class="actL" id="actL">讀取中…</div>`;
-  root.querySelector("#actC").onclick=e=>{const b=e.target.closest("[data-ac]");if(!b)return;A.cat=b.dataset.ac;L();};
-  root.querySelector("#actD").onchange=e=>{A.days=+e.target.value;L();};let tq=0;root.querySelector("#actQ").oninput=e=>{clearTimeout(tq);tq=setTimeout(()=>{A.q=e.target.value.trim();L();},400);};L();}
+@@SH89@@
 async function hevcMount(root){const GB=b=>(b/1e9).toFixed(b>=1e11?0:1)+" GB",MB=b=>(b/1e6).toFixed(1)+" MB";
   const L=async()=>{const j=await api("/api/pc/hevc");if(!j)return;const st=j.st||{},R=j.res;
-    root.innerHTML=`<div class="sbkN">用顯示卡把一分鐘影片壓成 <b>HEVC（H.265）</b>，看同樣畫質能小多少。<b>只是試算，不會動到任何原本的影片</b>；背景最低優先權，電腦忙會先等。</div>
-    <button class="pill sbkGo" id="hvGo"${st.running?" disabled":""}>${st.running?"試算中…":"🧪 拿最大的那支試一分鐘"}</button><div class="hvSt">${esc(st.msg||"")}</div>
-    ${R?`<div class="hvR"><div><b>${MB(R.orig)}</b><small>原本 60 秒</small></div><div><b>${MB(R.hevc)}</b><small>HEVC 60 秒</small></div><div><b>${Math.round(R.ratio*100)}%</b><small>大小剩下</small></div><div><b>${R.x}×</b><small>壓縮速度</small></div></div>
-    <div class="hvE">影片庫現在約 <b>${GB(R.lib)}</b>，照這個比例全部轉 HEVC 大約能空出 <b>${GB(R.save)}</b>（實際會依每支畫面不同）。試的是 ${esc(R.file)}，從第 ${Math.round(R.ss/60)} 分鐘開始。</div>
-    <div class="hvI"><figure><img src="${B}/api/pc/hevc/img?f=orig&t=${R.t}"><figcaption>原本</figcaption></figure><figure><img src="${B}/api/pc/hevc/img?f=hevc&t=${R.t}"><figcaption>HEVC</figcaption></figure></div>`:""}`;
-    const g=root.querySelector("#hvGo");if(g)g.onclick=async()=>{g.disabled=true;const r=await kPost("/api/pc/hevc",{});toast((r&&r.ok?"":"✖ ")+((r&&r.message)||""));setTimeout(L,1500);};
-    clearTimeout(window._hvT);if(st.running)window._hvT=setTimeout(()=>{if(root.isConnected)L();},3000);};L();}
-function csvMount(root){const A={days:30,u:window.CSV_U||""};   /* TK_V1.0.51 匯出場次表 */
-  const P=()=>{root.innerHTML=`<div class="sbkN">把場次表匯出成 <b>CSV</b>（Excel、Google 試算表直接開）：場次、主播、開播時間、長度、錄到幾成、保存等級、鑽石、留言、最高觀眾、MP4 大小、手機錄屏段數、有沒有字幕。</div>
-    <div class="actT"><select id="cvD">${[[7,"最近 7 天"],[30,"最近 30 天"],[90,"最近 90 天"],[365,"最近一年"]].map(([d,t])=>`<option value="${d}"${d===A.days?" selected":""}>${t}</option>`).join("")}</select><input id="cvU" placeholder="只匯出這位（帳號，空白＝全部）" value="${esc(A.u)}"></div>
-    <a class="pill sbkGo" id="cvGo" href="#">⬇ 下載 CSV</a><div class="sbkE">檔案會在電腦的 _DB_SSD\\export 留最新 10 份。</div>`;
-    root.querySelector("#cvD").onchange=e=>{A.days=+e.target.value;};root.querySelector("#cvU").oninput=e=>{A.u=e.target.value.trim().replace(/^@/,"");};
-    root.querySelector("#cvGo").onclick=e=>{e.preventDefault();const a=document.createElement("a");a.href=`${B}/api/pc/export/sessions?days=${A.days}&u=${encodeURIComponent(A.u)}`;a.download="";document.body.appendChild(a);a.click();a.remove();toast("⬇ 匯出中，好了瀏覽器會自己下載");};};P();}
-async function cuMount(root){   /* V1.1.13 ☁ 雲端更新（GitHub）：檢查／更新／略過這版；要換 EXE 會先列出正在錄的直播間 */
-  if(!root)return;const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-  const G=b=>!b?"":b>=1e6?(b/1048576).toFixed(1)+" MB":Math.round(b/1024)+" KB";
-  const get=async()=>{try{return await (typeof api==="function"?api:J)("/api/pc/cloud");}catch(e){return null;}};
-  const post=async(o)=>{const f=(typeof kPost==="function"?kPost:rvPost);const r=await f("/api/pc/cloud/set",o);return r||{};};
-  const ask=async(t,m)=>typeof confirmDlg==="function"?await confirmDlg(t,m,"堅持現在更新","stop"):window.confirm(t+"\n\n"+m);
-  const say=r=>{if(typeof toast==="function"&&r&&r.message)toast((r.ok!==false?"☁ ":"✖ ")+r.message,4500);};
-  const draw=I=>{if(!root.isConnected)return false;if(!I){root.innerHTML='<div class="cuBox">☁ 雲端更新：讀不到狀態</div>';return true;}
-    const c=I.chk||{},dl=I.dl;let h=`<div class="cuBox"><b>☁ 雲端更新（GitHub）</b> <span class="cuS">現在 V${esc(I.cur)} · EXE 第 ${I.launcher} 版${I.on?"":" · 自動檢查已關（設定裡可以開）"}</span><div class="cuT">`;
-    if(I.busy||dl){const p=dl&&dl.size?Math.round(dl.got/dl.size*100):0;h+=`⏳ ${esc(I.msg||"下載中")}${dl?`<div class="cuBar"><i style="width:${p}%"></i></div>${esc(dl.label||"")} ${p}%（${G(dl.got)} / ${G(dl.size)}，${(dl.spd/1048576).toFixed(1)} MB/s）`:""}`;}
-    else if(!I.chk)h+="還沒檢查（開程式 1 分鐘後會自動檢查，之後每 6 小時）";
-    else if(!c.ok)h+=`✖ ${esc(c.message||"連不到 GitHub")}`;
-    else if(c.newer){h+=`🆕 <b>有新版 V${esc(I.ver)}</b>${I.date?`（${esc(I.date)}）`:""}　${c.need_shell?'<b class="cuW">⚠ 這次要換 EXE：程式會關掉再自動打開（約 1 分鐘），開起來自動恢復監控</b>':'熱更新，監控錄影不中斷'}${c.skipped?" · 已略過這版":""}`;
-      if(I.notes&&I.notes.length)h+=`<div class="cuN">${I.notes.slice(0,10).map(n=>"• "+esc(n)).join("<br>")}</div>`;
-      if(c.need_shell&&I.rec&&I.rec.length)h+=`<div class="cuW">現在有 ${I.rec.length} 間正在錄影：${I.rec.map(x=>esc(x.name)).join("、")}（建議等錄完再更新）</div>`;}
-    else h+=`✔ 已經是最新（雲端 V${esc(I.ver||I.cur)}，${c.t?new Date(c.t*1000).toLocaleString("zh-TW",{hour12:false}):""} 檢查）`;
-    if(I.msg&&!I.busy)h+=`<div class="cuS">${esc(I.msg)}</div>`;
-    h+=`</div><div class="cuR"><button class="btn pill" data-cu="check">☁ 檢查更新</button>${c.newer&&!I.busy?`${c.need_shell?"":`<button class="btn pill" data-cu="skip">${c.skipped?"已略過":"略過這版"}</button>`}<button class="btn pill start cuGo" data-cu="update">更新到 V${esc(I.ver)}</button>`:""}${I.busy&&dl?`<button class="btn pill" data-cu="cancel">取消下載</button>`:""}</div></div>`;
-    root.innerHTML=h;
-    root.querySelectorAll("[data-cu]").forEach(b=>b.onclick=async()=>{const op=b.dataset.cu;b.disabled=true;let r;
-      if(op==="update"){r=await post({op:"update"});
-        if(r.need_confirm){if(await ask("要換 EXE（會重開程式）",r.message))r=await post({op:"update",force:1});else{b.disabled=false;return;}}}
-      else r=await post({op});
-      say(r);setTimeout(tick,op==="check"?4000:600);});
-    return true;};
-  let tm=null;const tick=async()=>{clearTimeout(tm);const I=await get();if(!draw(I))return;tm=setTimeout(tick,I&&(I.busy||I.dl)?1500:8000);};
-  tick();}
-function migFabInit(){   /* V1.1.20 搬硬碟切換／收尾中：右下角浮動進度 */
-  const G=b=>!b?"0":b>=1e12?(b/1e12).toFixed(2)+" TB":b>=1e9?(b/1e9).toFixed(1)+" GB":(b/1e6).toFixed(0)+" MB";
-  let tm=0;const chk=async()=>{clearTimeout(tm);let j=null;if(!document.hidden){try{j=await (typeof api==="function"?api:J)("/api/pc/mig");}catch(e){}}
-    let b=document.getElementById("migFab");const T=(j&&j.tail)||{},ph=j&&j.phase;
-    const show=j&&(ph==="final"||((ph==="switched"||ph==="verify")&&T.fast));
-    if(!show){if(b)b.remove();tm=setTimeout(chk,j&&(ph==="switched"||ph==="verify")?8000:30000);return;}
-    if(!b){b=document.createElement("div");b.id="migFab";document.body.appendChild(b);b.onclick=()=>{try{if(location.pathname.replace(/\/$/,"").endsWith("/pc")&&typeof go==="function")go(57);else location.hash="tool/mig";}catch(e){}};}
-    const spd=j.spd||0,eta=spd>1e5&&T.left_b?T.left_b/spd:null,H=s=>s>=3600?Math.floor(s/3600)+" 小時 "+Math.round(s%3600/60)+" 分":Math.max(1,Math.round(s/60))+" 分";
-    b.className=T.ready?"ok":"";
-    b.innerHTML=ph==="final"?`💽 <b>切換到 ${j.dst} 中</b><small>${String(j.final||"補最後差異").slice(0,30)}…（錄影照常）</small>`
-      :T.ready?`✅ <b>收尾完成，可以關機了</b><small>停止監控並退出 → 關機 → 換硬碟</small>`
-      :`🏁 <b>收尾中 · 剩 ${(T.left_n||0).toLocaleString()} 個 · ${G(T.left_b)}</b><small>${T.stage||""} · ${spd>1e5?(spd/1048576).toFixed(0)+" MB/s":"—"}${eta?" · 約 "+H(eta):""}${j.curf&&j.curf.rel?" · "+String(j.curf.rel).split(/[\\/]/).pop().slice(0,28):""}</small>`;
-    tm=setTimeout(chk,3000);};
-  setTimeout(chk,3000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)chk();});}
-setTimeout(()=>{try{migFabInit();}catch(e){}},2500);
-async function mrgMount(root){   /* V1.1.25 ⧉ 合併重複場次 */
-  if(!root)return;const E=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-  const get=async u=>{try{return await (typeof api==="function"?api:J)(u);}catch(e){return null;}};
-  const post=async(u,o)=>{const f=(typeof kPost==="function"?kPost:rvPost);return (await f(u,o))||{};};
-  const T=s=>{if(!s)return"—";const d=new Date(String(s).replace(" ","T"));return isNaN(d)?String(s).slice(5,16):d.toLocaleString("zh-TW",{hour12:false,month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});};
-  const off=new Set();let I=null,tm=0;
-  const draw=()=>{if(!root.isConnected)return;const sc=I&&I.scan,R=I&&I.run;let h=`<div class="mrgHead"><b>⧉ 合併重複場次</b><div class="snote">同一位主播、TikTok 開播時間一樣（相差 1 分鐘內）的場次＝同一場直播，只是程式重開、斷電、斷線被切成好幾段。合併後留言、禮物、送禮者、觀看人數都歸到同一場；<b>影片不重新輸出</b>，回放照時間軸一段接一段播，中間沒錄到的會自動跳過。合併前自動備份資料庫。直播中的場次不會動（等它下播）。</div></div>`;
-    if(R&&R.state==="running")h+=`<div class="mrgBox">⏳ 合併中… ${R.done}/${R.n}（先備份資料庫）</div>`;
-    else if(R&&(R.state==="done"||R.state==="error"))h+=`<div class="mrgBox ${R.state==="done"?"ok":"bad"}">${R.state==="done"?`✔ 合併了 ${R.done} 組${R.fails.length?`，${R.fails.length} 組沒合併（${E(R.fails[0][1])}）`:""}${R.backup?`<br><small>合併前的資料庫備份：${E(R.backup)}</small>`:""}`:"✖ "+E(R.message||"失敗")}</div>`;
-    if(!I||I.scanning&&!sc)h+=`<div class="mrgBox">🔎 找可以合併的場次…</div>`;
-    else if(sc&&sc.error)h+=`<div class="mrgBox bad">✖ 找的時候出錯：${E(sc.error)}</div>`;
-    else if(sc){const G=sc.groups||[];const on=G.filter(g=>!off.has(g.ids.join(",")));
-      h+=`<div class="mrgBar"><span>找到 <b>${G.length}</b> 組可以合併${sc.skipped?`（另有 ${sc.skipped} 組還在直播，先不動）`:""}</span><button class="btn pill" data-m="rescan">🔎 重新找</button>${G.length?`<button class="btn pill" data-m="all">${on.length===G.length?"全部取消":"全部勾選"}</button><button class="btn pill start" data-m="run" ${on.length?"":"disabled"}>⧉ 合併勾選的 ${on.length} 組</button>`:""}</div>`;
-      if(!G.length)h+=`<div class="mrgBox ok">✔ 沒有需要合併的場次</div>`;
-      h+=G.map(g=>{const k=g.ids.join(","),ck=!off.has(k),S=g.sessions||[],nc=S.reduce((a,x)=>a+x.comments,0),nd=S.reduce((a,x)=>a+x.diamonds,0),nv=S.reduce((a,x)=>a+x.videos,0);
-        return `<label class="mrgG ${ck?"on":""}"><input type="checkbox" data-k="${k}" ${ck?"checked":""}><div><div class="mrgT"><b>${E(g.name)}</b> <small>@${E(g.user)}</small> · ${T(S[0]&&S[0].start)} 開播 · <b>${S.length} 段</b> → 1 場</div>
-        <div class="mrgS">${S.map((x,i)=>`<span>#${x.id} ${T(x.start)}～${T(x.end).slice(-5)} · 💬${x.comments} · 🎁${x.gifts}${x.diamonds?` (💎${x.diamonds})`:""} · 🎬${x.videos}</span>`).join("")}</div>
-        <div class="mrgS"><small>合併後：💬 ${nc} 則 · 💎 ${nd} · 🎬 ${nv} 段影片照時間接著播 · 留下編號 #${Math.max(...g.ids)}</small></div></div></label>`;}).join("");
-      if(sc.more)h+=`<div class="snote">還有 ${sc.more} 組，這批合併完再按「重新找」</div>`;}
-    root.innerHTML=h;
-    root.querySelectorAll("input[data-k]").forEach(c=>c.onchange=()=>{c.checked?off.delete(c.dataset.k):off.add(c.dataset.k);draw();});
-    root.querySelectorAll("[data-m]").forEach(b=>b.onclick=async e=>{e.preventDefault();const m=b.dataset.m,G=(sc&&sc.groups)||[];
-      if(m==="all"){const allOn=G.every(g=>!off.has(g.ids.join(",")));G.forEach(g=>allOn?off.add(g.ids.join(",")):off.delete(g.ids.join(",")));draw();return;}
-      if(m==="rescan"){await get("/api/pc/merge/scan?force=1");tick();return;}
-      if(m==="run"){const on=G.filter(g=>!off.has(g.ids.join(",")));if(!confirm(`合併 ${on.length} 組場次？\n\n留言、禮物、影片都會歸到同一場（影片不重新輸出）。\n合併前會自動備份資料庫。`))return;
-        b.disabled=true;const r=await post("/api/pc/merge/run",{groups:on.map(g=>g.ids)});if(typeof toast==="function")toast((r.ok?"⧉ ":"✖ ")+(r.message||""),3500);tick();}});};
-  const tick=async()=>{clearTimeout(tm);if(!root.isConnected)return;I=await get("/api/pc/merge");if(I&&!I.scan&&!I.scanning&&!(I.run&&I.run.state==="running")){await get("/api/pc/merge/scan");I=await get("/api/pc/merge");}
-    draw();tm=setTimeout(tick,I&&(I.scanning||(I.run&&I.run.state==="running"))?1500:15000);};
-  tick();}
-/* V1.1.32 📖 規則說明：程式實際怎麼做（照程式碼整理，改規則時這裡一起改） */
-const RU_F=(a)=>'<div class="ruFlow">'+a.map((x,i)=>(i?'<i class="ruAr">→</i>':'')+'<span class="ruChip" style="'+(x[1]?'--c:'+x[1]:'')+'">'+x[0]+'</span>').join('')+'</div>';
-const RU_G=(k,n,c)=>'<span class="ruG" style="--c:'+c+'">'+k+'</span><b>'+n+'</b>';
-const RU_V=(k,u,d)=>'<span class="ruV" data-k="'+k+'" data-u="'+u+'"><b>'+d+'</b> '+u+'<i>✎</i></span>';   /* V1.1.35 規則裡的數字＝設定，可以直接改（要打勾確認） */
-const RU_BAR=(segs)=>'<div class="ruBar">'+segs.map(s=>'<span style="flex:'+s[0]+';--c:'+s[2]+'">'+s[1]+'</span>').join('')+'</div>';
-const RULES=[
- {k:"rec",i:"🎥",c:"#ff6b8a",t:"錄影與監控：怎麼錄、存在哪",s:[
-  {t:"一場直播的檔案怎麼走",d:RU_F([["直播中","#ff4d6d"],["FLV 先寫 C 槽 SSD","#f0ad4e"],["下播：在 SSD 轉 MP4","#4dc9ff"],["搬進影片庫（R 槽）","#45d483"]])+
-   "<ul><li>錄影時畫面直接複製串流、<b>不重新壓縮</b>，所以錄影本身幾乎不吃 CPU。</li><li>下播後在 SSD 上把 FLV 轉成 MP4：畫面大小沒變就直接複製（幾秒～幾分鐘）；直播中畫面大小變過（例如 PK）才重新壓縮成同一個大小，這時用<b>顯示卡</b>（主 FFmpeg 太新、1060 驅動不支援，用 ffmpeg_gpu 那份 FFmpeg 7.1.1）。</li><li><b>快的先轉</b>：排隊時先讀 FLV 標頭，看每部是「直接合併」還是「要重新壓縮」。直接合併的<b>兩條同時轉</b>（電腦忙時只用一條）；要重新壓縮的自己<b>一條、一次一部</b>（顯示卡壓縮、CPU 最多 2 核），不會擋住後面。轉到一半才發現要重新壓縮的，讓出來排到慢的那條<b>下一部</b>。設定 → 錄影「🚀 快的先轉」可以關。</li><li>轉好才一次搬到影片庫硬碟（HDD 只寫一次完整的 MP4，不會邊錄邊轉卡住）。轉成功就刪 FLV；<b>轉失敗一定保留 FLV</b>（放「FLV轉檔失敗」，之後可以重轉）。</li><li>聲音另外錄一份 M4A（48 kbps 單聲道，一小時約 22 MB），也是先放 SSD、轉好再搬。<b>就算 MP4 刪了，M4A、留言、禮物都還在</b>。</li></ul>"},
-  {t:"空間不夠時",d:"<ul><li>SSD 剩不到 <b>"+RU_V('rec.ssd_min_free','GB',60)+"</b>：新的錄影改成直接錄在影片庫硬碟。</li><li>影片硬碟剩不到 <b>"+RU_V('rec.video_min_free','GB',30)+"</b>：不開始新的錄影（<b>聲音照錄</b>）。</li><li>🛡 C 槽守門員每分鐘看 C 剩多少、減少多快：第 1 級先停不急的背景工作；第 2 級全速把東西搬走；第 3 級（剩不到 15 GB 或 20 分鐘內會滿）才會一位一位停掉正在錄到 C 的影片（F → E → 未分級先停）。</li></ul>"},
-  {t:"同一場直播的判定（斷線、重開）",d:"<ul><li>主播斷線後 <b>"+RU_V('conn.grace_minutes','分鐘',10)+"內</b>連回同一個直播間＝<b>續寫同一場</b>（錄影會分成第 2 段、第 3 段…）。</li><li>直播中卻 <b>"+RU_V('monitor.silent_min','分鐘',30)+"</b>沒有任何留言、禮物、進場、人數也沒變（而且沒在錄影）→ 重新連一次確認：還在播就續寫，結束了就把結束時間改回最後有資料的時間。</li><li>程式重開、斷電、超過 10 分鐘才連回來 → 會變成<b>另一場</b>。這種被切開的，用「⧉ 合併重複場次」合回一場（見「場次合併」）。</li></ul>"},
-  {t:"開程式、熱更新時的監控",d:"<ul><li>開程式 3 秒後自動開始監控（設定可以關）。正在錄的場次在熱更新、重開時會<b>接著錄同一場</b>。</li><li>搬硬碟切換後，如果找不到影片硬碟（例如 R 槽代號跑掉），程式<b>先不開始監控</b>，不會錄到別的地方，會提示你去磁碟管理改代號。</li></ul>"},
+@@SH90@@
   {t:"📲 手機錄特效",d:"<ul><li>一支安卓手機（紅米 10）用 USB 接電腦，裝好 scrcpy（工具頁可自動從官方 GitHub 下載）。</li><li>主播開播 → 手機自己亮起來、打開那個直播間 → 錄下手機畫面＋聲音（有禮物特效）。一支手機一次錄一場。</li><li>錄誰：<b>S 級</b>的主播，照「工具 → 📲 手機錄特效」裡拖好的順序；按「▶ 開始」後，排最前面、正在直播的那位先錄，他下播換下一位還在播的。要加人＝在審核改成 S。</li><li>改順序要按右下角「✔ 套用」才生效；套用後（或排更前面的開播了）正在錄的不是第一順位 → 倒數 10 秒停掉、換錄新的那位。</li><li>主播斷線／下播超過 90 秒才停；TikTok 被關掉或跳走會自己重新打開直播間；拔線再插回、scrcpy 中斷 → 接著錄下一段（_p2、_p3…）。</li><li>手機超過 46°C 先停錄，降到 41°C 再繼續。</li><li>先錄在 SSD（MKV，斷電也播得了），結束後不重新壓縮換成 MP4（idle），搬到影片資料夾 <b>TikLive_手機特效\\帳號\\</b>；不到 15 秒的段丟掉。</li><li>回放：同一場可以切換「原本／手機」版本（用聲音對齊；對不上用錄影時間，可能差幾秒）。剪輯器那場的來源最後多一個手機特效檔。</li><li>S 級：手機特效版也排進 YouTube（標題加「手機特效版」，跟原本的是不同一部）。容量預測也算進去。</li><li>🎁 禮物剪輯：「錄好的」那場按「禮物剪輯」→ 選一位大哥（不算 10 鑽以下），或不分是誰、單次 ≥ 2000 鑽的全部 → 每個禮物一格（一次顯示 10 格，往右滑再載入）；點一格只載那一小段，用 ±1／±5 調送禮前、送禮後幾秒，按 OK 換下一格；沒調的用預設 → 全部接成一支 MP4（連在一起的併成一段，用顯示卡壓縮）。</li><li>學習時間差：每次按 OK 都記下來（禮物、你調的秒數、當時幾個人在播…）。同一種禮物有 2 筆以上就用它們當預設：取中位數、差太多的先不算、其他平均；之後資料夠了可以分析延遲原因。</li><li>回放切到「手機」版本時，程式自己畫的送禮動畫不顯示（手機畫面本來就有真的特效）。</li><li>🧩 手機版合併：同一場有手機特效（自動錄）和上傳的手機／平板錄屏（用「手機錄屏」上傳，聲音自動對上這場）→ 回放的「📱 手機」預設用上傳的把重疊時間蓋掉；「錄好的」按「🧩 合併」可以改成只蓋幾分到幾分，也可以照結果輸出：每段各一支（各自原本的解析度，不混在一起、不補黑邊；被上傳的蓋掉的手機特效不輸出；整支用到直接複製，只用到一部分照原解析度剪），放在「暱稱_開播_#場次_手機合併」資料夾。</li><li>🎯 手動對齊：上傳的位置不對（聲音對不上、被放錯時間）→ 合併畫面每支上傳的按「🎯 手動對齊位置」：上面播上傳的、下面播這場（原本錄的或手機特效，可以點禮物清單跳過去），兩邊停在同一瞬間按「🎯 這兩個是同一刻」→ 程式再用聲音在前後 2 秒內找最準的一點（找不到就照你對的）；之後可以 ±0.1／±0.5 秒微調、「▶ 兩個一起播」檢查；存過的「蓋幾分到幾分」會跟著一起挪。</li><li>🎛 禮物陣列影片（工具／網頁版第 61 頁，或「錄好的」那場按「🎛 禮物陣列」，跟批量剪輯、GIF 陣列分開）：選一場 → 用「送禮的人／禮物／單次 ≥ 幾鑽」篩，每個禮物 5 張預覽圖（從開始秒數起每格長度內平均 5 張）看表情挑 → 排成陣列（畫面照「🧩 手機版合併」的結果：上傳的平板／手機錄屏蓋掉的時間用上傳的，被取代的手機特效不會出現），全部格子一起從頭循環播（每格是送禮前 10 秒～後 20 秒的小預覽影片，顯示卡壓縮、存 SSD）→ 點一格用 −0.1／+0.1（按住一直調）、−1／+1 調它從哪裡開始，其他格照播；「☑ 多選」「同一種禮物」可以一起調；◀ ▶ 換位置、✕ 拿掉 → 選每格秒數、排法（幾欄×幾列）、長邊、要不要聲音 → 輸出一支 MP4（存在 TikLive_手機特效\_禮物陣列\，背景一次一件、電腦忙先等）。「⏱ 前後」開始／結束各有 −1／−0.1／+0.1／+1（按住一直調），一起改全部格子，每格一樣長，時間條看黃線＝送禮、藍框＝要的那段；「🧩 疊法」跟截圖全覽一樣：間距（負＝疊在一起）、左右疊、上下疊、臉位置 ▲▼，另外可以勾「疊的地方柔化過渡」（輸出也一樣）；每格的小預覽影片前面多留 15 秒、後面多留 20 秒，調前後大多不用重做，超出才只重做那一格；做好的存在電腦 SSD（最多 2 萬支），換排版、換秒數、下次打開都直接用，離開頁面電腦也會在背景繼續做；上面有進度條和大概還要多久，輸出也有；某格讀不到 → 點那格看原因、按「🔄 重新讀取」。每次調整都記下來（_DB_SSD\pfx_gav_log.jsonl：哪種禮物、誰送、調前調後、當時幾個人在播），同一種禮物 2 格以上就自動當下次的預設開始秒數；工作區自動存，下次打開同一場接著做。</li><li>✂ 剪輯：那場有手機特效版會先問要剪「原本錄的」還是「手機特效版」；沒有就直接開。</li><li>看畫面：錄影中每 30 秒截一張手機畫面（頁面看得到），也讀畫面上的字、看現在是不是直播間。黑畫面（螢幕關了、直播間沒畫面）、TikTok 顯示「發生錯誤／請稍後再試」、跑到首頁不在直播間、一模一樣 2 分鐘（卡住）、錄影檔沒在長 → 看到就馬上動手，30 秒後還不對換下一招：①完全關掉 TikTok 重開直播間（每次開直播間都先這樣，避免叫回上一場已結束的）②先進另一位正在播的直播間 6 秒再回來 ③再關掉 TikTok 重開 ④檢查手機網路，不通就關掉 Wi-Fi 再打開 ⑤重開錄影 ⑥重開手機（6 小時最多一次）。小米「充電速度慢」這類跳出來的視窗按返回關掉。只是畫面沒動（主播可能停在同一畫面）救 3 招後改 3 分鐘再看。螢幕設成永遠不自己關。</li><li>自己處理：通知欄被拉下來、USB 用途選單、系統對話框 → 20 秒內自己收掉；離開 TikTok 會重新打開直播間；連不上 3 分鐘重新啟動 adb；處理不了的（找不到手機、電量低沒充電、在播卻沒在錄）會出現在狀態卡和這頁最上面。</li><li>聲音：開直播間前先把手機媒體音量調到 0（錄影還沒開始那幾秒不出聲），錄影接手聲音後（手機本來就不出聲）調回原本的音量，確保錄得到聲音。</li><li>螢幕：下播停錄 → 回桌面、把 TikTok 完全關掉（主帳號＋小米分身，不在背景一直播、耗電、出聲）；沒在錄、1 分鐘沒人操作 → 回桌面、亮度最低、關螢幕待機；開播時亮起來（亮度照設定，預設 50%）→ 回桌面 → 進直播間，開錄前先看一眼畫面，黑的就回桌面再開一次。頁面有手動按鈕：亮屏、熄屏、回桌面、開 TikTok、截一張、亮度拉桿（任何裝置都能按）。</li><li>SIM 卡：錄影手機不要插中國的 SIM 卡（TikTok 會把手機當成在中國，整頁「發生錯誤」、不能登入）；偵測到會在頁面最上面提醒。只用 Wi-Fi 就好。</li><li>帳號：有小米分身（雙開，系統使用者 999）登入另一個 TikTok 帳號時，每一場輪流用；一個帳號一直「發生錯誤」（可能被 TikTok 擋）就換另一個，被擋的休息 30 分鐘。兩個都不行就不再一直重開，改成等 5、10、20 分鐘再試，並提醒你（重開手機對這種沒用，只用在黑畫面）。</li><li>手機畫面每 30 秒截一張顯示在頁面（螢幕關著不截）；錄影中的截圖另外存成那支影片的「預覽」（檔名＝影片第幾秒），在「錄好的」按 🖼 預覽看，點一張從那裡播。要先開小米「USB 偵錯（安全設定）」程式才能按電源鍵。</li><li>每週二、週五凌晨 3～7 點（沒在錄、S 級都沒在播時）自動重開手機一次；</li><li>全部在背景執行緒：手機只把壓好的畫面傳過來，電腦不解碼、不開視窗。</li></ul>"},
-  {t:"⏸ 暫停監控並封存",d:"<ul><li>主播分類（或審核、檔案總管）<b>長按主播</b> → 主播選單 →「⏸ 暫停監控並封存」。</li><li>從那一刻起<b>不再連線、不錄新的</b>（直播中的話那一場停在那裡、照常收尾）；主播清單、等級、分類、<b>以前的場次全部留著</b>，照常轉檔、整理、照等級排隊上傳 YouTube、照保留天數刪原檔。</li><li>在主播分類移到最下面「⏸ 暫停監控（封存）」那區；<b>審核頁</b>也收到最下面同一欄「⏸ 封存」（保留原本的等級、照等級排、灰階，點進去一樣看以前的紀錄）。同一個選單按「▶ 恢復監控」就接回來。</li><li>封存中的主播又被<b>新增</b>（貼 TikTok 連結、@帳號、匯入）：會先問「目前封存中，要解封嗎？」— 解封＝移回來繼續監控；取消＝取消新增、維持封存。</li><li>每一次封存／解封都會記下來（時間、從哪裡按的），長按主播的小視窗最上面「🗄 封存紀錄」看得到。</li><li>跟「🗑 刪除主播」不一樣：刪除＝整位全部刪掉（等於標 F 再處置）。</li></ul>"},
-  {t:"只錄聲音的主播（照審核等級 G）",d:"<ul><li><b>在「主播審核」標 G＝只錄聲音</b>；改成別的等級就恢復錄影片。以前另外的「只錄聲音的主播」清單已經拿掉，程式每分鐘照等級對一次，以審核等級為準。</li><li>G 的主播直播中照樣錄畫面（FLV 先放 C 槽），下播後截 60 張圖＋字幕，自動傳 YouTube，傳好才移走原檔。</li><li>直播中每 <b>"+RU_V('rec.snap_min','分鐘',2)+"</b>另外拍一張快照，回放時在影片的位置左右翻看。</li></ul>"}]},
- {k:"play",i:"📺",c:"#4dc9ff",t:"回放與直播中觀看：延遲、預載入",s:[
-  {t:"為什麼要「+3 秒」",d:RU_BAR([[3,"留言／禮物（資料）","#4dc9ff"],[1,"約 3 秒","#f0ad4e"],[3,"畫面上才看到","#45d483"]])+"<ul><li>TikTok 的畫面比留言、禮物的資料<b>晚大約 3 秒</b>。所以在回放點一則留言或禮物，會跳到「那個時間 <b>+3 秒</b>」，畫面才對得上（秒數在回放設定可以改）。</li><li>送禮動畫也跟著這個延遲一起延後，畫面上出現禮物那一刻才跳動畫。</li><li>點<b>禮物</b>時會再<b>早 0.5 秒</b>落地，播放 0.5 秒後動畫完整出現。</li></ul>"},
-  {t:"看還在直播的場次（LIVE 時移）",d:RU_F([["錄影中的 FLV","#ff4d6d"],["切成 2 秒一片","#f0ad4e"],["手機／平板播放","#4dc9ff"]])+"<ul><li>還在直播、而且正在錄影的場次，回放會用「直播畫面（可回看）」：把錄影中的 FLV 切成 2 秒一片給手機播。</li><li>一打開先從<b>大約 30 秒前</b>開始，跟著最新畫面走；最新那一兩片寫到一半不給，所以最新畫面再晚約 4 秒，加上 TikTok 本身的延遲。</li><li>往回看：程式從尾巴往前<b>每次補 2 分鐘</b>（限速每秒約 3 MB，不搶錄影），補到哪裡才看得到哪裡，所以<b>剛打開時只能往回拉一點點</b>，等一下才能拉到開播。這就是「預載入速度會影響回放」。</li><li>同時最多 <b>3 位</b>主播用這種方式看；沒人看 <b>90 秒</b>就自動停掉、清掉暫存。</li></ul>"},
-  {t:"已經下播的回放",d:"<ul><li>播的是影片庫裡的 MP4，可以直接跳到任何位置（程式一次只送一小段，不會整支讀完）。</li><li>一場有好幾段影片時，照時間軸<b>一段接一段</b>播；中間沒錄到的地方自動跳過。</li><li>影片在傳統硬碟上，硬碟很忙（轉檔、搬檔、搬硬碟）時，開始播放和跳轉會慢一點。設定「手機回放加速」打開後，有人在手機看回放時背景工作全部讓路。</li><li>MP4 已經刪掉的場次：用刪之前截的 60 張圖（或 20 張）在影片的位置左右翻看，留言、禮物、M4A 照舊。</li><li>剪輯成品手機放不出畫面時（HEVC、10-bit…），背景自動用顯示卡轉一份相容的，原檔留著。</li></ul>"},
-  {t:"🚀 載入速度：快速通道與預載",d:"<ul><li>網頁的埠 <b>+1</b>（例如 8766）是<b>快速通道</b>：截圖、預覽大圖、縮圖、頭像、回放資料、影片都從這條拿，多執行緒、不排主程式畫面的隊。在外面（https）或連不到（Windows 防火牆）會<b>自動走原本的</b>；每天第一次會提示「🚀 已開」或「⚠ 連不到」。設定 →「🚀 圖片快速通道」可關。</li><li>回放：打開一場後，前後 6 場先在背景載好（資料＋第一頁截圖）；電腦端也先算好同一位主播前後各 2 場。歷史紀錄清單停在畫面上的場次、手指碰到的場次都先載。‹ › 中間的綠色小字＝這次換場花幾秒（⚡＝預載過）。</li><li>回放總覽用縮小版截圖（最近 14 天背景先做好），放大看、下載才用原圖。</li><li>檔案總管：往後 30 場、往回 2 場先載，最近 8 場整段大圖先載；電腦同時拼 4 張大圖（電腦忙時 1 張）。</li></ul>"},
-  {t:"平板版回放（4 格）",d:'<div class="ruQuad"><span>左上<br>💬 留言</span><span>右上<br>🎁 禮物</span><span>左下<br>🎵 點歌</span><span>右下<br>👋 進入</span></div>'+"<ul><li>右上角「📱 手機／▭ 平板」切換（預設看螢幕大小）。平板<b>橫著</b>看回放時，右邊分成 4 格，每格選要看什麼。</li><li>中間一條直線貫穿上下，左右兩欄的橫線<b>各自</b>拖，可以上下不對稱；點兩下恢復。大小和選擇會記住。</li><li>App 以後的修正手機、平板一起改，除非你說「平板更正」。</li></ul>"}]},
- {k:"grade",i:"🏷",c:"#ffc94d",t:"主播等級（🗂 主播審核）",s:[
-  {t:"每個等級的意思與自動規則",d:'<table class="ruT"><tr><th>等級</th><th>自動傳 YouTube</th><th>原檔（MP4）留多久</th><th>特別規則</th></tr>'+
-   '<tr><td>'+RU_G("S","無條件保存","#ffc94d")+'</td><td>✔ 最優先</td><td>傳好後再留 '+RU_V('ret.yt_keep_days','天',7)+'</td><td>還沒傳好前不受時間限制</td></tr>'+
-   '<tr><td>'+RU_G("A","保存","#45d483")+'</td><td>✔</td><td>傳好就刪</td><td></td></tr>'+
-   '<tr><td>'+RU_G("AD","A-Dance","#56e39f")+'</td><td>✔</td><td>傳好後再留 '+RU_V('ret.yt_keep_days','天',7)+'</td><td></td></tr>'+
-   '<tr><td>'+RU_G("AS","A-Sing","#f78fb3")+'</td><td>✔</td><td>傳好就刪</td><td></td></tr>'+
-   '<tr><td>'+RU_G("B","普通","#2ec4b6")+'</td><td>—</td><td>下播後 '+RU_V('ret.be_days','天',14)+'</td><td></td></tr>'+
-   '<tr><td>'+RU_G("E","觀察","#4dc9ff")+'</td><td>—</td><td>下播後 '+RU_V('ret.be_days','天',14)+'</td><td>C 槽快滿、要停錄影時：F 先停、再來 E、再來未分級</td></tr>'+
-   '<tr><td>'+RU_G("G","只錄聲音","#b48cff")+'</td><td>✔</td><td>傳好就刪</td><td>截 60 張＋字幕做好後才傳</td></tr>'+
-   '<tr><td>'+RU_G("F","刪除","#ff4d6d")+'</td><td>✖ 不傳</td><td>—</td><td>按「處置 F」會把這位整個刪掉</td></tr></table>'+
-   "<ul><li><b>「傳好」＝每個 MP4 都在 YouTube 處理好；刪之前會再問 YouTube 一次確認還在</b>。還在 YouTube 排隊、上傳中、處理中的，<b>不受時間限制</b>（所以理論上原檔不會留超過 14 天，除非排隊一直排不上）。</li><li>上面是預設值。審核頁「🏷 等級設定」可以新增、改名、改色、排序，也可以改每一級要不要傳 YouTube、傳好原檔要不要留（S、F、G 的特別作用不能刪）。</li><li>「傳 YouTube」的等級：那一場的轉檔、截圖、字幕、預覽圖都做好之後才自動上傳。</li></ul>"},
-  {t:"審核頁怎麼看",d:"<ul><li>每位主播所有場次、每 2 分鐘一張圖接成一長條（新的在上），用來決定等級。</li><li>圖只拿檔案總管已經做好的預覽圖，不另外跑 FFmpeg；還沒做好的先用 20 張截圖，都沒有就標「預覽圖排隊中」。</li></ul>"}]},
- {k:"lv",i:"🗂",c:"#45d483",t:"場次標記（−2／0／+1／+2）與刪除",s:[
-  {t:"四種標記",d:'<div class="ruLv"><span style="--c:#ff4d6d">−2 可丟</span><span style="--c:#f0ad4e">0 未分類</span><span style="--c:#45d483">+1 待剪輯</span><span style="--c:#2ec4b6">+2 保存</span></div>'+"<ul><li>在檔案總管按等級＝存好、自動捲到下一場。</li><li><b>沒按就滑到下一場＝上一場自動標 −2</b>；有選片段的話，那些片段先合併輸出成 1 部剪輯成品。按「↩ 復原自動 −2」可以還原。</li></ul>"},
-  {t:"−2 的場次要刪 MP4 時（重要）",d:'<div class="ruWarn">⚠ <b>只要這場有安排要傳 YouTube，就算你在檔案總管標了 −2、按了刪除，原檔也一定等 YouTube 傳完、處理好才會刪。</b></div>'+RU_F([["標 −2、按刪除","#ff4d6d"],["這場有安排傳 YouTube？","#f0ad4e"],["有 → 先不刪，等傳完","#4dc9ff"],["YouTube 處理好","#b48cff"],["隔離區 → 再確認 → 刪","#45d483"]])+
-   "<ul><li><b>「有安排傳 YouTube」</b>包括：① 主播等級設定要傳（S、A、A-Dance、A-Sing、G…），還沒傳完；② 已經在 YouTube 排隊中；③ 正在上傳（傳到一半的也算）；④ 已經傳上去、YouTube 還在處理。四種都一樣：<b>先不刪</b>。</li><li>還沒排進 YouTube 的會自動排進去；傳完、YouTube 處理好之後，才移到「YouTube 已上傳-刪除隔離區」，再問 YouTube 一次確認影片還在，才刪原檔。</li><li>不管從哪裡刪都一樣：檔案總管 −2、整理 MP4、剪輯完刪、刪主播、回放頁、手機、網頁。</li><li>沒有安排傳 YouTube 的場次：直接照你按的刪。</li><li>查不到 YouTube 狀態時<b>寧可先不刪</b>。</li><li>還在直播／錄影中的場次<b>不能刪影片</b>；正在剪輯的那場剪完才刪。</li></ul>"},
-  {t:"刪 MP4 之前一定先截圖",d:"<ul><li>不管從哪裡刪 MP4（歷史紀錄、檔案總管、整理 MP4、手機、網頁），刪之前先在影片 10%、20%…100% 各截圖，共 <b>60 張</b>（原檔不完整的 20 張），每張約 100 KB。</li><li>剪輯成品、留言、禮物、錄音全部留著；剪輯成品<b>永久保留</b>。</li><li>有 ⭐ 收藏片段的場次：刪 MP4／轉出時會跳過那些片段。</li></ul>"},
-  {t:"🗓 原檔保留期限（自動）",d:RU_F([["B／E：下播 "+RU_V('ret.be_days','天',14)+"","#2ec4b6"],["刪 MP4（先截 60 張）","#ff4d6d"]])+RU_F([["S／AD：YouTube 傳好","#ffc94d"],["再留 "+RU_V('ret.yt_keep_days','天',7)+"","#f0ad4e"],["隔離區 → 確認 YouTube → 馬上刪","#ff4d6d"]])+RU_F([["A／AS／G：YouTube 傳好","#45d483"],["隔離區 → 確認 YouTube → 馬上刪","#ff4d6d"]])+"<ul><li>每 30 分鐘檢查一次（開程式 10 分鐘後開始）；B／E 一次最多刪 10 場，慢慢來。</li><li><b>不動</b>：還在 YouTube 排隊／上傳中／處理中的、直播／錄影中、有 ⭐ 收藏片段、標 <b>+1 待剪輯</b>或 <b>+2 保存</b>的場次。</li><li>刪的只有 MP4：截圖、預覽圖、字幕、留言、禮物、M4A 錄音、剪輯成品都留著。設定「🗓 原檔保留期限」可以整個關掉。</li><li><b>💾 容量預測</b>（設定 → 電腦效能 → 容量變化，<b>長按圖表</b>）：可以模擬每個等級留幾天、YouTube 每天上限，看幾天會滿、平衡在多少 TB；按左下角「套用變更」確認 3 次後，每個等級改成各自的天數（傳 YouTube 的＝傳好後幾天，0＝傳好就刪；不傳的＝下播後幾天或永久），上面的 B／E、留原檔天數就以那邊為準。</li></ul>"},
-  {t:"程式自己會清的",d:"<ul><li><b>冗餘 14 天+</b>：放超過 14 天、沒有場次紀錄的 MP4（檔案總管「冗餘」那些）。</li><li><b>暫存</b>：只錄聲音的場次留著的 MP4，<b>5 天後</b>沒按「📌 留下」就自動刪。</li><li>每 30 秒一張的預覽圖：C 槽最多 "+RU_V('vg.cache_gb','GB',40)+"，超過從最久沒看的刪；要看時再做。精選用的每 2 秒圖保留 15 天、最多 "+RU_V('hl.keep2s_gb','GB',60)+"。</li></ul>"}]},
- {k:"yt",i:"▶",c:"#ff4d4d",t:"YouTube 上傳",s:[
-  {t:"上傳規則",d:"<ul><li>照「主播等級」自動上傳（見主播等級），也可以在 YouTube 上傳頁手動加。隱私預設<b>不公開</b>（搜尋不到，只有拿到網址的人看得到；回放頁可以內嵌 YouTube 跟留言同步播）。</li><li>每 <b>24 小時最多 "+RU_V('yt.daily','個',100)+"</b>，照<b>上傳完成時間滾動</b>算；頁面會顯示第 101 個什麼時候可以開始。額度用完自動等 6 小時。</li><li>速度上限 "+RU_V('yt.mbps','Mbps',20)+"，不搶錄影的網路；可以設只在某個時段開始傳新的。<b>正在傳的那部一定照傳完</b>，不會中途斷。</li><li>「幾天後全部傳完」會<b>扣掉每天新增的</b>（最近 7 天平均）：每天真正消化＝每天上限 − 每天新增。新增的比上限多就會寫「追不上」，並告訴你上限至少要調到多少。</li></ul>"},
-  {t:"先傳哪些",d:"<ul><li>現在是「<b>舊的場次先傳</b>」。S 級永遠最優先。</li><li><b>開播在最近 "+RU_V('yt.hold_new_days','天',3)+"內的場次先不傳</b>，留給合併同一場被切開的（YouTube 頁可以改天數，0＝不限）。已經開始傳的照傳完。</li></ul>"},
-  {t:"傳好之後",d:"<ul><li>YouTube 處理好會把網址存進那一場。</li><li>「傳好原檔留著」沒勾的等級：原檔移到「YouTube 已上傳-刪除隔離區」，"+RU_V('yt.hold_auto_h','小時',24)+"後再跟 YouTube 確認一次就自動刪（設定可以關掉自動刪）。</li></ul>"}]},
- {k:"bg",i:"✨",c:"#b48cff",t:"背景工作：精選、字幕、預覽圖、轉檔順序",s:[
-  {t:"誰先誰後",d:RU_F([["監控、錄影（永遠最先）","#ff4d6d"],["FLV → MP4 轉檔","#f0ad4e"],["語音轉字幕","#4dc9ff"],["預覽圖、截圖","#2ec4b6"],["✨ 精選（最後）","#b48cff"]])+"<ul><li>精選是非必要的工作，排最後：轉檔、字幕、搬檔、截圖在做，或 CPU 超過 "+RU_V('hl.max_cpu','%',55)+"、顯示卡超過 "+RU_V('hl.max_gpu','%',50)+"、硬碟忙超過 "+RU_V('hl.max_disk','%',50)+"時就先停（做到一半的之後重做那場）。</li><li>你正在檔案總管看的那場、排著要上傳 YouTube 的，精選和每 2 秒圖永遠先做。</li></ul>"},
-  {t:"語音轉字幕",d:"<ul><li>下播、錄音整理好後（約 5 分鐘）自動排進來，只在顯示卡加速版可以用時自動轉（CPU 轉太吃效能）。</li><li>每場最慢 6 小時轉完，程式算出剛好轉完需要的最低用量，平常顯示卡幾乎閒著；排隊到 8 成以上會自動加快。</li></ul>"},
-  {t:"以前留下的 FLV",d:"<ul><li>新的錄影一律自動轉。以前留在硬碟上的 FLV 預設不自動處理，到「FLV 待處理」勾選（V1.1.28 已經把積欠的一次全部排進去）。</li><li>一次轉一部；大部分只是換容器、直接複製畫面，速度看硬碟，顯示卡用不太到，這是正常的。</li></ul>"},
-  {t:"每日精選影片",d:"<ul><li>每天早上把前一天的精彩片段（不含 PK）剪成一支，最長 "+RU_V('reel.max_min','分鐘',30)+"、只留 "+RU_V('reel.keep','天',7)+"；你自己剪的成品不受影響。</li></ul>"}]},
- {k:"th",i:"🌡",c:"#f0ad4e",t:"控溫、斷電、效能保護（不准讓主程式過載）",s:[
-  {t:"CPU 預算",d:RU_BAR([[45,"整台 CPU 預算 45%（SortCut 有開）","#f0ad4e"],[55,"留給你和系統","#3a4250"]])+"<ul><li>背景的轉檔、合併、預覽、截圖、字幕全部算一組，用 Windows 內建的 CPU 硬上限壓住（只會變慢，不會停，最少留 "+RU_V('th.min','%',5)+"）。</li><li>上限＝整台預算 −（錄影和其他程式用的）。SortCut 有開時 "+RU_V('th.cpu','%',45)+"，沒開時 "+RU_V('th.cpu_solo','%',60)+"。<b>錄影、監控、畫面不受限制</b>。</li><li>顯示卡 <b>"+RU_V('th.gpu','°C',75)+"</b>以上，新的背景轉檔先等（跑到一半的照跑完，最多等 10 分鐘）。</li></ul>"},
-  {t:"斷電偵測（通知 SortCut）",d:"<ul><li>程式沒按「停止監控並退出」就沒了、而且電腦重開過，再對照事件檢視器的 Kernel-Power 41 → 判定為<b>非人為斷電</b>。</li><li>重開後通知 SortCut："+RU_V('th.alert_h','小時',12)+"內降到最低（Lv 1、CPU 最低、同時 1 個）；24 小時內斷電 "+RU_V('th.alert_stop_n','次',2)+"以上 → 叫 SortCut 停止轉檔至少 24 小時。TikLive 自己的背景重活也少 15%。</li><li>顯示卡供需頁可以「解除警報」。</li></ul>"},
-  {t:"💽 硬碟有壞掉的資料夾",d:"<ul><li>斷電可能讓硬碟的檔案系統壞掉一小塊，Windows 會跳「檔案或目錄已毀損…請執行 Chkdsk」。</li><li>程式不讓 Windows 跳這種視窗（以前按確定會一直重跳），改成記下那個路徑、之後跳過；快照要搬進去的資料夾壞了就改放 <b>_2</b>、_3 的新資料夾，回放照樣找得到。</li><li>狀態卡會出現「💽 硬碟檔案系統有錯」。處理：系統管理員命令提示字元 <b>chkdsk R: /scan</b>（只檢查，程式可以開著）→ 有錯再挑沒人在播的時候關掉 TikLive 跑 <b>chkdsk R: /spotfix</b>。</li></ul>"},
-  {t:"效能自我保護",d:"<ul><li>CPU 95% 以上超過 2 分鐘、錄影用的硬碟忙超過 85% 超過 1 分鐘，或 70 位以上同時在播且 CPU 超過 85% → 精選、預告、預覽圖、搜尋、報告先暫停，閒下來自動繼續。</li><li>主程式畫面卡住超過 "+RU_V('ui.freeze_rest_s','秒',6)+" → 自動切到不用更新的「休息畫面」，監控、錄影照常。</li><li>資料庫寫不進去：3 分鐘先停背景資料庫工作，10 分鐘重開卡住的連線，"+RU_V('health.restart_min','分鐘',20)+"自動重開程式。</li></ul>"}]},
- {k:"conn",i:"🔌",c:"#2ec4b6",t:"連線與開播檢查（不被 TikTok 擋）",s:[
-  {t:"多久查一次有沒有開播",d:'<table class="ruT"><tr><th>主播</th><th>檢查間隔</th></tr><tr><td>重點（紅色）</td><td>3 秒起，慢慢拉長到 '+RU_V('retry.priority','秒',10)+'</td></tr><tr><td>一般</td><td>'+RU_V('retry.normal','秒',60)+'（他平常開播的時段加快）</td></tr><tr><td>'+RU_V('conn.stale_days','天',7)+'以上沒開播</td><td>× '+RU_V('conn.stale_mult','倍',3)+'</td></tr><tr><td>帳號不存在（連續 3 次）</td><td>× 10</td></tr></table>'+"<ul><li>全部檢查排隊進行：續寫中的直播 → 重點 → 一般，<b>每分鐘最多 "+RU_V('conn.rate','次',80)+"</b>。TikTok 開始拒絕就自動放慢一級（45%）、最多兩級（22%），恢復正常 10 分鐘才加回來。</li><li>開播時間很固定的主播，快到平常時間前 3 分鐘就排到最前面。</li></ul>"},
-  {t:"重開程式不是萬靈丹",d:"<ul><li>TikTok 正在拒絕、或簽章額度用完時，重開程式不會換網址，反而會斷掉直播中的場次（程式會先提醒你）。</li></ul>"}]},
- {k:"upd",i:"☁",c:"#3a7bd5",t:"更新、搬硬碟、場次合併",s:[
-  {t:"雲端更新（GitHub）",d:RU_F([["開程式 1 分鐘後、每 6 小時檢查","#3a7bd5"],["有新版只提示","#f0ad4e"],["你按「更新」","#45d483"],["熱更新（不中斷錄影）","#2ec4b6"]])+"<ul><li><b>一定要你按才更新，不會自己重開</b>。下載限速、比對檔案完整才裝。</li><li>以後<b>只熱更新、絕對不換 EXE 外殼</b>（不會再要你關程式重裝）。</li><li>更新後有問題，可以在更新頁「退回前面的版本」（一樣不中斷錄影）。</li></ul>"},
-  {t:"場次合併（⧉ 合併重複場次）",d:RU_F([["第 1 段","#4dc9ff"],["第 2 段","#4dc9ff"],["第 3 段","#4dc9ff"],["⧉ 合併 → 1 場","#45d483"]])+"<ul><li>同一位主播、<b>TikTok 開播時間一樣（相差 "+RU_V('history.merge_tol','秒',60)+"內）</b>＝同一場直播，只是程式重開、斷電、斷線被切開。</li><li>合併後留言、禮物、送禮者、觀看人數都歸到同一場；<b>影片不重新輸出</b>，回放照時間一段接一段播，中間沒錄到的自動跳過。留下編號最大的那一場。</li><li>合併前自動備份資料庫；直播中的場次不會動（等它下播）。</li></ul>"},
-  {t:"搬硬碟（E → R，已完成）",d:"<ul><li>先複製、每個檔讀回來比對一樣才算數 → 第一輪搬完自動切換（錄影不停）→ 舊硬碟上的逐一確認後刪 → 「搬硬碟完成」。</li><li>舊硬碟上剩的十幾 GB 是 Windows 自己的（回收筒、系統還原、檔案系統本身），格式化就清掉。</li></ul>"}]},
- {k:"dev",i:"📱",c:"#9aa5b3",t:"手機、平板、網頁版",s:[
-  {t:"差別",d:"<ul><li>手機版與平板版是同一個 App，右上角切換；除了回放（平板 4 格），其他畫面一樣。</li><li>網頁版（電腦瀏覽器）：右下角可以調滾輪倍數（×0.5～×8）、「滾輪 ∿」絲滑開關、介面大小。每個瀏覽器自己記。</li><li>會改東西的操作（更新、刪除、合併、設定）都要密碼；只看的不用。</li></ul>"}]}
-];
-async function rulesMount(root){if(!root)return;
-  const st=(()=>{try{return JSON.parse(localStorage.getItem("tlm_rules_open")||"{}")||{};}catch(e){return {};}})();
-  const draw=(q)=>{q=(q||"").trim().toLowerCase();let n=0;
-    const h='<div class="ruHead"><b>📖 規則說明</b><div class="snote">程式實際怎麼做（照程式碼整理，V1.1.32）。看不懂、跟你遇到的不一樣，截圖跟我說，我改程式或改這裡。</div>'+
-     '<input class="ruQ" placeholder="🔍 找規則（例如：−2、YouTube、延遲、斷電）" value="'+(q?q.replace(/"/g,"&quot;"):"")+'"><div class="ruToc">'+RULES.map(c=>'<button data-go="'+c.k+'" style="--c:'+c.c+'">'+c.i+' '+c.t.split("：")[0].split("（")[0]+'</button>').join("")+'</div></div>'+
-     RULES.map(c=>{const S=c.s.filter(x=>!q||(c.t+x.t+x.d.replace(/<[^>]+>/g,"")).toLowerCase().includes(q));if(!S.length)return"";n+=S.length;const op=q||st[c.k]!==0;
-      return '<section class="ruC'+(op?" on":"")+'" id="ru_'+c.k+'" style="--c:'+c.c+'"><h3 data-k="'+c.k+'"><span>'+c.i+'</span>'+c.t+'<em>'+S.length+' 項</em><i>'+(op?"▾":"▸")+'</i></h3><div class="ruB">'+S.map(x=>'<div class="ruI"><h4>'+x.t+'</h4>'+x.d+'</div>').join("")+'</div></section>';}).join("")+(q&&!n?'<div class="ruNone">找不到「'+q+'」</div>':"");
-    root.innerHTML=h;rulesPaintVals(root);const qi=root.querySelector(".ruQ");qi.oninput=()=>{const v=qi.value,p=qi.selectionStart;draw(v);const q2=root.querySelector(".ruQ");q2.focus();try{q2.setSelectionRange(p,p);}catch(e){}};
-    root.querySelectorAll("h3[data-k]").forEach(h3=>h3.onclick=()=>{const k=h3.dataset.k,sec=h3.parentElement,o=!sec.classList.contains("on");sec.classList.toggle("on",o);h3.querySelector("i").textContent=o?"▾":"▸";st[k]=o?1:0;try{localStorage.setItem("tlm_rules_open",JSON.stringify(st));}catch(e){}});
-    root.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{const s=root.querySelector("#ru_"+b.dataset.go);if(s){s.classList.add("on");s.scrollIntoView({behavior:"smooth",block:"start"});}});};
-  draw("");rulesVals(root);}
-/* V1.1.35 規則裡的數字：讀現在的設定值；點 ✎ → 改數字 → 旁邊打勾「確認修改」才存（雙重確認） */
-async function rulesVals(root){const ks=[...new Set([...root.querySelectorAll(".ruV[data-k]")].map(x=>x.dataset.k))];if(!ks.length)return;
-  let j=null;try{j=await (typeof api==="function"?api:J)("/api/pc/rules/vals?k="+ks.join(","));}catch(e){}if(!j||!j.vals)return;RU_VALS=j.vals;rulesPaintVals(root);}
-let RU_VALS={};
-function rulesPaintVals(root){root.querySelectorAll(".ruV[data-k]").forEach(sp=>{const k=sp.dataset.k,V=RU_VALS[k];if(!V||sp._ed)return;const u=sp.dataset.u;
-  sp.innerHTML='<b>'+V.v+'</b> '+u+(V.v!==V.def?'<small title="預設 '+V.def+'">（預設 '+V.def+'）</small>':'')+'<i>✎</i>';sp.title=V.label+(V.help?'\n'+V.help:'')+'\n點一下可以改';
-  sp.onclick=e=>{if(sp._ed)return;e.stopPropagation();rulesEdit(root,sp);};});}
-function rulesEdit(root,sp){const k=sp.dataset.k,V=RU_VALS[k],u=sp.dataset.u;sp._ed=1;sp.classList.add("ed");
-  sp.innerHTML='<input type="number" class="ruIn" value="'+V.v+'"'+(V.min!=null?' min="'+V.min+'"':'')+(V.max!=null?' max="'+V.max+'"':'')+(V.step!=null?' step="'+V.step+'"':'')+'> '+u+' <label class="ruCk"><input type="checkbox" disabled> 確認修改</label><button class="ruX" title="不改">✕</button>';
-  const inp=sp.querySelector(".ruIn"),ck=sp.querySelector(".ruCk input"),lb=sp.querySelector(".ruCk");inp.focus();inp.select();
-  const close=()=>{sp._ed=0;sp.classList.remove("ed");rulesPaintVals(root);};
-  inp.oninput=()=>{const n=parseFloat(inp.value),bad=isNaN(n)||(V.min!=null&&n<V.min)||(V.max!=null&&n>V.max);ck.disabled=bad||n===V.v;lb.classList.toggle("go",!ck.disabled);lb.title=bad?("範圍 "+(V.min??"")+"～"+(V.max??"")):"";};
-  inp.onkeydown=e=>{if(e.key==="Escape")close();};sp.querySelector(".ruX").onclick=e=>{e.stopPropagation();close();};
-  sp.onclick=e=>e.stopPropagation();
-  ck.onchange=async()=>{if(!ck.checked)return;const n=parseFloat(inp.value);ck.disabled=true;inp.disabled=true;
-    const f=(typeof kPost==="function"?kPost:rvPost);let r=null;try{r=await f("/api/pc/rules/set",{k,v:n});}catch(e){}
-    if(r&&r.ok){RU_VALS[k].v=r.value;if(typeof toast==="function")toast("✔ "+(r.message||"已改"),3000);close();root.querySelectorAll('.ruV[data-k="'+k+'"]').forEach(x=>{x.classList.add("done");setTimeout(()=>x.classList.remove("done"),2500);});}
-    else{if(typeof toast==="function")toast("✖ "+((r&&r.message)||"沒有改成"),3500);ck.checked=false;ck.disabled=false;inp.disabled=false;}};}
-
-async function migMount(root){   /* V1.1.07／1.1.08 💽 E → R 搬硬碟（照 SortCut「R 碟清空搬移」的樣子） */
-  const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-  const G=b=>b==null?"—":b>=1e12?(b/1e12).toFixed(2)+" TB":b>=1e9?(b/1e9).toFixed(1)+" GB":b>=1e6?(b/1e6).toFixed(1)+" MB":Math.round(b/1e3)+" KB";
-  const MB=v=>v==null?"—":(v/1048576)>=10?(v/1048576).toFixed(1)+" MB/s":(v/1048576)>=0.1?(v/1048576).toFixed(2)+" MB/s":Math.round(v/1024)+" KB/s";
-  const T=t=>t?new Date(t*1000).toLocaleTimeString("zh-TW",{hour12:false}):"—";
-  const H=s=>{s=Math.max(0,s||0);const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return d?`${d} 天 ${h} 小時`:h?`${h} 小時 ${m} 分`:`${m} 分`;};
-  const post=async(o)=>{const f=(typeof kPost==="function"?kPost:rvPost);const r=await f("/api/pc/mig/set",o);if(typeof toast==="function"&&r&&r.message)toast((r.ok!==false?"✔ ":"✖ ")+r.message);return r;};
-  const spark=(vals,max,col,dash,fill)=>{const n=vals.length;if(n<2)return"";const W=300,Hh=70,pts=vals.map((v,i)=>[(i/(n-1)*W).toFixed(1),(Hh-Math.min(1,(v||0)/(max||1))*(Hh-4)-2).toFixed(1)]);
-    const p=pts.map(x=>x.join(",")).join(" ");return (fill?`<polygon points="0,${Hh} ${p} ${W},${Hh}" fill="${col}" opacity=".18"/>`:"")+`<polyline points="${p}" fill="none" stroke="${col}" stroke-width="1.6" ${dash?'stroke-dasharray="4 3"':""}/>`;};
-  const grid=()=>{let g="";for(let i=1;i<10;i++)g+=`<line x1="${i*30}" y1="0" x2="${i*30}" y2="70" stroke="rgba(127,140,160,.18)"/>`;for(let i=1;i<4;i++)g+=`<line x1="0" y1="${i*17.5}" x2="300" y2="${i*17.5}" stroke="rgba(127,140,160,.18)"/>`;return g;};
-  function dcard(lab,role,col,busyArr,rwArr,cur,curRw){const mx=Math.max(1048576,...rwArr.map(x=>Math.max(x?x[0]:0,x?x[1]:0)));
-    return `<div class="mgD" style="--c:${col}"><div class="mgDh"><b>💽 ${esc(lab)}</b><span class="mgTag">${role}</span><em>${cur==null?"—":Math.round(cur)+"%"}</em></div>
-      <div class="mgCl"><span>使用率</span><span>100%</span></div><svg viewBox="0 0 300 70" preserveAspectRatio="none" class="mgSv">${grid()}${spark(busyArr,100,col,false,true)}</svg>
-      <div class="mgCl"><span>傳輸速率</span><span>${MB(mx)}</span></div><svg viewBox="0 0 300 70" preserveAspectRatio="none" class="mgSv sm">${grid()}${spark(rwArr.map(x=>x?x[0]:0),mx,col,true)}${spark(rwArr.map(x=>x?x[1]:0),mx,col,false)}</svg>
-      <div class="mgCl b"><span>--- 讀 ${MB(curRw?curRw[0]:null)}</span><span>— 寫 ${MB(curRw?curRw[1]:null)}</span></div></div>`;}
-  async function draw(){if(!root.isConnected)return;
-    if(root.contains(document.activeElement)&&document.activeElement.tagName==="INPUT"){clearTimeout(root._t);root._t=setTimeout(draw,2500);return;}
-    let j;try{j=await (typeof api==="function"?api:J)("/api/pc/mig");}catch(e){j=null;}
-    if(!j||!j.ok){root.innerHTML='<div class="sbkE">讀不到</div>';clearTimeout(root._t);root._t=setTimeout(draw,5000);return;}
-    const D=j.disk||{},s=D.src||{},d=D.dst||{},ph=j.phase,now=Date.now()/1000;
-    const Hs=j.hist||[],last=Hs[Hs.length-1]||{},cp=j.pass||{};
-    const mineArr=Hs.map(x=>x.mine||0),recent=mineArr.length?mineArr.reduce((a,b)=>a+b,0)/mineArr.length:0;
-    const avg=j.avg||(j.tot_s>0?j.tot_b/j.tot_s:0),used=s.used||0,pct=used?Math.min(100,j.copied_b/used*100):0;
-    const rate=(j.eta_rate>1e5?j.eta_rate:recent>1e5?recent:avg),left=Math.max(0,used-j.copied_b),eta=(ph==="copy"&&!j.paused&&rate>1e5)?left/rate:null;   /* V1.1.17 照最近 1 小時真的在搬的速度（斷電、關程式、暫停那段不算）；不到 10 分鐘先照最近 6 分鐘 */
-    const rateTxt=j.eta_rate>1e5?`照最近 ${Math.round(Math.min(3600,j.eta_win||0)/60)} 分鐘 ${MB(rate)}`:recent>1e5?`照最近 6 分鐘 ${MB(rate)}，1 小時後改用 1 小時平均`:`照平均 ${MB(rate)}`;
-    const leftN=Math.max(0,(j.src_files||0)-(j.copied_n||0));
-    const pill={idle:["還沒開始","g"],copy:j.paused?["⏸ 暫停中","w"]:j.cur||j.curf?["▶ 搬移中","ok"]:j.why?["⏳ "+(j.why.length>14?"等待中":j.why),"w"]:["▶ 搬移中","ok"],final:["🔁 切換中","w"],handoff:["🔄 換新版接手中","w"],switched:["✔ 已切換","ok"],verify:["✔ 從 "+j.dst+" 執行中","ok"],cleaning:["🧹 清空中","w"],done:["✔ 搬完了","ok"]}[ph]||[ph,"g"];
-    let h=`<div class="mgCard"><div class="mgRow1"><b>⚡ 傳輸速度</b><span class="mgBigV">${j.mbps} <small>MB/s</small></span><span class="mgChip">🧠 自動讓路</span></div>
-      <input type="range" class="mgRange" min="5" max="300" step="5" value="${j.mbps}"><div class="mgTicks"><span>5</span><span>慢・省力</span><span>50</span><span>全速</span><span>300 MB/s</span></div>
-      <div class="mgSmall">現在 ${MB(last.mine)} · ✋ 上限 ${j.mbps} MB/s · 💽 ${j.src} ${last.sb==null?"—":Math.round(last.sb)+"%"} ${j.dst} ${last.db==null?"—":Math.round(last.db)+"%"}</div>
-      <div class="mgSmall">確認：<span class="mgChip on">🔎 完整讀回</span> 每個檔寫完都讀回來比對（CRC），一樣才改成正式檔</div>
-      ${j.why&&ph==="copy"?`<div class="mgSmall w">⏳ ${esc(j.why)}</div>`:""}${j.slow&&ph==="copy"?`<div class="mgSmall w">💽 硬碟很忙（${j.slow.busy!=null?j.slow.busy+"%":"≥95%"}）：自動降到 ${j.slow.mbps} MB/s，不忙了會慢慢升回來</div>`:""}</div>`;
-    h+=`<details class="mgHow"><summary>🚚 怎麼搬的（按一下看）</summary><ol>
-      <li>${j.src} 整顆照原本的資料夾複製到 ${j.dst}（回收桶、系統資料夾不搬）；搬的期間程式照舊用 ${j.src}，新錄的也會跟著複製。</li>
-      <li>每個檔：先寫成暫存檔 → 寫進硬碟 → 讀回來比對 → 一樣才改成正式檔；斷電只丟掉那一個暫存檔，開機後接著做。</li>
-      <li>錄好的影片在搬進硬碟、硬碟或 CPU 很忙、太熱、剛斷電過 → 自己先停，讓監控先。</li>
-      <li>${j.src} 上刪掉／改過的，${j.dst} 也跟著；一輪做完沒東西可搬就 30 分鐘再看一次。</li>
-      <li>要關機裝硬碟時按「切換到 ${j.dst}」：補最後差異、改路徑；重開機從 ${j.dst} 執行沒問題，才按「清空 ${j.src}」。</li></ol></details>`;
-    h+=`<div class="mgDisks">${dcard(j.src,"來源","#f5a524",Hs.map(x=>x.sb),Hs.map(x=>x.srw),last.sb,last.srw)}${dcard(j.dst,"目的","#45d483",Hs.map(x=>x.db),Hs.map(x=>x.drw),last.db,last.drw)}</div>`;
-    h+=`<div class="mgCard mgMain"><div class="mgRow1"><span class="mgPct">${pct.toFixed(1)}<small>%</small></span><span class="mgPill ${pill[1]}">${esc(pill[0])}</span></div><div class="mgBar"><i style="width:${pct.toFixed(2)}%"></i></div>
-      <div class="mgTiles">
-       <div><small>已複製（比對過）</small><b>${G(j.copied_b)}</b><i>${(j.copied_n||0).toLocaleString()} 個</i></div>
-       <div><small>還剩</small><b>${G(left)}</b><i>${j.src_files?leftN.toLocaleString()+" 個（上一輪算的）":"第一輪還在算"}</i></div>
-       <div><small>最近 6 分鐘速度</small><b>${MB(recent)}</b><i>${j.src} 讀 ${MB(last.srw?last.srw[0]:null)}</i></div>
-       <div><small>平均速度</small><b>${MB(avg)}</b><i>${j.t_start?"已經跑了 "+H(now-j.t_start):""}</i></div>
-       <div class="${eta?"hi":""}"><small>預計完成</small><b>${eta?new Date((now+eta)*1000).toLocaleString("zh-TW",{hour12:false,month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}):"—"}</b><i>${eta?"還要 "+H(eta)+"（"+rateTxt+"）":j.passes?"第一輪完成了，持續同步":"—"}</i></div>
-       <div><small>沒複製成</small><b class="${j.failed?"bad":""}">${j.failed||0}</b><i>原檔都還在 ${j.src}</i></div></div>
-      <div class="mgSmall">${j.dst} 剩 ${G(d.free)}／${G(d.total)} · ${j.src} 用了 ${G(used)} · 已掃完 ${j.passes||0} 輪${cp.scanning?` · 🔎 掃描中（已看 ${(cp.files||0).toLocaleString()} 個）`:cp.todo?` · 這一輪要搬 ${cp.todo.toLocaleString()} 個，還剩 ${G(cp.todo_b)}（大檔先、小檔最後）`:""}</div></div>`;
-    const cf=j.curf;
-    h+=`<div class="mgSec">📄 正在處理</div>`;
-    if(cf){const p=cf.size?Math.min(100,cf.done/cf.size*100):100;h+=`<div class="mgCur"><div class="mgCi">📥</div><div class="mgCm"><b>${esc(String(cf.rel).split(/[\\/]/).pop())}</b><small>${cf.stage==="比對"?"讀回來比對":"複製到 "+j.dst} · ${G(cf.size)} · ${Math.round(now-cf.t0)} 秒${cf.stage==="複製"?" · "+MB(cf.spd):""}</small></div><span class="mgCp">${p.toFixed(1)}%</span><div class="mgBar sm"><i style="width:${p}%"></i></div><small class="mgPath">${esc(j.dst)}\\${esc(cf.rel)}</small></div>`;}
-    else if(j.cur)h+=`<div class="mgCur"><div class="mgCi">📥</div><div class="mgCm"><b>${esc(String(j.cur).split(/[\\/]/).pop())}</b><small>複製到 ${j.dst} · ${MB(last.mine)}</small></div><span class="mgCp"></span><small class="mgPath">${esc(j.dst)}\\${esc(j.cur)}</small></div>`;
-    else h+=`<div class="mgCur idle"><div class="mgCi">⏸</div><div class="mgCm"><b>${ph==="copy"?(j.why?esc(j.why):"等下一個"):"沒有在搬"}</b></div></div>`;
-    const vc=j.vcur;
-    h+=`<div class="mgCur ${cf&&cf.stage==="比對"||vc?"":"idle"}"><div class="mgCi">🔎</div><div class="mgCm"><b>${vc?"二次比對："+esc(String(vc.rel).split(/[\\/]/).pop()):cf&&cf.stage==="比對"?"讀回來比對："+esc(String(cf.rel).split(/[\\/]/).pop()):"確認：沒有"}</b><small>每個檔複製完馬上讀回來比對一次；第一輪搬完後，趁閒再把 ${j.dst} 上的全部讀一次跟指紋比（二次比對）。已二次比對 ${(j.v2_n||0).toLocaleString()} 個（${G(j.v2_b)}）</small></div>${vc?`<span class="mgCp">${(vc.size?Math.min(100,vc.done/vc.size*100):0).toFixed(1)}%</span>`:""}</div>`;
-    if(ph==="idle")h+=`<button class="btn mgWide" data-mg="start">▶ 開始複製 ${j.src} → ${j.dst}</button>`;
-    if(ph==="copy")h+=`<div class="mgBtns"><button class="btn s mgWide" data-mg="pause" data-v="${j.paused?0:1}">${j.paused?"▶ 繼續":"⏸ 暫停（手上正在搬的做完再停）"}</button><button class="btn s" data-mg="kick">🔎 馬上再掃一輪</button></div>`;
-    if(ph==="copy")h+=`<div class="migStep"><b>接下來會自動做：</b>第一輪搬完 → <b>自動切換到 ${j.dst}</b>（錄影、監控不停，之後新的錄影都直接進 ${j.dst}）→ ${j.src} 上搬好的逐一確認後刪掉。<br><b>回家要關機時：</b>按「🏁 收尾」→ 看右下角進度 → 顯示「可以關機了」→ 停止監控並退出、關機 → 換硬碟。<br><button class="btn" data-mg="tail_final" ${(j.passes||0)<1?"disabled":""}>🏁 收尾（準備關機）</button>${(j.passes||0)<1?`<small>第一輪複製完才能按（搬完會自動切換）</small>`:""}</div>`;
-    if(ph==="final")h+=`<div class="migStep">🔁 ${esc(j.final||"切換中")}…（錄影、監控照常）</div>`;
-    if(ph==="switched"){const T=j.tail||{},rd=T.ready,fs=T.fast;
-      h+=`<div class="migStep ok">✔ 已切換：新的錄影都直接進 ${j.dst}，${j.src} 不會再有新檔進來。改了 ${j.rewrote||0} 處存起來的路徑。<br>
-      ${j.src} 上搬好的：每 10 分鐘逐一確認（${j.dst} 上一樣大、複製時讀回來比對過）就刪掉；放超過 30 分鐘沒動的才刪。程式資料夾裡的設定、頭像這些小檔重開前還在用，只複製、不刪（${j.dst} 上都有）。<br>
-      <b>收尾：</b>${T.stage==="補複製"?"補複製中…":T.stage==="確認後刪除"?"確認後刪除中…":"等下一輪"}${T.t_last?` · ${j.src} 上還有 <b>${(T.left_n||0).toLocaleString()} 個（${G(T.left_b||0)}）</b>要處理`:""} · 已刪 ${(T.deleted||0).toLocaleString()} 個（${G(T.deleted_b||0)}）${T.copied?` · 補複製 ${T.copied} 個`:""}${T.keep_n?` · 程式小檔 ${T.keep_n} 個（只複製）`:""}</div>`;
-      h+=rd?`<div class="migStep ok" style="font-size:1.1em">✅ <b>收尾完成，可以關機了</b>${T.left_n?`（${j.src} 上還有 ${T.left_n} 個刪不掉的，${j.dst} 上都有）`:""}<br>① 按「停止監控並退出」 → ② 關機 → ③ 把 ${j.dst} 接 SATA 裝進主機、拔掉 ${j.src} → ④ 開機 → ⑤ 磁碟管理確認新硬碟是 <b>${j.dst}</b> 槽 → ⑥ 開程式（找不到 ${j.dst} 會先不監控）</div>`
-        :`<button class="btn mgWide" data-mg="tail_final" ${fs?"disabled":""}>${fs?"🏁 收尾中…（全速）":"🏁 收尾（準備關機）"}</button>`;}
-    if(ph==="verify"){const T=j.tail||{};h+=`<div class="migStep ok">✔ 現在從 ${j.dst} 執行（影片資料夾：${esc(j.video_root)}），${j.src} 是外接的舊硬碟。<br>
-      ${j.src} 上的每 10 分鐘自動比對一輪：${j.dst} 上有一樣的 → 確認後刪；${j.dst} 上沒有的 → 放回 ${j.dst} 同一個位置再刪；不一樣的不蓋掉 ${j.dst} 在用的，放到 ${j.dst}\\從E槽多出來的。全部處理完會顯示「搬硬碟完成」，${j.src} 就是空的。<br>
-      <b>現在：</b>${T.stage==="確認後刪除"?"比對、刪除中…"+(T.cur?" "+esc(String(T.cur).split(/[\\/]/).pop()):""):"等下一輪"} · 已刪 ${(T.deleted||0).toLocaleString()} 個（${G(T.deleted_b||0)}）${T.t_last?` · ${j.src} 上還有 <b>${(T.left_n||0).toLocaleString()} 個（${G(T.left_b||0)}）</b>`:""}${T.copied?` · 放回 ${T.copied} 個`:""}${T.extra?` · 不一樣的 ${T.extra} 個`:""}${T.err?` · 錯誤 ${T.err} 個（下一輪再試）`:""}</div>
-      <button class="btn mgWide" data-mg="tail_final" ${T.fast?"disabled":""}>${T.fast?"⚡ 全速處理中…":"⚡ 全速處理（不用等）"}</button>`;}
-    if(ph==="done"&&j.clean)h+=`<div class="migStep ok">✔ ${j.src} 清空了 ${j.clean.files} 個檔（${G(j.clean.bytes)}）${j.clean.extra?`，另外 ${j.clean.extra} 個切換後才有的放到 ${j.dst}\\從E槽多出來的`:""}${j.clean.junk?`（其中 ${j.clean.junk} 個是暫存檔／已轉好的 FLV，直接刪）`:""}${j.clean.err?`，錯誤 ${j.clean.err} 個`:""}。<br><b>搬硬碟完成，${j.src} 可以拔掉了。</b>${j.clean.sys_b?`${j.src} 上還用著的 ${G(j.clean.sys_b)} 是 Windows 自己的（資源回收筒、系統還原、檔案系統本身），不是 TikLive 的資料，格式化就清掉。`:""}</div>`;
-    const JK=j.junk||{},JL=[["tmp","寫到一半的暫存檔（.copying／.part…）","不搬，清空 "+j.src+" 時一起刪"],["flv_done","已經轉好 MP4 的 FLV","旁邊有同名 MP4：不搬，清空 "+j.src+" 時一起刪"],["flv_todo","還沒轉檔的 FLV","是錄影原始檔：照常搬過去，之後在 "+j.dst+" 轉"]].filter(x=>JK[x[0]]&&JK[x[0]][0]);
-    if(JL.length)h+=`<div class="mgSec">🗑 不搬的垃圾／要注意的檔${j.junk_t?`<small style="opacity:.6;font-weight:400">（上一次掃描 ${new Date(j.junk_t*1000).toLocaleString("zh-TW",{hour12:false,month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}）</small>`:""}</div><div class="mgList">${JL.map(([k,t,d])=>`<details><summary><b>${t}</b> ${JK[k][0].toLocaleString()} 個 · ${G(JK[k][1])}<small> — ${d}</small></summary>${JK[k][2].map(p=>`<div class="mgJp">${esc(p)}</div>`).join("")}${JK[k][0]>JK[k][2].length?`<div class="mgJp">…還有 ${(JK[k][0]-JK[k][2].length).toLocaleString()} 個</div>`:""}</details>`).join("")}</div>`;   /* V1.1.12 */
-    const rc=j.recent||[];
-    h+=`<div class="mgSec">✅ 最近搬好的</div><div class="mgList">${rc.length?rc.map(x=>`<div><span class="ok">✔</span><div><b>${esc(String(x.rel).split(/[\\/]/).pop())}</b><small>${G(x.size)} → ${j.dst} · 複製 ${x.tc} 秒 · 比對 ${x.tv} 秒</small></div><i>${T(x.t)}</i></div>`).join(""):`<div class="mgE">還沒有（這次開程式之後搬好的會列在這裡）</div>`}</div>`;
-    if((j.errors||[]).length)h+=`<details class="migErr"><summary>⚠ 最近的問題（${j.errors.length}）</summary>${j.errors.slice().reverse().map(e=>`<div><i>${new Date(e[0]*1000).toLocaleString("zh-TW",{hour12:false})}</i> ${esc(e[1])}</div>`).join("")}</details>`;
-    const op_=[...root.querySelectorAll("details")].map((d,i)=>d.open?(d.className||"")+"|"+(d.querySelector("summary")||{}).textContent:"").filter(Boolean);   /* V1.1.22 點開的不會被重畫收起來 */
-    root.innerHTML=h;if(op_.length)root.querySelectorAll("details").forEach(d=>{const k=(d.className||"")+"|"+(d.querySelector("summary")||{}).textContent;if(op_.some(x=>x.split("|")[0]===(d.className||"")&&x.split("|")[1].slice(0,6)===k.split("|")[1].slice(0,6)))d.open=true;});clearTimeout(root._t);root._t=setTimeout(draw,4000);}
-  root.onclick=async e=>{const b=e.target.closest("[data-mg]");if(b){const op=b.dataset.mg;
-      if(op==="tail_final"&&!confirm("收尾？\n\n全速把舊硬碟上剩的補到新硬碟、確認後刪掉。錄影、監控照常，不用停。\n完成會顯示「可以關機了」。"))return;
-      if(op==="final"&&!confirm("切換到新硬碟？\n\n會先暫停搬進硬碟幾分鐘、補最後差異，再把程式改成用新硬碟。錄影、監控照常。\n切換好之後就可以關機裝硬碟。"))return;
-      if(op==="clean"&&(!confirm("清空來源硬碟？\n\n只刪新硬碟上確定有一樣大小的檔；切換後才改過的會先複製一份過去再刪。")||prompt("確定的話請輸入：清空")!=="清空"))return;
-      await post({op,v:b.dataset.v==="1"});draw();}};
-  root.oninput=e=>{if(e.target.classList.contains("mgRange")){const v=root.querySelector(".mgBigV");if(v)v.innerHTML=e.target.value+" <small>MB/s</small>";}};
-  root.onchange=async e=>{if(e.target.classList.contains("mgRange")){await post({op:"mbps",v:+e.target.value});e.target.blur();draw();}};
-  draw();}
-async function gsdMount(root,days){days=days||14;root.innerHTML='<div class="sbkE">計算中…</div>';   /* TK_V1.0.84 🎛 顯示卡供需 */
-  const j=await (typeof api==="function"?api:J)("/api/pc/gpusd?days="+days);if(!j||!j.ok){root.innerHTML='<div class="sbkE">讀不到</div>';return;}
-  const e_=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));const mn=Math.round(j.ratio*60*10)/10;
-  const R=j.rows.slice().reverse();const mx=Math.max(1,...j.rows.map(r=>r.rec_h));
-  const T=j.th||{};const thH=T.on?`<div class="hpTop ${T.hot?"bad":"ok"}"><b>🌡 控溫開著：背景轉檔／字幕整組 CPU ${T.cap!=null?"最多 "+T.cap+"%":"（還沒有背景重活在跑）"}${T.hot?` · 顯示卡 ${Math.round(T.gtemp)}°C 太熱，新的先等`:""}</b><small>整台預算 ${T.budget!=null?T.budget:T.cpu}%（${T.sc!=null?"SortCut 有開":"SortCut 沒開"}）− 錄影和其他 ${T.others??"—"}% · 現在用 ${T.job??0}%（${T.active||0} 個在跑）${T.gtemp?` · 顯示卡 ${Math.round(T.gtemp)}°C／上限 ${T.glim}°C`:""}${T.err?` · ⚠ ${e_(T.err)}`:""}。設定 → 自動處理 → 🌡 可以改。</small></div>`+(T.alert?`<div class="hpTop bad"><b>⚡ 電腦斷電重開過：已叫 SortCut ${T.alert.mode==="stop"?"停止轉檔":"降到最低"}（到 ${new Date(T.alert.until*1000).toLocaleString("zh-TW",{hour12:false})}）</b><small>24 小時內斷電 ${T.alert.n24} 次、7 天 ${T.alert.n7d} 次 · ${T.ack_ok?"✔ SortCut 已配合："+e_(T.ack.did||T.ack.mode||""):"SortCut 還沒回應（它更新支援後會回）"}${T.alert.evidence?" · "+e_(T.alert.evidence):""}</small></div><div class="hoB"><button class="pill" data-tha="clear">解除警報（SortCut 恢復正常）</button></div>`:"")+((T.power7||[]).length?`<div class="sbkN">最近 7 天沒正常關閉：${T.power7.map(r=>`${new Date(r.t*1000).toLocaleString("zh-TW",{hour12:false})} ${r.kind==="power"?"⚡ 斷電":r.kind==="crash"?"程式沒了":"有人重開"}`).join("、")}</div>`:""):`<div class="hpTop warn"><b>🌡 控溫關著</b><small>主機板會過熱斷電的話，到設定 → 自動處理 → 🌡 控溫打開。</small></div>`;   /* TK_V1.0.100 */
-  root.innerHTML=thH+`<div class="hpTop ${j.lv}"><b>${j.lv==="ok"?"✔ ":j.lv==="warn"?"⚠ ":"❗ "}${e_(j.v)}</b><small>最近 ${j.days} 天 · ${e_(j.gpu||"沒有顯示卡")}${j.use_gpu?"":"（字幕現在用 CPU 轉）"}</small></div>
-  <div class="hpX gsdX">
-  <div><small>每天平均錄到（要轉字幕的量）</small><b>${j.avg_rec_h} 小時 · ${j.avg_rec_n} 場</b></div>
-  <div><small>全速轉完一天的量要</small><b>${j.need_h} 小時 · 一天的 ${j.load}%</b></div>
-  <div><small>字幕速度（${j.learned?`學了 ${j.learned} 場`:"預設值"}）</small><b>1 小時錄音 ≈ ${mn} 分鐘</b></div>
-  <div><small>每天平均轉完</small><b>${j.avg_done_n} 場</b></div>
-  <div><small>現在排隊</small><b>${j.q} 場${j.q_age!=null?` · 最舊的 ${j.q_age} 天前`:""}</b></div>
-  <div><small>顯示卡 閒／輕／忙（每分鐘平均）</small><b>${j.idle_pct!=null?`${j.idle_pct}%／${j.light_pct}%／${j.busy_pct}%`:"這版開始記錄"}</b></div></div>
-  <div class="sbkN">怎麼看：<b>全速要幾 %</b> 是「顯示卡全力轉，一天要花多少時間才轉得完當天錄到的」——低於 50% 就很充裕。實際上背景是用低功耗慢慢轉（每場最慢 ${j.plan&&j.plan.hours||6} 小時內轉完、最少用 ${j.plan&&j.plan.min||20}% 力氣），所以排隊有十幾場是正常的；要看的是<b>排隊最舊的那場是不是超過 2 天</b>、排隊數是不是每天越來越多。<br>閒＝顯示卡用不到 10%、輕＝10～35%、忙＝35% 以上；${j.hist_min?`已經記了 ${Math.round(j.hist_min/60)} 小時`:"更新後每分鐘記一筆，明天開始就看得到每天的比例"}。</div>
-  <div class="hoT">📅 每天</div><div class="gsdT"><div class="gsdH"><span>日期</span><span>錄到</span><span>轉完字幕</span><span>顯示卡 閒／輕／忙</span></div>
-  ${R.map(r=>{const m=r.m||0,pi=m?r.idle/m*100:0,pl=m?r.light/m*100:0,pb=m?r.busy/m*100:0;return `<div class="gsdR"><span>${r.d.slice(5)}</span><span><i class="gsdB" style="width:${Math.round(r.rec_h/mx*100)}%"></i><em>${r.rec_h}h · ${r.rec_n} 場</em></span><span><em>${r.done_n} 場${r.done_h?` · ${r.done_h}h`:""}</em></span><span>${m?`<i class="gsdG"><u style="width:${pi}%"></u><u style="width:${pl}%"></u><u style="width:${pb}%"></u></i><em>${Math.round(pi)}／${Math.round(pl)}／${Math.round(pb)}%${r.g!=null?` · 平均 ${r.g}%`:""}${r.q1!=null?` · 排隊 ${r.q0}→${r.q1}`:""}</em>`:"<em>—</em>"}</span></div>`;}).join("")}</div>
-  <div class="hoB">${[7,14,30].map(d=>`<button class="pill${d===j.days?" on":""}" data-d="${d}">${d} 天</button>`).join("")}<button class="pill" data-d="${j.days}">↻ 重新計算</button></div>`;
-  root.onclick=async e=>{const t=e.target.closest("[data-tha]");if(t){if(!confirm("解除斷電警報？SortCut 會恢復正常速度。"))return;const r=await (typeof kPost==="function"?kPost:rvPost)("/api/pc/th/alert",{op:"clear"});if(typeof toast==="function")toast((r&&r.ok?"✔ ":"✖ ")+((r&&r.message)||""));gsdMount(root,days);return;}const b=e.target.closest("[data-d]");if(b)gsdMount(root,+b.dataset.d);};}
-async function hpMount(root){root.innerHTML='<div class="sbkE">檢查中…</div>';   /* TK_V1.0.69 🩺 一頁健檢 */
-  const j=await (typeof api==="function"?api:J)("/api/pc/health");if(!j||!j.ok){root.innerHTML='<div class="sbkE">讀不到</div>';return;}const X=j.x||{},I=j.items||[];
-  const nb=I.filter(x=>x.lv==="bad").length,nw=I.filter(x=>x.lv==="warn").length;const ago=t=>{if(!t)return "沒有";const h=(Date.now()/1000-t)/3600;return h<1?"不到 1 小時前":h<48?Math.round(h)+" 小時前":Math.round(h/24)+" 天前";};
-  root.innerHTML=`<div class="hpTop ${nb?"bad":nw?"warn":"ok"}"><b>${nb?`❗ 有 ${nb} 件要馬上處理`:nw?`⚠ 有 ${nw} 件要留意`:"✔ 一切正常"}</b><small>${new Date(j.t*1000).toLocaleTimeString()} 檢查 · 共 ${I.length} 項</small></div>
-  ${I.map(x=>`<button class="hpI ${x.lv||""}" data-k="${esc(x.k)}"><span>${x.ic||""}</span><div><b>${esc(x.t)}</b><small>${esc(x.v)}</small></div><i>›</i></button>`).join("")}
-  <div class="hoT">🔧 平常不會跳出來的數字</div><div class="hpX">
-  <div><small>版本</small><b>V${esc(X.ver||"")}</b></div><div><small>開著之後熱更新</small><b>${X.hot??"—"} 次</b></div><div><small>主程式記憶體</small><b>${X.mem_gb??"—"} GB</b></div>
-  <div><small>字幕搜尋庫</small><b>${X.stt_idx??"—"}／${X.stt_tot??"—"} 場${X.stt_run?" · 整理中":""}</b></div><div><small>最近一次小檔備份</small><b>${ago(X.sbk_last)}</b></div><div><small>硬碟小工具資料</small><b>${X.disk_fresh?"✔ 有在更新":"⚠ 15 分鐘沒更新"}</b></div></div>
-  <div class="hoB"><button class="pill" data-a="re">↻ 重新檢查</button></div>`;
-  root.onclick=e=>{const b=e.target.closest("[data-k]");if(b){if(typeof smtGo==="function")smtGo(b.dataset.k);return;}if(e.target.closest('[data-a="re"]'))hpMount(root);};}
-async function dtlMount(root){const A={day:""};   /* TK_V1.0.49 📅 一天的時間軸 */
-  const fmtD=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-  const L=async()=>{const j=await (typeof api==="function"?api:J)("/api/pc/daytl?day="+A.day);if(!j||!j.ok)return;A.day=j.day;const LC={"-2":"#ff4d6d","-1":"#ff8c42","0":"#f0c419","1":"#9ad94a","2":"#2ecc71"};
-    root.innerHTML=`<div class="dtlT"><button class="pill" data-d="-1">‹ 前一天</button><b>${j.day}</b><button class="pill" data-d="1">後一天 ›</button><span>${j.rows.length} 位 · ${j.n} 場 · 共 ${j.hours} 小時${j.miss?` · <b style="color:#ff8c9f;font-size:12px">漏開頭 5 分以上 ${j.miss} 場</b>`:""}</span></div>
-    <div class="dtlG"><div class="dtlH"><i></i><div>${[0,3,6,9,12,15,18,21].map(h=>`<u style="left:${h/24*100}%">${h}</u>`).join("")}</div></div>
-    ${j.rows.map(r=>`<div class="dtlR"><i title="@${esc(r.u)}" data-u="${esc(r.u)}">${esc(r.n)}</i><div>${j.now!=null?`<em style="left:${j.now/24*100}%"></em>`:""}${r.b.map(b=>`<s data-sid="${b.sid}" title="${esc(b.lab)} ${esc(b.start||"")} · ${esc(b.dur||"")}${b.pct!=null?" · 錄到 "+b.pct+"%":""}" class="${b.live?"on":""}" style="left:${b.a/24*100}%;width:${Math.max(0.6,(b.z-b.a)/24*100)}%;--lc:${b.lv==null?"transparent":LC[String(b.lv)]}">${b.r!=null&&b.r>b.a?`<b style="width:${(b.r-b.a)/(b.z-b.a)*100}%"></b>`:""}</s>`).join("")}</div></div>`).join("")||'<div class="sbkE">這天沒有直播紀錄</div>'}</div>
-    ${(j.pred||[]).map(r=>`<div class="dtlR dtlP"><i title="@${esc(r.u)}" data-u="${esc(r.u)}">${esc(r.n)}</i><div>${j.now!=null?`<em style="left:${j.now/24*100}%"></em>`:""}<s class="pd" title="過去 60 天的這個星期幾，有 ${r.c} 次在 ${r.h} 點開播" style="left:${r.h/24*100}%;width:${100/24}%"></s></div></div>`).join("")}
-    <div class="dtlN">一條＝一場直播（開播→下播）；<b class="k3"></b>可能會開（照過去 60 天同一個星期幾）；<b class="k1"></b>錄到的部分　<b class="k2"></b>漏掉的開頭；下面的色條＝保存等級；紅線＝現在。點一條跳到那一場、點名字看主播總覽。</div>`;};
-  root.onclick=e=>{const d=e.target.closest("[data-d]");if(d){const x=new Date(A.day+"T12:00:00");x.setDate(x.getDate()+(+d.dataset.d));A.day=fmtD(x);L();return;}
-    const s=e.target.closest("[data-sid]");if(s){lvsFocus(+s.dataset.sid);return;}const u=e.target.closest("[data-u]");if(u&&typeof hostOpen==="function")hostOpen(u.dataset.u);};L();}
-function hoColGet(){try{return JSON.parse(localStorage.getItem("ho_col")||"[]")||[];}catch(e){return [];}}   /* TK_V1.0.63 主播總覽：每一區可以收合（記住） */
-function hoColApply(root){const C=hoColGet();let hide=false;for(const el of [...root.children]){if(el.classList.contains("hoT")){const k=el.textContent.replace(/[（(].*$/,"").trim();hide=C.includes(k);el.classList.toggle("hoTc",hide);continue;}if(el.classList.contains("hoB")){el.style.display="";hide=false;continue;}if(hide)el.style.display="none";else if(el.style.display==="none")el.style.display="";}}
-async function hostMount(root,u){u=u||window.HOST_U||"";root.innerHTML='<div class="sbkE">讀取中…</div>';   /* TK_V1.0.42 主播總覽 */
-  const j=await (typeof api==="function"?api:J)("/api/pc/host?u="+encodeURIComponent(u));if(!j||!j.ok){root.innerHTML=`<div class="sbkE">${esc((j&&j.message)||"讀不到")}</div>`;return;}
-  if(j.pick){const P=j.pick.slice().sort((a,b)=>(b[2]-a[2])||(b[3]-a[3]));root.innerHTML=`<div class="sbkN">選一位主播看總覽（🔴 直播中、⭐ 重點主播排前面）</div><input class="hoPq" placeholder="🔎 打帳號或名字" autocomplete="off"><div class="hoPk">${P.map(r=>`<button data-pu="${esc(r[0])}" data-k="${esc((r[0]+" "+r[1]).toLowerCase())}"><img loading="lazy" src="${imgB(B)}/avatar/${encodeURIComponent(r[0])}" onerror="this.style.visibility='hidden'"><b>${r[2]?"🔴 ":""}${r[3]?"⭐ ":""}${esc(r[1])}</b><small>@${esc(r[0])}</small></button>`).join("")}</div>`;   /* TK_V1.0.66 */
-    root.querySelector(".hoPq").oninput=e=>{const q=e.target.value.trim().toLowerCase();root.querySelectorAll("[data-pu]").forEach(b=>b.style.display=!q||b.dataset.k.includes(q)?"":"none");};
-    root.onclick=e=>{const b=e.target.closest("[data-pu]");if(b)hostOpen(b.dataset.pu);};return;}
-  const WD=["一","二","三","四","五","六","日"],mx=Math.max(1,...j.hm.flat());const LC={"-2":["−2","#ff4d6d"],"-1":["−1","#ff8c42"],"0":["0","#f0c419"],"1":["+1","#9ad94a"],"2":["+2","#2ecc71"],"none":["未分","#6b7280"]};
-  const lvT=Object.values(j.lv).reduce((a,b)=>a+b,0)||1;const ytN=(j.yt.ready||0),ytW=(j.yt.wait||0)+(j.yt.up||0);
-  root.innerHTML=`<div class="hoH"><img src="${imgB(B)}/avatar/${encodeURIComponent(j.u)}" onerror="this.style.visibility='hidden'"><div><b>${esc(j.name)}${j.pri?" ⭐":""}${j.live?' <span class="hoLive">🔴 直播中</span>':""}</b><small>@${esc(j.u)} · 共 ${j.n_all} 場 · 影片 ${j.gb} GB</small></div></div>
-  <div class="hoK"><div><b>${j.n14}</b><small>14 天場數</small></div><div><b>${j.h14}</b><small>14 天小時</small></div><div><b>${j.pct14==null?"—":j.pct14+"%"}</b><small>平均錄到</small></div><div><b>${j.n60}</b><small>60 天場數</small></div></div>
-  ${j.next?`<div class="hoNx">🔮 下次最可能：<b>${(()=>{const d=new Date(j.next.t*1000),dd=Math.round((d-new Date())/3600000);return `週${WD[(d.getDay()+6)%7]} ${d.getHours()}:00`+(dd<=24?`（約 ${dd} 小時後）`:"");})()}</b><small>最近 60 天這個時段開過 ${j.next.n} 次${j.top&&j.top.length?" · 常開："+j.top.map(([d,h,n])=>`週${WD[d]} ${h} 點（${n}）`).join("、"):""}</small></div>`:'<div class="hoNx"><small>🔮 開播時間還不固定（60 天內沒有同一個時段開過 2 次以上）</small></div>'}
-  <div class="hoT">🕒 什麼時候在播（最近 60 天，越亮越常）</div><div class="hoHm"><i></i>${[0,3,6,9,12,15,18,21].map(h=>`<u style="grid-column:${h+2}/span 3">${h}</u>`).join("")}${j.hm.map((r,d)=>`<i>${WD[d]}</i>`+r.map((v,h)=>`<s title="週${WD[d]} ${h}:00 · ${v} 次" style="opacity:${v?0.18+0.82*v/mx:0.06}"></s>`).join("")).join("")}</div>
-  <div class="hoT">📆 最近 5 週每天（越亮播越久）</div><div class="hoCal">${WD.map(w=>`<u>${w}</u>`).join("")}${(()=>{const t0=new Date();t0.setHours(0,0,0,0);const st=new Date(t0);st.setDate(st.getDate()-((t0.getDay()+6)%7)-28);let h="";for(let i=0;i<35;i++){const d=new Date(st);d.setDate(st.getDate()+i);const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`,v=(j.cal||{})[k]||0,fut=d>t0;h+=`<s class="${fut?"fu":""}${+d===+t0?" td":""}" title="${d.getMonth()+1}/${d.getDate()}${v?` · ${v} 小時`:" · 沒播"}" style="${v?`background:rgba(77,201,255,${Math.min(1,0.25+v/6)})`:""}">${d.getDate()}</s>`;}return h;})()}</div>   <!-- TK_V1.0.68 -->
-  <div class="hoT">🗂 保存等級</div><div class="hoLv">${Object.keys(LC).filter(k=>j.lv[k]).map(k=>`<span style="flex:${j.lv[k]};background:${LC[k][1]}" title="${LC[k][0]}：${j.lv[k]} 場">${j.lv[k]/lvT>0.08?LC[k][0]+" "+j.lv[k]:""}</span>`).join("")}</div>
-  <div class="hoChip">${j.phone?`<span>📱 手機錄屏 ${j.phone} 段</span>`:""}${ytN||ytW?`<span>▶ YouTube 已傳 ${ytN}${ytW?` · 排隊 ${ytW}`:""}</span>`:""}</div>
-  <div class="hoT">🎁 禮物（最近 8 週，每週鑽石）</div><div id="hoGift" class="hoGift"><div class="sbkE">讀取中…</div></div>
-  ${(j.notes||[]).length?`<div class="hoT">📝 我寫過的筆記（${j.notes.length}）</div>${j.notes.map(x=>`<button class="hoS hoNt" data-sid="${x.id}"><b>${esc(x.lab)}</b><span>${esc(x.tx)}</span><small>${esc((x.start||"").slice(5,16))}</small></button>`).join("")}`:""}   <!-- TK_V1.0.62 -->
-  <div class="hoT">🎞 最近 8 場</div>${j.last.map(x=>`<button class="hoS" data-sid="${x.id}"><b>${esc(x.lab)}</b><span>${esc(x.start)} · ${esc(x.dur)}${x.live?" · 🔴":""}</span><small>${x.pct!=null?x.pct+"%":""}</small><em style="background:${(LC[x.lv==null?"none":String(x.lv)]||LC.none)[1]}">${(LC[x.lv==null?"none":String(x.lv)]||LC.none)[0]}</em></button>`).join("")}
-  <div class="hoB"><button class="pill" data-a="fx">▦ 在檔案總管看全部場次</button><button class="pill" data-a="gifs">🎞 GIF 製作</button><button class="pill" data-a="sw">⇄ 換一位</button><a class="pill" href="https://www.tiktok.com/@${encodeURIComponent(j.u)}/live" target="_blank" rel="noopener">↗ 在 TikTok 打開</a><button class="pill" data-a="cp">📋 複製帳號</button>${j.mon?`<button class="pill" data-a="pri">${j.pri?"★ 取消重點主播":"☆ 設為重點主播"}</button>`:""} <a class="pill" href="${B}/api/pc/export/sessions?days=365&u=${encodeURIComponent(j.u)}" download>📤 匯出這位一年的場次（CSV）</a></div>`;
-  hoColApply(root);
-  (async()=>{const g=await (typeof api==="function"?api:J)("/api/pc/hostgift?u="+encodeURIComponent(j.u));const el=root.querySelector("#hoGift");if(!el)return;   /* TK_V1.0.61 */
-    if(!g||!g.ok){el.innerHTML='<div class="sbkE">讀不到</div>';return;}if(!g.tot){el.innerHTML='<div class="sbkE">60 天內沒有收到禮物的紀錄</div>';return;}const mx=Math.max(1,...g.wk.map(x=>x.v));
-    el.innerHTML=`<div class="hoWk">${g.wk.map(x=>`<div title="${x.d} 那週 ${x.v.toLocaleString()} 鑽"><s style="height:${Math.max(2,x.v/mx*56)}px"></s><small>${x.d}</small></div>`).join("")}</div>
-    <div class="hoGs">60 天共 <b>${g.tot.toLocaleString()}</b> 鑽 · ${g.n} 位送禮者 · 前 10 位：</div>${g.top.map((r,i)=>`<button class="hoGf" data-gf="${esc(r[0])}"><i>${i+1}</i><b>${esc(r[1]||r[0])}</b><small>${r[3]} 場</small><em>${(+r[2]).toLocaleString()} 鑽</em></button>`).join("")}`;})();
-  root.onclick=e=>{const ht=e.target.closest(".hoT");if(ht){const k=ht.textContent.replace(/[（(].*$/,"").trim();const C=hoColGet();if(C.includes(k))C.splice(C.indexOf(k),1);else C.push(k);try{localStorage.setItem("ho_col",JSON.stringify(C));}catch(x){}hoColApply(root);return;}const s=e.target.closest("[data-sid]");if(s){lvsFocus(+s.dataset.sid);return;}const gf=e.target.closest("[data-gf]");if(gf){const k=gf.dataset.gf;if(typeof PAGES!=="undefined"&&typeof go==="function"){go(3);setTimeout(()=>{try{PAGES[3].detail(k);}catch(x){}},400);}else location.hash="gifter/"+encodeURIComponent(k);return;}if(e.target.closest('[data-a="fx"]'))qsUser(j.u);if(e.target.closest('[data-a="gifs"]')){gfsOpen(j.u);return;}if(e.target.closest('[data-a="sw"]')){window.HOST_U="";hostMount(root,"");return;}if(e.target.closest('[data-a="cp"]')){const v="@"+j.u,fb=()=>{const ta=document.createElement("textarea");ta.value=v;ta.style.cssText="position:fixed;opacity:0;top:0";document.body.appendChild(ta);ta.select();let ok=false;try{ok=document.execCommand("copy");}catch(x){}ta.remove();toast(ok?"📋 已複製 "+v:"請長按選取："+v);};try{if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(v).then(()=>toast("📋 已複製 "+v),fb);else fb();}catch(x){fb();}return;}   /* TK_V1.0.65 */
-    const pb=e.target.closest('[data-a="pri"]');if(pb){pb.disabled=true;kPost("/api/pc/streamer/priority",{u:j.u,on:!j.pri}).then(r=>{if(r&&r.ok){toast(r.priority?"★ 設為重點主播（斷線會更快重連、開播會提醒）":"已取消重點主播");hostMount(root,j.u);}else{pb.disabled=false;toast("✖ "+((r&&r.message)||"沒有成功"));}});}};}   /* TK_V1.0.59 */
-async function dhhMount(root){const A={days:30};   /* TK_V1.0.40 硬碟健康歷史 */
-  const sp=(V,col,mx)=>{const P=V.map((v,i)=>v==null?null:[i,v]).filter(Boolean);if(!P.length)return '<span class="dhhNo">沒有資料</span>';const W=220,H=40,n=Math.max(1,V.length-1),lo=Math.min(...P.map(x=>x[1])),hi=Math.max(mx||0,...P.map(x=>x[1]));const y=v=>H-3-(hi===lo?0.5:(v-lo)/(hi-lo))*(H-6);
-    return `<svg viewBox="0 0 ${W} ${H}" class="dhhSv"><polyline fill="none" stroke="${col}" stroke-width="2" points="${P.map(([i,v])=>`${(i/n*(W-4)+2).toFixed(1)},${y(v).toFixed(1)}`).join(" ")}"/></svg>`;};
-  const L=async()=>{const j=await (typeof api==="function"?api:J)(`/api/pc/dhist?days=${A.days}`);if(!j)return;
-    root.innerHTML=`<div class="sbkN">每小時記一次每顆硬碟的<b>溫度、讀寫錯誤、健康狀態</b>（資料來自每分鐘的硬碟小工具），看長期有沒有變差。錯誤數一直往上＝該準備換硬碟了。</div>
-    <div class="actT"><select id="dhD">${[7,14,30,60].map(d=>`<option value="${d}"${d===A.days?" selected":""}>${d} 天</option>`).join("")}</select>${j.fresh?"":'<span class="dhhW">⚠ 硬碟小工具最近 15 分鐘沒有新資料（設定 → 效能 可以裝／重開）</span>'}</div>
-    ${(j.alerts||[]).map(x=>`<div class="dhhA ${x.lv}">🩺 ${esc(x.name)}：${esc(x.why)}</div>`).join("")}
-    ${(j.disks||[]).map(d=>{const T=d.days.map(x=>x[1]),Rr=d.days.map(x=>x[2]+x[3]),last=d.days[d.days.length-1]||[];const t0=T.filter(v=>v!=null);
-      return `<div class="dhhD"><div class="dhhH"><b>💽 ${esc(d.name)}</b><span>${last[4]?esc(last[4]):""}</span></div>
-      <div class="dhhR"><small>最高溫 ${t0.length?Math.max(...t0).toFixed(0)+"°C":"—"}（今天 ${last[1]!=null?(+last[1]).toFixed(0)+"°C":"—"}）</small>${sp(T,"#ffb547",55)}</div>
-      <div class="dhhR"><small>讀＋寫錯誤累計 ${(last[2]||0)+(last[3]||0)}${Rr.length>1&&Rr[Rr.length-1]>Rr[0]?` <b class="bad">↑ 期間多了 ${Rr[Rr.length-1]-Rr[0]}</b>`:""}</small>${sp(Rr,"#ff4d6d")}</div></div>`;}).join("")||'<div class="sbkE">還沒有紀錄：程式開著、硬碟小工具有在跑，每小時會記一筆</div>'}`;
-    root.querySelector("#dhD").onchange=e=>{A.days=+e.target.value;L();};};L();}
+@@SH91@@
 async function sbkMount(root){root.innerHTML='<div class="sbkE">讀取中…</div>';const L=async()=>{const j=await api("/api/pc/sbk");const T=t=>{const d=new Date(t*1000);return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;};
-  root.innerHTML=`<div class="sbkN">每天自動把分級、YouTube 排隊、手機錄屏紀錄、標記等設定小檔（_DB_SSD 裡的 JSON，不含影片和大資料庫）壓成一份備份，留最近 14 份。<br><small>${esc((j&&j.dir)||"")}</small></div><button class="pill sbkGo" id="sbkGo">🗂 現在備份一份</button>
-  <div class="sbkL">${((j&&j.list)||[]).map(x=>`<div class="sbkR"><b>${T(x.t)}</b><span>${x.mb} MB</span><a class="pill" href="${B}/api/pc/sbk/file?f=${encodeURIComponent(x.f)}">⬇ 下載</a></div>`).join("")||'<div class="sbkE">還沒有備份（程式開著、電腦不忙時每天會自動做一份）</div>'}</div>`;
-  $("#sbkGo").onclick=async()=>{$("#sbkGo").disabled=true;$("#sbkGo").textContent="備份中…";const r=await kPost("/api/pc/sbk",{});toast(r&&r.ok?`✔ 備份好了：${r.n} 個檔、${r.mb} MB`:"✖ "+((r&&r.message)||"沒有成功"));L();};};L();}
+@@SH104@@
 PAGES[46]={render(pg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding:14px;max-width:900px"><div id="actRoot"></div></div>`;actMount(pg.querySelector("#actRoot"));}};
 PAGES[52]={render(pg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding:14px;max-width:760px"><div id="cvRoot"></div></div>`;csvMount(pg.querySelector("#cvRoot"));}};   /* TK_V1.0.51 */
 PAGES[51]={render(pg){pg.innerHTML=`<div class="pg" style="overflow:auto;padding:14px"><div id="dtlRoot"></div></div>`;dtlMount(pg.querySelector("#dtlRoot"));}};   /* TK_V1.0.49 */
@@ -2778,6 +1826,126 @@ SH = [
 [
 "/* PUP-BEGIN */",
 "/* PUP-END */"
+],
+[
+"/* HA-CSS-BEGIN */",
+"/* HA-CSS-END */"
+],
+[
+".gfsH{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px}.gfsH b{font-size:16px;flex:1 1 auto}.gfsH select{max-width:100%;padding:7px 8px;border-radius:9px;background:var(--card,#151a21);color:inherit;border:1px solid var(--line,#2a3340)}   /* TK_V1.0.75 GIF 製作 */",
+".hoCal{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;max-width:420px}.hoCal u{text-decoration:none;font-size:10.5px;opacity:.55;text-align:center}.hoCal s{text-decoration:none;font-size:10.5px;text-align:center;padding:5px 0;border-radius:5px;background:rgba(127,127,127,.08)}.hoCal s.fu{opacity:.25}.hoCal s.td{outline:1.5px solid #ff4d6d}   /* TK_V1.0.68 */"
+],
+[
+".hpTop{padding:12px 14px;border-radius:12px;margin:4px 0 10px;border:1px solid}.hpTop b{display:block;font-size:17px}.hpTop small{font-size:12px;opacity:.7}.hpTop.ok{border-color:rgba(46,204,113,.55);background:rgba(46,204,113,.1)}.hpTop.warn{border-color:rgba(255,181,71,.6);background:rgba(255,181,71,.1)}.hpTop.bad{border-color:rgba(255,77,109,.65);background:rgba(255,77,109,.12)}   /* TK_V1.0.69 */",
+".dhhA{font-size:13px;padding:7px 10px;border-radius:9px;margin:6px 0;background:rgba(255,181,71,.12);border:1px solid rgba(255,181,71,.5)}.dhhA.bad{background:rgba(255,77,109,.12);border-color:rgba(255,77,109,.6)}.dhhW{font-size:12px;color:#ffb547;margin-left:8px}"
+],
+[
+".lvaI{display:flex;align-items:center;gap:8px;padding:9px 10px 9px 12px;border-radius:12px;background:rgba(20,24,32,.95);border:1px solid #ff4d6d;color:#fff;box-shadow:0 6px 20px rgba(0,0,0,.5);cursor:pointer;animation:lvaIn .25s ease-out}",
+".qsBtn{background:transparent;border:0;color:inherit;font-size:17px;padding:2px 6px;cursor:pointer}"
+],
+[
+".lvsKindOv{position:fixed;inset:0;z-index:9700;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:14px}",
+"/* LVS-CSS-END */"
+],
+[
+"/* CLP-CSS-BEGIN */",
+"/* CLP-CSS-END */"
+],
+[
+".mrgHead{margin-bottom:10px}.mrgBox{padding:10px 12px;border-radius:12px;background:rgba(127,127,127,.12);margin:8px 0}.mrgBox.ok{background:rgba(69,212,131,.14)}.mrgBox.bad{background:rgba(255,80,80,.14)}.mrgBar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0}.mrgBar span{flex:1 1 100%}.mrgBar .btn{flex:0 0 auto;width:auto;max-width:none;min-width:0;white-space:nowrap;overflow:visible;padding:6px 12px}.mrgBar .btn.start{margin-left:auto}.mrgG{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid rgba(127,127,127,.25);border-radius:12px;margin:6px 0;cursor:pointer}.mrgG.on{border-color:#3a7bd5;background:rgba(58,123,213,.08)}.mrgG input{margin-top:4px;transform:scale(1.3)}.mrgT{line-height:1.5}.mrgS{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12.5px;opacity:.85;margin-top:3px}",
+".ruWarn{border:2px solid #ff4d6d;background:rgba(255,77,109,.1);border-radius:10px;padding:8px 12px;margin:6px 0 8px;line-height:1.6}"
+],
+[
+"const B=\"__BASE__\";",
+"  t._fr=(t._fr||0)+1;const rest=m[1],n=t._fr;fastFix().then(()=>{t.src=(n<2&&window.FASTB?window.FASTB:(typeof B===\"string\"?B:\"\"))+rest;});}catch(x){}},true);   /* 第二次還不行就走原本的 */"
+],
+[
+"/* QSK-END */",
+"/* LVA-END */"
+],
+[
+"/* V0.6.27 自我檢查狀態＋重新啟動主程式（手機與電腦網頁版共用） */",
+"    (S.limited?` · <b style=\"color:#ff6577\">簽章額度用完</b>`:` · 今天簽章 ${S.n||0} 次`)+` <a href=\"javascript:void(0)\" onclick=\"cgOpen()\" style=\"color:var(--vline,#4dc9ff)\">詳細 →</a>`;}"
+],
+[
+"/* KIT-BEGIN */",
+"/* KIT-END */"
+],
+[
+"/* SMT-BEGIN */",
+"/* SMT-END */"
+],
+[
+"  root.innerHTML=`<div class=\"lvsTop lvsTopM\"><button class=\"lvsNav\" data-a=\"prev\" title=\"上一場\">◀</button><button class=\"lvsCurN\" id=\"lvsCurN\" title=\"點開看全部場次\"><b>讀取中…</b><small></small></button><button class=\"lvsNav orpB\" data-orph=\"1\" title=\"只看放超過 14 天、沒有場次資料的純 MP4（冗餘檔）\">冗餘</button><button class=\"lvsNav\" data-a=\"next\" title=\"下一場\">▶</button><span class=\"lvsAuto\" id=\"lvsAuto\"></span></div>",
+"<div class=\"lvsTool lvsToolM\"><span class=\"lvsGr\" id=\"lvsGr\">${LVS_GR.map(([v,t])=>`<button data-g=\"${v}\" class=\"${F.g.includes(v)?\"on\":\"\"}\">${t}</button>`).join(\"\")}</span><button class=\"lvsPv${F.pv?\" on\":\"\"}\" id=\"lvsPv\" title=\"還沒做好預覽圖的場次先不列（背景照樣在做，做好就會出現）\">✔ 跳過沒好的</button><select id=\"lvsStep\" title=\"間隔\">${LVS_STEPS.map(([v,t])=>`<option value=\"${v}\"${+lvsPref(\"step\",0)===v?\" selected\":\"\"}>⏱ ${t}</option>`).join(\"\")}</select><select id=\"lvsCols\" title=\"一列幾張\">${[3,4,5,6,7,8,10,12,14,16,18,20,24,30,36].map(n=>`<option value=\"${n}\"${lvsColsN()===n?\" selected\":\"\"}>▦ ${n}</option>`).join(\"\")}</select><small id=\"lvsCnt\" class=\"lvsCntM\">讀取中…</small></div>"
+],
+[
+"/* SN-BEGIN */",
+"/* SN-END */"
+],
+[
+"    root.querySelector(\"#actC\").innerHTML=`<button class=\"${A.cat?\"\":\"on\"}\" data-ac=\"\">全部</button>`+(j.cats||[]).map(c=>`<button class=\"${A.cat===c.k?\"on\":\"\"}\" data-ac=\"${c.k}\">${c.ic} ${esc(c.nm)} <small>${c.n}</small></button>`).join(\"\");",
+"  root.querySelector(\"#actD\").onchange=e=>{A.days=+e.target.value;L();};let tq=0;root.querySelector(\"#actQ\").oninput=e=>{clearTimeout(tq);tq=setTimeout(()=>{A.q=e.target.value.trim();L();},400);};L();}"
+],
+[
+"    root.innerHTML=`<div class=\"sbkN\">用顯示卡把一分鐘影片壓成 <b>HEVC（H.265）</b>，看同樣畫質能小多少。<b>只是試算，不會動到任何原本的影片</b>；背景最低優先權，電腦忙會先等。</div>",
+"  {t:\"開程式、熱更新時的監控\",d:\"<ul><li>開程式 3 秒後自動開始監控（設定可以關）。正在錄的場次在熱更新、重開時會<b>接著錄同一場</b>。</li><li>搬硬碟切換後，如果找不到影片硬碟（例如 R 槽代號跑掉），程式<b>先不開始監控</b>，不會錄到別的地方，會提示你去磁碟管理改代號。</li></ul>\"},"
+],
+[
+"  {t:\"⏸ 暫停監控並封存\",d:\"<ul><li>主播分類（或審核、檔案總管）<b>長按主播</b> → 主播選單 →「⏸ 暫停監控並封存」。</li><li>從那一刻起<b>不再連線、不錄新的</b>（直播中的話那一場停在那裡、照常收尾）；主播清單、等級、分類、<b>以前的場次全部留著</b>，照常轉檔、整理、照等級排隊上傳 YouTube、照保留天數刪原檔。</li><li>在主播分類移到最下面「⏸ 暫停監控（封存）」那區；<b>審核頁</b>也收到最下面同一欄「⏸ 封存」（保留原本的等級、照等級排、灰階，點進去一樣看以前的紀錄）。同一個選單按「▶ 恢復監控」就接回來。</li><li>封存中的主播又被<b>新增</b>（貼 TikTok 連結、@帳號、匯入）：會先問「目前封存中，要解封嗎？」— 解封＝移回來繼續監控；取消＝取消新增、維持封存。</li><li>每一次封存／解封都會記下來（時間、從哪裡按的），長按主播的小視窗最上面「🗄 封存紀錄」看得到。</li><li>跟「🗑 刪除主播」不一樣：刪除＝整位全部刪掉（等於標 F 再處置）。</li></ul>\"},",
+"    root.querySelector(\"#dhD\").onchange=e=>{A.days=+e.target.value;L();};};L();}"
+],
+[
+"/* HT-CSS-BEGIN */",
+"/* HT-CSS-END */"
+],
+[
+"/* SH-CSS-BEGIN */",
+"/* SH-CSS-END */"
+],
+[
+"/* SOON-CSS-BEGIN */",
+"/* SOON-CSS-END */"
+],
+[
+"/* SMT-CSS-BEGIN */",
+"/* SMT-CSS-END */"
+],
+[
+"/* LEND-CSS-BEGIN */",
+"/* LEND-CSS-END */"
+],
+[
+"/* EXP-CSS-BEGIN */",
+"/* EXP-CSS-END */"
+],
+[
+"/* TKD-CSS-BEGIN */",
+".tkdC{cursor:pointer;min-width:0}.tkdC b{display:block;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px}.tkdC small{display:block;font-size:10.5px;color:var(--subtext,#8a93a3)}"
+],
+[
+".hvSt{font-size:12.5px;opacity:.8;margin:4px 0 8px}.hvR{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:6px 0}.hvR div{border:1px solid var(--line);border-radius:10px;padding:8px;display:flex;flex-direction:column;align-items:center}.hvR b{font-size:16px}.hvR small{font-size:11px;opacity:.7}.hvE{font-size:13px;line-height:1.6;margin:6px 0}.hvI{display:grid;grid-template-columns:1fr 1fr;gap:6px}.hvI figure{margin:0}.hvI img{width:100%;border-radius:8px;background:#000}.hvI figcaption{text-align:center;font-size:12px;opacity:.75}   /* TK_V1.0.32 */",
+".lvsPage{display:flex;flex-direction:column;min-height:0}"
+],
+[
+"/* TK_V1.0.27 電腦已經熱更新、這頁還是舊版：上方出現提示（不自動重新整理，免得中斷上傳／播放） */",
+"setTimeout(verWatch,20000);document.addEventListener(\"visibilitychange\",()=>{if(!document.hidden)setTimeout(verWatch,2000);});"
+],
+[
+"const MINI={t:null,busy:false,h:\"\"};",
+"function miniStart(){if(!MINI.t)miniTick();else{const el=document.getElementById(\"miniS\");if(el&&!el.innerHTML&&MINI.h)el.innerHTML=MINI.h;}}"
+],
+[
+"  root.querySelector(\"[data-a=prev]\").onclick=()=>lvsGoTo(LVS.cur-1);root.querySelector(\"[data-a=next]\").onclick=()=>lvsGoTo(LVS.cur+1);root.querySelector(\"#lvsCurN\").onclick=lvsList;   /* TK_V0.9.17 名字＝下拉選場次；◀ ▶＝上一場／下一場 */",
+"  if($r(\"[data-a=back]\"))root.querySelector(\"[data-a=back]\").onclick=()=>{window.lvsList=true;if(typeof PAGES===\"undefined\")location.hash=\"fx\";else if(typeof go===\"function\")go(31);};   /* 回一般檔案總管（這次開著就不再自動跳回來） */"
+],
+[
+"function anomHtml(L){if(!L||!L.length)return '<span style=\"color:#45d483\">✔ 最近 7 天沒有觀察到異常（CPU、記憶體、硬碟忙碌、溫度、空間、資料庫與紀錄檔大小、主程式記憶體、畫面卡住都會自動盯著）</span>';",
+"  return L.slice(0,30).map(e=>`<div style=\"margin:4px 0\"><b style=\"color:${e.level===\"bad\"?\"#ff4d6d\":\"#f0ad4e\"}\">⚠ ${esc(e.title||\"\")}</b> <span style=\"opacity:.65;font-size:.9em\">${f(e.t)}${(e.n||1)>1?` → ${f(e.last).slice(-5)}，${e.n} 次`:\"\"}</span><br>${esc(e.detail||\"\")}${e.tip?`<br><span style=\"opacity:.65;font-size:.9em\">${esc(e.tip)}</span>`:\"\"}</div>`).join(\"\");}"
+],
+[
+"  root.innerHTML=`<div class=\"sbkN\">每天自動把分級、YouTube 排隊、手機錄屏紀錄、標記等設定小檔（_DB_SSD 裡的 JSON，不含影片和大資料庫）壓成一份備份，留最近 14 份。<br><small>${esc((j&&j.dir)||\"\")}</small></div><button class=\"pill sbkGo\" id=\"sbkGo\">🗂 現在備份一份</button>",
+"  $(\"#sbkGo\").onclick=async()=>{$(\"#sbkGo\").disabled=true;$(\"#sbkGo\").textContent=\"備份中…\";const r=await kPost(\"/api/pc/sbk\",{});toast(r&&r.ok?`✔ 備份好了：${r.n} 個檔、${r.mb} MB`:\"✖ \"+((r&&r.message)||\"沒有成功\"));L();};};L();}"
 ]
 ]
 _SH_C = {}
@@ -2799,6 +1967,7 @@ def _sh_html(G):
         except Exception as e:
             return f'/* SH{i} missing: {e} */'
     out = re.sub(r'@@SH(\d+)@@', one, HTML)
+    out = re.sub(r'[ \t]*/\* ?(?:TK_)?V\d[^*]*?\*/', ' ', out)   # V1.1.96 拿掉版本註解（頁面小一點）
     _SH_C.clear(); _SH_C[k] = out
     return out
 
