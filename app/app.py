@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.85"
+APP_VERSION = "1.1.86"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -20447,6 +20447,42 @@ try { NLConnect | Out-Null; Unset
             if c > best[0]: best = (c, L)
         return best, out
 
+    def _phr_env(self, ff, path, ss=0.0, dur=None):
+        """V1.1.86 整段聲音的「起音曲線」：FFmpeg 自己算每 50 ms 的音量（astats），不用把整場聲音讀進 Python（3 小時也只要幾十秒、記憶體很小）."""
+        cmd = [ff, '-hide_banner', '-loglevel', 'error', '-nostdin'] + (['-ss', f'{max(0.0, ss):.2f}'] if ss else []) + ['-i', str(path)] + (['-t', f'{dur:.2f}'] if dur else []) + \
+              ['-vn', '-sn', '-ac', '1', '-af', 'aresample=8000,asetnsamples=n=400:p=0,astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-', '-f', 'null', '-']
+        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=1800, **_no_window_kwargs(idle=True))
+        e = []
+        for ln in r.stdout.decode('ascii', 'ignore').splitlines():
+            if ln.startswith('lavfi.astats.Overall.RMS_level='):
+                v = ln.split('=', 1)[1].strip()
+                try: e.append(max(-100.0, float(v)))
+                except ValueError: e.append(-100.0)
+        return [0.0] + [max(0.0, e[i] - e[i - 1]) for i in range(1, len(e))]
+
+    def _phr_global(self, ff, pfile, pdur, afile):
+        """V1.1.86 時間差很多（平板檔案時間是匯出／上傳的時間）時，整場錄音找這支在哪：250 ms 粗找全場 → 50 ms 細找前三名 → 原本的 10 ms 對齊.
+        回傳 (分數, 錄音檔裡的秒數, 上傳的哪一秒開始比) 或 None."""
+        plen = min(60.0, max(20.0, pdur - 4)); pss = max(2.0, min(pdur * 0.3, pdur - plen - 2))
+        P = self._phr_env(ff, pfile, pss, plen); A = self._phr_env(ff, afile)
+        if len(P) < 200 or len(A) < len(P): return None
+        nz = lambda v: (lambda mu, sd: [(x - mu) / sd for x in v])(sum(v) / len(v), math.sqrt(sum((x - sum(v) / len(v)) ** 2 for x in v) / len(v)) or 1.0)
+        c5 = lambda v: [sum(v[i:i + 5]) for i in range(0, len(v) - 4, 5)]
+        P5, A5 = nz(c5(P)), nz(c5(A))
+        _b, allc = self._phr_xcorr(P5, A5, range(0, len(A5) - len(P5) + 1))
+        tops = []
+        for L, c in sorted(allc.items(), key=lambda kv: -kv[1]):
+            if all(abs(L - t) > 8 for t in tops): tops.append(L)
+            if len(tops) >= 3: break
+        Pn, An = nz(P), nz(A); best = None
+        for L in tops:
+            (c, L2), _ = self._phr_xcorr(Pn, An, range(L * 5 - 20, L * 5 + 21))
+            if best is None or c > best[0]: best = (c, L2)
+        if not best: return None
+        center = best[1] * 0.05                                                  # 錄音檔裡上傳的第 pss 秒大概在這裡
+        c, apos, _sec = self._phr_align(ff, pfile, pss, min(40.0, plen), afile, center, 3.0)
+        return (c, apos, pss) if c > -1 else None
+
     def _phr_align(self, ff, pfile, pss, plen, afile, center, W):
         """手機檔 pss 開始 plen 秒，在錄音檔 center±W 秒裡找最像的位置. 回傳 (分數, 錄音檔裡的秒數, 第二高分)."""
         pf = self._phr_feat(self._phr_pcm(ff, pfile, pss, plen))
@@ -20481,6 +20517,14 @@ try { NLConnect | Out-Null; Unset
             C = [c for c in C if int(c[0]) == int(it['pfx_sid'])] or [(int(it['pfx_sid']), str(it.get('hint') or ''), S0, None)]
         if h_:
             C = [c for c in C if c[1].casefold() == h_]
+            if not C:                                                           # V1.1.86 檔案時間差很多：這位前後 2 天最近的 3 場，下面整場聲音找
+                far = []
+                for sid, u, le, sa, en in rows:
+                    if str(u or '').casefold() != h_: continue
+                    try: live = float(le) if le else datetime.fromisoformat(str(sa)).timestamp()
+                    except Exception: continue
+                    far.append((abs(live - S0), (int(sid), str(u or ''), live, en)))
+                C = [x[1] for x in sorted(far)[:3]]
             if not C: it.update(st='fail', msg=f'{self.streamer_names.get(it.get("hint"), it.get("hint"))} 在 {datetime.fromtimestamp(S0).strftime("%m/%d %H:%M")} 前後沒有場次 → 建成這位的手機場次'); return
         if not C: it.update(st='fail', msg=f'{datetime.fromtimestamp(S0).strftime("%m/%d %H:%M")} 前後沒有任何場次（手機時間不對？）'); return
         plen = min(40.0, dur - 4); probes = [max(2.0, min(dur * 0.3, dur - plen - 2))]
@@ -20505,6 +20549,20 @@ try { NLConnect | Out-Null; Unset
         it['score'] = b['score']
         ok = b['score'] >= 0.3 and b.get('agree', True) and b['score'] - max(nx, b.get('sec', -1)) >= 0.12
         if not ok and h_ and len(C) == 1 and b['score'] >= 0.2 and b.get('agree', True): ok = True   # 你指定了主播、只有這一場：門檻放低
+        if not ok and not it.get('pfx') and (h_ or len(C) <= 3):               # V1.1.86 附近找不到（檔案時間不準）：整場錄音找一次（你選了主播、或候選只有幾場時）
+            for r_ in [x for x in res if x.get('score', -1) > -1 or x.get('why') != '沒有錄音檔'][:3]:
+                try:
+                    a = self._history_audio_file(r_['sid']); rec = self._history_recording_info(r_['sid'], r_.get('live') or self._history_live_epoch(r_['sid']), None) if a else {}
+                    R0 = rec.get('record_start_epoch') if a else None
+                    if not a or not R0: continue
+                    M = self.__dict__.get('_phr_ms') or {}; M['msg'] = f'整場找 {it["orig"]} ↔ #{r_["sid"]:05d}'
+                    g = self._phr_global(ff, p, dur, a)
+                    if g and g[0] >= 0.3:
+                        e0 = float(R0) + g[1] - g[2]; it['score'] = round(g[0], 3)
+                        self._phr_assign(it, r_['sid'], e0, auto=True); it['msg'] = (it.get('msg') or '') + f'（檔案時間不準，整場聲音找到的，相似度 {g[0]:.2f}）'; self._phr_save(); return
+                except Exception as ex:
+                    try: self._wd_log(f'手機錄屏整場比對失敗 #{r_.get("sid")}：{ex}')
+                    except Exception: pass
         if not ok and it.get('pfx') and it.get('pfx_sid'):                      # V1.1.66 手機錄特效：分數低也先接上，對不上就用錄影時間
             if b['score'] >= 0.2 and b.get('agree', True) and b.get('e0'): ok = True
             else:
@@ -20543,7 +20601,37 @@ try { NLConnect | Out-Null; Unset
         if not e0: return {'ok': False, 'message': '不知道這支的開始時間'}
         try: self._phr_assign(it, int(sid), e0)
         except Exception as ex: return {'ok': False, 'message': f'歸檔失敗：{ex}'}
-        return {'ok': True, 'message': it['msg'] + ('' if c else '（聲音沒對上，用檔名的時間對齊，可能差幾秒）')}
+        if not c:                                                               # V1.1.86 你選了場次但聲音在附近對不上：背景整場錄音找一次位置
+            it['msg'] = it['msg'] + '（聲音沒對上，用錄影時間對齊，可能差很多）'; self._phr_save()
+            threading.Thread(target=self._phr_global_fix, args=(str(iid), int(sid)), daemon=True, name='TikLivePhrGlobal').start()
+            return {'ok': True, 'message': it['msg'] + '：電腦正在整場錄音裡找這支的正確位置（找到會自己更新；找不到可以到「🎯 手動對齊」）'}
+        return {'ok': True, 'message': it['msg']}
+
+    def _phr_global_fix(self, iid, sid):
+        lk = self.__dict__.setdefault('_phr_glk', threading.Lock())
+        with lk:                                                                # 一次一支
+            try:
+                for _w in range(120):
+                    try: bz = self._busy_guard()[0]
+                    except Exception: bz = False
+                    if not bz: break
+                    time.sleep(5)
+                it = self._phr_db()['items'].get(str(iid)); ff = self._experiment_ffmpeg()
+                if not it or not ff or int(it.get('sid') or 0) != int(sid): return
+                live = float(self._history_live_epoch(int(sid))); a = self._history_audio_file(int(sid))
+                rec = self._history_recording_info(int(sid), live, None) if a else {}; R0 = rec.get('record_start_epoch') if a else None
+                if not a or not R0: return
+                p = Path(it['path']); dur = float(it.get('dur') or 0) or float(ffmpeg_info(ff, p)[3] or 0)
+                g = self._phr_global(ff, p, dur, a)
+                if g and g[0] >= 0.3:
+                    s_old = float(it['e0']) - live; s_new = float(R0) + g[1] - g[2] - live
+                    self._mix_set_e0(int(sid), it, live, s_old, s_new, f'整場聲音找到位置（相似度 {g[0]:.2f}）')
+                    self._wd_log(f'📱 手機錄屏 {p.name}：整場聲音找到位置 #{int(sid):05d}，挪了 {s_new - s_old:+.1f} 秒')
+                else:
+                    self._wd_log(f'📱 手機錄屏 {p.name}：整場聲音也找不到（{(g[0] if g else -1):.2f}），請用 🎯 手動對齊')
+            except Exception as ex:
+                try: self._wd_log(f'手機錄屏整場比對失敗：{ex}')
+                except Exception: pass
 
     def _phr_retry(self, iid):
         it = self._phr_db()['items'].get(str(iid))
