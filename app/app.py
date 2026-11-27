@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.12"
+APP_VERSION = "1.2.13"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -25352,8 +25352,13 @@ $r | ConvertTo-Json -Depth 4 -Compress
         import urllib.request, urllib.error
         rq = urllib.request.Request('https://api.github.com' + path, data=(json.dumps(body).encode() if body is not None else None), method=method,
                                     headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'TikLiveMonitor', 'Content-Type': 'application/json'})
+        import ssl
+        ctx = ssl.create_default_context()                                      # V1.2.13 跟雲端更新一樣：Windows 內建憑證不夠 → 加上 certifi 的清單（照樣完整驗證）
         try:
-            with urllib.request.urlopen(rq, timeout=60) as r: return r.status, json.loads(r.read() or b'{}')
+            import certifi; ctx.load_verify_locations(cafile=certifi.where())
+        except Exception: pass
+        try:
+            with urllib.request.urlopen(rq, timeout=60, context=ctx) as r: return r.status, json.loads(r.read() or b'{}')
         except urllib.error.HTTPError as e:
             try: return e.code, json.loads(e.read() or b'{}')
             except Exception: return e.code, {}
