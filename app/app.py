@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.87"
+APP_VERSION = "1.1.88"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -51275,7 +51275,7 @@ function geEdHtml(r){const a=GE.adj[r.rid]||[r.pre,r.post];GE.cur={pre:+a[0],pos
   <div class="geR" id="geSpan" style="font-weight:700"></div>
   <div class="geR"><span>開始</span><button class="gb" data-g="a" data-v="5">−5</button><button class="gb" data-g="a" data-v="1">−1</button><b id="gePre" style="min-width:96px;text-align:center"></b><button class="gb" data-g="a" data-v="-1">+1</button><button class="gb" data-g="a" data-v="-5">+5</button><span>秒</span></div>
   <div class="geR"><span>結束</span><button class="gb" data-g="b" data-v="-5">−5</button><button class="gb" data-g="b" data-v="-1">−1</button><b id="gePost" style="min-width:96px;text-align:center"></b><button class="gb" data-g="b" data-v="1">+1</button><button class="gb" data-g="b" data-v="5">+5</button><span>秒</span></div>
-  <div class="geR"><button class="gb" data-g="play">▶ 播這段</button><button class="gb" data-g="pa">⏮ 從開始</button><button class="gb" data-g="pg">🎁 從送禮</button><span style="flex:1"></span><button class="gb go" data-g="ok">✔ OK（下一個）</button></div></div>`;}
+  <div class="geR"><button class="gb" data-g="play">▶ 播這段</button><button class="gb" data-g="pa">⏮ 從開始</button><button class="gb" data-g="pg">🎁 從送禮</button><button class="gb" data-g="auto1" title="電腦找特效跳出來的時間，開始設成特效前 1 秒">🪄 自動找特效</button><span style="flex:1"></span><button class="gb go" data-g="ok">✔ OK（下一個）</button></div></div>`;}
 function geBarDraw(){const r=GE.rows[GE.sel];if(!r)return;const [L,H]=geRg(r),W=H-L,b=document.getElementById("geBar");if(!b)return;
   const a=Math.max(0,r.pos-GE.cur.pre),e=r.pos+GE.cur.post;const v=document.getElementById("geV");const ct=v?v.currentTime:a;
   b.innerHTML=`<i style="left:${(a-L)/W*100}%;width:${(e-a)/W*100}%"></i><em style="left:${(r.pos-L)/W*100}%"></em><u style="left:${Math.min(100,Math.max(0,(ct-L)/W*100))}%"></u>`;
@@ -51286,7 +51286,13 @@ function geVidWire(){const v=document.getElementById("geV");geBarDraw();if(!v)re
   v.addEventListener("timeupdate",()=>{geBarDraw();if(GE.stopAt!=null&&v.currentTime>=GE.stopAt){v.pause();GE.stopAt=null;}});
   const bar=document.getElementById("geBar");bar.addEventListener("click",e=>{const R=bar.getBoundingClientRect(),[L,H]=geRg(r);try{v.currentTime=L+(e.clientX-R.left)/R.width*(H-L);}catch(x){}});}
 function gePlay(from){const v=document.getElementById("geV"),r=GE.rows[GE.sel];if(!v||!r)return;const a=Math.max(0,r.pos-GE.cur.pre);GE.stopAt=r.pos+GE.cur.post;try{v.currentTime=from==null?a:from;}catch(e){}v.play().catch(()=>{});}
-async function geClick(e){const b=e.target.closest("[data-g],[data-gt]");if(!b)return;
+async function geAuto1(){const r=GE.rows[GE.sel];if(!r)return;const bt=document.querySelector('#geEd [data-g="auto1"]');if(bt){bt.disabled=true;bt.textContent="🪄 找…";}   /* V1.1.88 禮物剪輯也能自動找特效 */
+  let j=null;try{j=await rvPost("/api/pc/pfx/set",{op:"gav_onset",sid:GE.sid||PFX.gsid||0,cells:[{rid:r.rid,f:r.f,pos:r.pos}]});}catch(e){}
+  const on=j&&j.on?j.on[String(r.rid)]:null;if(bt){bt.disabled=false;bt.textContent="🪄 自動找特效";}
+  if(on==null){if(typeof toast==="function")toast("🪄 這格找不到特效跳出來的時間，請自己調");return;}
+  GE.cur.pre=Math.round((1-on)*10)/10;if(GE.cur.post<-GE.cur.pre+1)GE.cur.post=Math.ceil(-GE.cur.pre+6);geBarDraw();const v=document.getElementById("geV");if(v){v.currentTime=Math.max(0,r.pos-GE.cur.pre);}
+  if(typeof toast==="function")toast(`🪄 特效在送禮後 ${on} 秒跳出來 → 從那之前 1 秒開始（按 ✔ OK 才算數）`);}
+async function geClick(e){const b=e.target.closest("[data-g],[data-gt]");if(!b)return;if(b.dataset.g==="auto1"){geAuto1();return;}
   if(b.dataset.gt!=null){const i=+b.dataset.gt;GE.sel=GE.sel===i?-1:i;const sx=(document.getElementById("geStrip")||{}).scrollLeft||0;geDraw();const st=document.getElementById("geStrip");if(st)st.scrollLeft=sx;const ed=document.getElementById("geEd");if(ed)ed.scrollIntoView({behavior:"smooth",block:"nearest"});return;}
   const g=b.dataset.g,r=GE.rows[GE.sel];
   if(g==="x"){geClose();if(PFX.root)pfxLoad(PFX.root);return;}
@@ -51344,7 +51350,7 @@ function gavCss(){if(document.getElementById("gavCss"))return;const s=document.c
 .gvW .gvSes{display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;background:rgba(120,140,170,.1);cursor:pointer}.gvW .gvSes:hover{background:rgba(46,125,246,.18)}
 .gvW .gvL{display:flex;flex-direction:column;gap:6px}.gvW .gvI{display:flex;gap:10px;align-items:center;padding:6px;border-radius:10px;background:rgba(120,140,170,.08);cursor:pointer;border:2px solid transparent}
 .gvW .gvI.on{border-color:#2e7df6;background:rgba(46,125,246,.16)}.gvW .gvI img{width:min(62vw,560px);aspect-ratio:720/256;object-fit:cover;border-radius:6px;background:#000;flex:0 0 auto}
-.gvW .gvI .tx{display:flex;flex-direction:column;gap:2px;font-size:13px;min-width:0}.gvW .gvI .ck{font-size:22px;flex:0 0 auto}
+.gvW .gvL.cmp{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}.gvW .gvL.cmp .gvI img{width:240px}.gvW .gvL.cmp .gvI .ck{font-size:18px}.gvW .gvI .tx{display:flex;flex-direction:column;gap:2px;font-size:13px;min-width:0}.gvW .gvI .ck{font-size:22px;flex:0 0 auto}
 .gvW .gvG{position:relative;background:#000;border-radius:6px;overflow:hidden}.gvW .gvCell{position:absolute;background:#111;overflow:hidden;cursor:pointer}
 .gvW .gvCell video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% var(--fy,50%)}.gvW .gvCell.sel::after{content:"";position:absolute;inset:0;border:3px solid #f0ad4e;border-radius:4px;pointer-events:none;z-index:2}.gvW.nolb .gvCell .lb{display:none}.gvW .gvCell .lb{position:absolute;left:0;right:0;bottom:0;z-index:3;font-size:10px;line-height:1.25;padding:2px 3px;background:rgba(0,0,0,.55);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gvW .gvCell .ld{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:4px;font-size:11px;color:#aaa}.gvW .gvCell .ld.err{color:#ff8a8a}.gvW .gvLay .on{background:#f0ad4e;border-color:#f0ad4e;color:#111}.gvW .gvCell.empty{background:#000;cursor:default}
@@ -51381,8 +51387,8 @@ function gavPick(){GAV.st="pick";const B=gavBox();if(!B)return;const d=GAV.d||{}
 <div class="gvR"><span class="gvS">送禮的人</span><select data-g="fu"><option value="">全部（${Object.keys(us).length} 位）</option>${Object.entries(us).sort((a,b)=>b[1].dia-a[1].dia).map(([u,x])=>`<option value="${rvE(u)}" ${u===GAV.fu?"selected":""}>${rvE(x.nick)}（${x.n} 個・${x.dia}💎）</option>`).join("")}</select>
 <span class="gvS">禮物</span><select data-g="fg"><option value="">全部</option>${Object.entries(gs).sort((a,b)=>b[1].dia-a[1].dia).map(([g,x])=>`<option value="${rvE(g)}" ${g===GAV.fg?"selected":""}>${rvE(g)}（${x.n} 個・${x.dia}💎）</option>`).join("")}</select>
 <span class="gvS">單次 ≥</span><select data-g="mn">${[1,10,100,500,1000,2000,5000].map(v=>`<option ${v===GAV.mn?"selected":""}>${v}</option>`).join("")}</select><span class="gvS">鑽</span></div>
-<div class="gvR"><span class="gvS">符合 ${F.length} 個</span><button class="gb" data-g="all">✔ 全選這些</button><button class="gb" data-g="none">✕ 這些全不選</button><span class="gvS">已選 ${GAV.pick.size} 個</span></div></div>
-<div class="gvL">${F.slice(0,400).map(r=>{const o=gavO0(r.g),on=GAV.pick.has(r.rid);return `<div class="gvI${on?" on":""}" data-g="pk" data-rid="${r.rid}"><span class="ck">${on?"☑":"☐"}</span><img loading="lazy" src="${rvB()}/api/pc/pfx/gav/th?f=${r.f}&t=${Math.max(0,r.pos+o).toFixed(1)}&d=${D}" alt=""><div class="tx"><b>${rvE(r.g)}${r.cnt>1?" ×"+r.cnt:""} <span class="gvS">${r.dia}💎</span></b><span>${rvE(r.nick)}</span><span class="gvS">${mxT(r.ts-(d.live||r.ts))}${r.up?" ・📤 上傳的":""}${r.al?"":" ・時間未對齊"}</span></div></div>`;}).join("")||'<div class="gvS">沒有符合的禮物</div>'}${F.length>400?`<div class="gvS">只列前 400 個，請用上面篩選</div>`:""}</div>`;
+<div class="gvR"><span class="gvS">符合 ${F.length} 個</span><button class="gb" data-g="all">✔ 全選這些</button><button class="gb" data-g="none">✕ 這些全不選</button><span class="gvS">已選 ${GAV.pick.size} 個</span><button class="gb ${GAV.cmpL?"on":""}" data-g="cmpL">${GAV.cmpL?"▤ 大圖":"▦ 小圖（一次看更多）"}</button></div></div>
+<div class="gvL${GAV.cmpL?" cmp":""}">${F.slice(0,400).map(r=>{const o=gavO0(r.g),on=GAV.pick.has(r.rid);return `<div class="gvI${on?" on":""}" data-g="pk" data-rid="${r.rid}"><span class="ck">${on?"☑":"☐"}</span><img loading="lazy" src="${rvB()}/api/pc/pfx/gav/th?f=${r.f}&t=${Math.max(0,r.pos+o).toFixed(1)}&d=${D}" alt=""><div class="tx"><b>${rvE(r.g)}${r.cnt>1?" ×"+r.cnt:""} <span class="gvS">${r.dia}💎</span></b><span>${rvE(r.nick)}</span><span class="gvS">${mxT(r.ts-(d.live||r.ts))}${r.up?" ・📤 上傳的":""}${r.al?"":" ・時間未對齊"}</span></div></div>`;}).join("")||'<div class="gvS">沒有符合的禮物</div>'}${F.length>400?`<div class="gvS">只列前 400 個，請用上面篩選</div>`:""}</div>`;
   gavBar(`<span class="n">已選 ${GAV.pick.size} 個</span>${GAV.cells.length?`<button data-g="togrid">回陣列（${GAV.cells.length} 格）</button>`:""}<button class="go" data-g="next" ${GAV.pick.size?"":"disabled"}>下一步：排成陣列 ▶</button>`);}
 function gavSg(o){return o<0?"前 "+(-o)+" 秒":o>0?"後 "+o+" 秒":"當下";}
 function gavToGrid(){const old={};GAV.cells.forEach(c=>old[c.rid]=c);GAV.cells=[...GAV.pick].map(rid=>GAV.R[rid]).filter(Boolean).sort((a,b)=>a.ts-b.ts).map(r=>old[r.rid]||{rid:r.rid,o:gavO0(r.g)});
@@ -51413,7 +51419,7 @@ function gavGrid(){GAV.st="grid";const B=gavBox();if(!B)return;const n=GAV.cells
 /* V1.1.80 疊法（跟截圖全覽／動態拼貼一樣）：間距可以負數（疊在一起）、左右疊、上下疊、臉位置 ▲▼；另外可以把疊的地方柔化過渡 */
 function gavLay0(){let v={};try{v=JSON.parse(localStorage.getItem("tlm_gav_lay")||"null")||JSON.parse(localStorage.getItem("tlm_ga_lay")||"null")||{};}catch(e){}
   return {gap:Math.max(-0.5,Math.min(0.5,+v.gap||0)),zh:v.zh==="l"?"l":"r",zv:v.zv==="u"?"u":"d",fy:Math.max(-50,Math.min(50,Math.round(+v.fy||0))),fe:v.fe!==false,nolb:!!v.nolb};}
-GAV.L=gavLay0();
+GAV.L=gavLay0();try{GAV.cmpL=localStorage.getItem("tlm_gav_cmpl")==="1";}catch(e){}
 function gavLaySave(){try{localStorage.setItem("tlm_gav_lay",JSON.stringify(GAV.L));}catch(e){}gavSave();}
 function gavZ(c,r){return 1+(GAV.L.zv==="d"?r:500-r)*200+(GAV.L.zh==="r"?c:199-c);}
 function gavFeather(c,r,C,R){const L=GAV.L;if(L.gap>=0||!L.fe)return [0,0,0,0];const g=-L.gap;   /* [左,右,上,下]：疊在別格上面的那一邊，在重疊的寬度內慢慢變透明 */
@@ -51521,6 +51527,7 @@ async function gavJob(){clearTimeout(GAV.jt);const el=document.getElementById("g
 async function gavClick(e){const b=e.target.closest("[data-g]");if(!b)return;const g=b.dataset.g;
   if(g==="ses"){gavLoad(+b.dataset.sid);return;}if(g==="back"){GAV.sid=0;GAV.d=null;gavSes();return;}
   if(g==="pk"){const rid=+b.dataset.rid;if(GAV.pick.has(rid))GAV.pick.delete(rid);else GAV.pick.add(rid);b.classList.toggle("on",GAV.pick.has(rid));const ck=b.querySelector(".ck");if(ck)ck.textContent=GAV.pick.has(rid)?"☑":"☐";gavBar(`<span class="n">已選 ${GAV.pick.size} 個</span>${GAV.cells.length?`<button data-g="togrid">回陣列（${GAV.cells.length} 格）</button>`:""}<button class="go" data-g="next" ${GAV.pick.size?"":"disabled"}>下一步：排成陣列 ▶</button>`);return;}
+  if(g==="cmpL"){GAV.cmpL=!GAV.cmpL;try{localStorage.setItem("tlm_gav_cmpl",GAV.cmpL?"1":"");}catch(e){}gavPick();return;}
   if(g==="all"){gavFilt().slice(0,400).forEach(r=>GAV.pick.add(r.rid));gavPick();return;}if(g==="none"){gavFilt().forEach(r=>GAV.pick.delete(r.rid));gavPick();return;}
   if(g==="next"){gavToGrid();return;}if(g==="togrid"){GAV.st="grid";gavGrid();return;}if(g==="topick"){gavPick();return;}
   if(g==="cell"){const rid=+b.dataset.rid;if(GAV.multi){if(GAV.sel.has(rid))GAV.sel.delete(rid);else GAV.sel.add(rid);}else{if(GAV.sel.size===1&&GAV.sel.has(rid))GAV.sel.clear();else GAV.sel=new Set([rid]);}
