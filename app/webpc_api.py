@@ -935,6 +935,7 @@ def route(win, sock, method, rest, q, body):
         p_ = win._pfx_thumb(q.get('i', '-1'), q.get('t', '0'))
         if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True
         win._web_send_file(sock, p_, 'image/jpeg'); return True
+    if name == 'pfx/gav/stats' and method == 'GET': _bg(win, sock, win._gav_stats); return True   # V1.1.92 調整紀錄分析（只讀）
     if name == 'pfx/gav/ses' and method == 'GET': _bg(win, sock, win._gav_sessions); return True   # V1.1.77 禮物陣列影片（只讀）
     if name == 'pfx/gav' and method == 'GET':
         s_ = int(q.get('sid', '0') or 0); _bg(win, sock, lambda: win._gav_rows(s_)); return True

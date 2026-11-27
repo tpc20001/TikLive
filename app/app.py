@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.91"
+APP_VERSION = "1.1.92"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -37668,6 +37668,32 @@ $r | ConvertTo-Json -Depth 4 -Compress
             finally: st['run'] = False
         threading.Thread(target=work, daemon=True, name='TikLiveGavPre').start()
 
+    def _gav_stats(self):
+        """V1.1.92 📊 調整紀錄分析（禮物陣列＋禮物剪輯的學習資料）：每種禮物、每位送禮者、同時開播人數 → 最後調到「送禮後幾秒開始」的中位數、分散程度、幾格."""
+        last = {}
+        try:
+            lp = self._gav_log_path()
+            if lp.is_file():
+                with open(lp, 'rb') as fh:
+                    fh.seek(max(0, lp.stat().st_size - 6 * 1024 * 1024)); raw = fh.read().decode('utf-8', 'ignore').splitlines()
+                for ln in raw:
+                    try: x = json.loads(ln)
+                    except Exception: continue
+                    if x.get('to') is not None: last[(x.get('sid'), x.get('rid'))] = x
+        except Exception: pass
+        def agg(key):
+            G = {}
+            for x in last.values(): G.setdefault(key(x), []).append(float(x['to']))
+            out = []
+            for k, v in G.items():
+                v = sorted(v); m = v[len(v) // 2]; q1, q3 = v[len(v) // 4], v[(3 * len(v)) // 4]
+                out.append({'k': k, 'n': len(v), 'med': round(m, 2), 'iqr': round(q3 - q1, 2), 'min': round(v[0], 2), 'max': round(v[-1], 2)})
+            return sorted(out, key=lambda z: -z['n'])[:40]
+        ln_ = lambda x: (lambda n: '0～1 位' if n <= 1 else '2～5 位' if n <= 5 else '6～15 位' if n <= 15 else '16 位以上')(int(x.get('live_n') or 0))
+        return {'ok': True, 'n': len(last), 'auto': sum(1 for x in last.values() if x.get('auto')),
+                'gift': agg(lambda x: str(x.get('g') or '?')), 'giver': agg(lambda x: str(x.get('giver') or '?')), 'host': agg(lambda x: str(x.get('host') or '?')),
+                'live': agg(ln_), 'al': agg(lambda x: '聲音對齊' if x.get('al') else '時間推的')}
+
     def _gav_defs(self):
         """學到的「每種禮物從送禮後第幾秒開始」：同一種禮物每格最後調到的值，最近 20 格取中位數（≥2 格才算）；全部 ≥5 格時另給一個總預設."""
         c = self.__dict__.get('_gav_def_c')
@@ -51397,7 +51423,7 @@ function gavCss(){if(document.getElementById("gavCss"))return;const s=document.c
 .gvW .gvCell video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% var(--fy,50%)}.gvW .gvCell.sel::after{content:"";position:absolute;inset:0;border:3px solid #f0ad4e;border-radius:4px;pointer-events:none;z-index:2}.gvW.nolb .gvCell .lb{display:none}.gvW .gvCell .lb{position:absolute;left:0;right:0;bottom:0;z-index:3;font-size:10px;line-height:1.25;padding:2px 3px;background:rgba(0,0,0,.55);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gvW .gvCell .ld{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:4px;font-size:11px;color:#aaa}.gvW .gvCell .ld.err{color:#ff8a8a}.gvW .gvLay .on{background:#f0ad4e;border-color:#f0ad4e;color:#111}.gvW .gvCell.empty{background:#000;cursor:default}
 .gavBar{position:fixed;left:0;right:0;bottom:0;z-index:9000;display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:center;padding:8px 96px 10px 10px;background:rgba(18,24,34,.96);color:#e8edf5;border-top:1px solid rgba(140,150,165,.35)}
-.gavBar .n{font-size:13px;opacity:.85}.gvW .gvMore>summary{cursor:pointer;font-size:13px;font-weight:700;padding:2px 0}
+.gavBar .n{font-size:13px;opacity:.85}.gvW .gvTb{border-collapse:collapse;font-size:12px;margin-top:4px;width:100%}.gvW .gvTb td,.gvW .gvTb th{border-bottom:1px solid rgba(140,150,165,.2);padding:3px 6px;text-align:left}.gvW .gvMore>summary{cursor:pointer;font-size:13px;font-weight:700;padding:2px 0}
 @media (max-width:700px){.gavBar{flex-wrap:nowrap;overflow-x:auto;justify-content:flex-start;padding:6px 8px}.gavBar button{padding:7px 10px;font-size:13px;flex:0 0 auto}.gavBar button.gvBig{font-size:15px;min-width:50px;padding:8px 10px}.gavBar .n{flex:0 0 auto;max-width:26vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.gvW .gvTr .gb{min-width:40px;padding:6px 8px}.gvW .gb{padding:6px 9px;font-size:13px}}.gvW .gvHelp summary{cursor:pointer;font-size:12px;opacity:.75}#gavCmp{position:fixed;inset:0;z-index:100000;background:rgba(8,10,14,.96);color:#e8edf5;display:flex;flex-direction:column;gap:8px;padding:10px}#gavCmp .gcH,#gavCmp .gcF{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center}#gavCmp .gcH .gvS{flex:1;font-size:12px;opacity:.75}
 #gavCmp .gcB{flex:1;min-height:0;display:flex;gap:10px;justify-content:center}#gavCmp .gcV{position:relative;height:100%;aspect-ratio:9/16;max-width:48vw;background:#000;border-radius:8px;overflow:hidden}#gavCmp .gcV video{width:100%;height:100%;object-fit:cover}#gavCmp .gcE{display:flex;align-items:center;justify-content:center;font-size:13px;opacity:.7}
 #gavCmp .lb{position:absolute;left:0;right:0;bottom:0;padding:4px 6px;background:rgba(0,0,0,.6);font-size:12px}#gavCmp .gb{border:1px solid rgba(140,150,165,.5);background:rgba(120,140,170,.15);color:inherit;border-radius:9px;padding:9px 14px;font-size:14px}#gavCmp .gvBig{font-size:18px;min-width:70px}.gvW .gvOut{display:flex;flex-direction:column;gap:6px;align-items:center;margin-top:8px}.gvW .gvOut video{max-width:100%;max-height:60vh;background:#000;border-radius:8px}.gvW a.gb{text-decoration:none;display:inline-block}.gvW .gvPb{height:10px;border-radius:6px;background:rgba(120,140,170,.2);overflow:hidden;margin:4px 0}.gvW .gvPb i{display:block;height:100%;background:linear-gradient(90deg,#2e7df6,#45d483);transition:width .4s}.gvW .gvTr{gap:4px}.gvW .gvTr .gb{padding:7px 10px;min-width:46px}.gvW #gavDl{margin-left:auto;color:#f0ad4e}
@@ -51414,7 +51440,12 @@ function gavBar(h){let b=document.getElementById("gavBar");if(!h){if(b)b.remove(
 function gavLeft(){return !GAV.root||!GAV.root.isConnected||!gavBox();}
 async function gavSes(){GAV.st="ses";gavBar("");let j=null;try{j=await rvGet("/api/pc/pfx/gav/ses");}catch(e){}const B=gavBox();if(!B)return;const L=(j&&j.L)||[];
   B.innerHTML=`<div class="gvC"><h3>🎛 禮物陣列影片</h3><div class="gvS">用手機錄到的特效（每一種禮物都有）：選一場 → 挑送禮（看 5 張預覽圖挑表情好看的）→ 排成陣列一起循環播、每格 ±0.1 秒對齊 → 選排法輸出一支 MP4。跟批量剪輯、GIF 陣列是分開的。</div></div>
+<details class="gvC" id="gavSt"><summary><b>📊 調整紀錄分析</b> <span class="gvS">（每次調的開始時間都記下來；看哪種禮物、哪位送禮者、開播人數多的時候延遲比較大）</span></summary><div id="gavStB" class="gvS">讀取中…</div></details>
 <div class="gvC"><b>選一場（有手機特效的）</b><div class="gvL">${L.map(x=>`<div class="gvSes" data-g="ses" data-sid="${x.sid}">${x.g?`<b style="color:${x.g==="S"?"#ff5a7a":"#8a93a3"}">${rvE(x.g)}</b>`:""}<b>${rvE(x.name||x.u)}</b><span class="gvS">#${String(x.sid).padStart(5,"0")} · ${x.t?new Date(x.t*1000).toLocaleString("zh-TW",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}):""} · ${x.n} 段手機特效</span></div>`).join("")||'<div class="gvS">還沒有手機特效錄影</div>'}</div></div>`;}
+document.addEventListener("toggle",e=>{if(e.target&&e.target.id==="gavSt"&&e.target.open)gavStats();},true);
+async function gavStats(){const B=document.getElementById("gavStB");if(!B)return;let j=null;try{j=await rvGet("/api/pc/pfx/gav/stats");}catch(e){}if(!j||!j.ok){B.textContent="讀不到";return;}
+  const T=(t,L)=>`<div style="margin-top:8px"><b>${t}</b><table class="gvTb"><tr><th></th><th>格數</th><th>中位數（送禮後幾秒開始）</th><th>中間一半的範圍</th><th>最早～最晚</th></tr>${L.map(x=>`<tr><td>${rvE(x.k)}</td><td>${x.n}</td><td><b>${x.med>0?"+":""}${x.med}</b></td><td>${x.iqr}</td><td>${x.min}～${x.max}</td></tr>`).join("")}</table></div>`;
+  B.innerHTML=j.n?`共 ${j.n} 格（🪄 自動 ${j.auto} 格）。數字＝最後調到的開始時間（負的＝送禮前）；「中間一半的範圍」越大代表越不固定。`+T("🎁 每種禮物",j.gift)+T("👤 送禮的人",j.giver)+T("📺 同時開播幾位",j.live)+T("🔊 時間怎麼對的",j.al)+T("🎤 主播",j.host):"還沒有紀錄（禮物陣列調過就會有）";}
 async function gavLoad(sid){GAV.sid=+sid;GAV.st="pick";const B=gavBox();if(B)B.innerHTML='<div class="gvC">讀取這場的禮物…</div>';let d=null;try{d=await rvGet("/api/pc/pfx/gav?sid="+sid);}catch(e){}if(gavLeft())return;
   GAV.d=d||{rows:[]};GAV.rows=GAV.d.rows||[];GAV.R={};GAV.rows.forEach(r=>GAV.R[r.rid]=r);GAV.fu="";GAV.fg="";GAV.sel=new Set();GAV.log={};
   const sv=GAV.d.saved;GAV.cells=[];GAV.pick=new Set();if(sv&&sv.cells){GAV.D=+sv.D||8;GAV.C=+sv.C||0;if(sv.lay)GAV.L=Object.assign(gavLay0(),sv.lay);sv.cells.forEach(c=>{if(GAV.R[c.rid]){GAV.cells.push({rid:c.rid,o:+c.o});GAV.pick.add(c.rid);}});}
