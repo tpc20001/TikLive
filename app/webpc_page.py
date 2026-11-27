@@ -41,7 +41,7 @@ input[type=checkbox],input[type=range]{padding:0}
 #qBtn{text-align:left;padding:5px 8px;font-size:11.5px;line-height:1.35;margin-top:4px;white-space:pre-line}
 main{display:flex;flex-direction:column;min-width:0;min-height:0}
 #tabsRow{display:flex;align-items:stretch;gap:6px;padding:4px 6px 2px;border-bottom:1px solid var(--border);background:var(--bg);min-height:56px}
-#tabMode{font-size:10.5px;font-weight:700;padding:2px 6px;white-space:pre;line-height:1.2;border-color:#2b3440}#tabMode.on{border-color:#45d483}
+#tabMode{font-size:10.5px;font-weight:700;padding:2px 6px;white-space:pre;line-height:1.2;border-color:#2b3440}#tabMode.on{border-color:#45d483}#tabMode:empty{display:none}
 #tabs{flex:1;display:flex;gap:2px;overflow-x:auto;overflow-y:hidden;align-items:stretch;padding-bottom:2px}
 #topRight{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:3px;font-size:11px;color:var(--subtext);white-space:nowrap}
 #topRight button{font-size:11.5px;padding:3px 8px}
@@ -49,7 +49,7 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0}
 .tb.on{background:var(--tab_active);border:2px solid var(--tab_active_border);padding:3px 7px 3px 5px}.tb.alert{background:var(--tab_alert);border:2px solid #ff4d6d}
 .tb .av{width:40px;height:40px}.tb .tx{display:flex;flex-direction:column;min-width:0;line-height:1.25}
 .tb .tx b{color:var(--tab_text);font-size:13px;white-space:nowrap;overflow:hidden;max-width:150px}.tb .tx .dl{font-size:11.5px;white-space:nowrap}
-.dia{color:#4dc9ff}.lik{color:#ff5c8a}.grn{color:#45d483}.tsub{color:var(--tab_sub)}
+.dia{color:#4dc9ff}.lik{color:#ff5c8a}.grn{color:#45d483}
 .tb.col{flex-direction:column;gap:1px;padding:6px 4px 3px;align-items:center}.tb.col .av{width:50px;height:50px}.tb.col .pill{position:absolute;top:3px;left:50%;transform:translateX(-50%);background:rgba(20,120,70,.92);color:#fff;font-size:10px;border-radius:5px;padding:0 4px;white-space:nowrap}
 .tb.col .t1{font-size:11px}.tb.col .t2{font-size:10.5px;white-space:nowrap}
 .tb.stk{padding:2px;border:0;background:transparent;margin-right:-8px}.tb.stk .av{width:34px;height:34px;box-shadow:0 0 0 2px var(--bg)}
