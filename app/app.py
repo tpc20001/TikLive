@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.93"
+APP_VERSION = "1.1.94"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -20448,7 +20448,18 @@ try { NLConnect | Out-Null; Unset
         return best, out
 
     def _phr_env(self, ff, path, ss=0.0, dur=None):
-        """V1.1.86 整段聲音的「起音曲線」：FFmpeg 自己算每 50 ms 的音量（astats），不用把整場聲音讀進 Python（3 小時也只要幾十秒、記憶體很小）."""
+        """V1.1.86 整段聲音的「起音曲線」：FFmpeg 自己算每 50 ms 的音量（astats），不用把整場聲音讀進 Python（3 小時也只要幾十秒、記憶體很小）.
+        V1.1.94 整場的結果記住（同一個檔沒變就不重算，最多 4 場）."""
+        if not ss and not dur:
+            try: k_ = (str(path), Path(path).stat().st_mtime_ns, Path(path).stat().st_size)
+            except Exception: k_ = None
+            C_ = self.__dict__.setdefault('_phr_env_c', {})
+            if k_ and k_ in C_: return C_[k_]
+            v_ = self._phr_env(ff, path, 0.001, None)
+            if k_:
+                if len(C_) >= 4: C_.pop(next(iter(C_)))
+                C_[k_] = v_
+            return v_
         cmd = [ff, '-hide_banner', '-loglevel', 'error', '-nostdin'] + (['-ss', f'{max(0.0, ss):.2f}'] if ss else []) + ['-i', str(path)] + (['-t', f'{dur:.2f}'] if dur else []) + \
               ['-vn', '-sn', '-ac', '1', '-af', 'aresample=8000,asetnsamples=n=400:p=0,astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-', '-f', 'null', '-']
         r = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=1800, **_no_window_kwargs(idle=True))
@@ -37444,7 +37455,13 @@ $r | ConvertTo-Json -Depth 4 -Compress
             x = items[sg[0]]; pos = T - x['s']
             out.append({'rid': int(rid), 'ts': float(ts), 'g': str(g or ''), 'dia': int(dd or 0), 'cnt': int(cnt or 1), 'u': str(u or ''), 'nick': str(nk or ''), 'f': x['id'], 'up': bool(x['up']),
                         'pos': round(pos, 2), 'fdur': round(float(x['dur'] or 0), 1), 'al': alof(x['id'])})
-        return {'ok': True, 'sid': sid, 'live': live, 'rows': out, 'segs': len(segs), 'nup': sum(1 for x in items.values() if x['up']), 'def': self._gav_defs(), 'saved': self._gav_load(sid),
+        dfs = dict(self._gav_defs())                                             # V1.1.94 陣列還沒調過的禮物：借禮物剪輯學到的「送禮前幾秒開始」
+        for g_ in {r['g'] for r in out} - set(dfs):
+            try:
+                pd_ = self._pfx_gdef(g_)
+                if pd_ and pd_[0] is not None and (pd_[2] if len(pd_) > 2 else 2) >= 2: dfs[g_] = [round(-float(pd_[0]), 1), int(pd_[2] if len(pd_) > 2 else 2)]
+            except Exception: pass
+        return {'ok': True, 'sid': sid, 'live': live, 'rows': out, 'segs': len(segs), 'nup': sum(1 for x in items.values() if x['up']), 'def': dfs, 'saved': self._gav_load(sid),
                 'job': {k: v for k, v in (self._pfx_S().get('gv') or {}).items() if k != 'cells'}}
 
     def _gav_dir(self, sub):
