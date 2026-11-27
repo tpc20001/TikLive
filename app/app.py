@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.01"
+APP_VERSION = "1.2.02"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -17944,7 +17944,7 @@ try { NLConnect | Out-Null; Unset
                 data=self._json_resp(r_,gz_)                                   # V1.1.52 壓縮也在背景
                 self._ui_call.emit(lambda d=data,s=sock: self._phone_raw(s,d))
             threading.Thread(target=w,daemon=True).start(); return
-        if rest=='api/days': J(self._web_days()); return
+        if rest=='api/days': _side_module('webpc_api')._bg(self,sock,self._web_days); return   # V1.2.02 背景查資料庫
         if rest=='api/hchart':                                     # V0.6.05 每場小圖表（背景執行緒查資料庫）
             ids=[x for x in str(q.get('ids','')).split(',') if x]
             def worker(sock=sock,ids=ids):
@@ -17952,7 +17952,7 @@ try { NLConnect | Out-Null; Unset
                 except Exception as ex: b=json.dumps({'error':str(ex),'items':{}})
                 self._ui_call.emit(lambda s=sock,b=b: self._phone_send(s,'200 OK',b,'application/json; charset=utf-8'))
             threading.Thread(target=worker,daemon=True).start(); return
-        if rest=='api/session': J(self._web_session(int(q.get('id','0') or 0))); return
+        if rest=='api/session': sid_=int(q.get('id','0') or 0); _side_module('webpc_api')._bg(self,sock,lambda: self._web_session(sid_)); return   # V1.2.02 背景查資料庫
         if rest=='api/pc/fastimg': J(self._fast_info()); return       # V1.1.49 圖片快速通道（埠＋鑰匙；要登入才拿得到）
         if rest=='api/replay':                                     # V0.6.23b 背景執行
             sid_=int(q.get('id','0') or 0); gz_='gzip' in str((getattr(sock,'_hdr',{}) or {}).get('accept-encoding',''))
