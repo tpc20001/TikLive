@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.99"
+APP_VERSION = "1.1.100"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -30815,11 +30815,11 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 import hashlib; k_=md_ or hashlib.md5(body).digest(); C_=self.__dict__.setdefault('_gz_page_c',{})
                 z_=C_.get(k_)
                 if z_ is None:
-                    z_=gzip.compress(body,6)
+                    z_=gzip.compress(body,9)   # V1.1.100 整頁只壓一次 → 用最高壓縮（手機下載更小）
                     if len(C_)>=6: C_.pop(next(iter(C_)))
                     C_[k_]=z_
                 body=z_
-            else: body=gzip.compress(body,6)
+            else: body=gzip.compress(body,4 if len(body)>262144 else 6)   # V1.1.100 大的資料用快一點的壓縮（畫面執行緒少一半時間、只大約 3%）
             extra+='Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n'
         cc='no-cache' if cache==-1 else (f'private, max-age={int(cache)}' if cache else 'no-store')
         head=f'HTTP/1.1 {code}\r\nContent-Type: {ctype}\r\nContent-Length: {len(body)}\r\nCache-Control: {cc}\r\n{extra}Connection: close\r\n\r\n'.encode('ascii')
