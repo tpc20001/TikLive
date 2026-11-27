@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.84"
+APP_VERSION = "1.1.85"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -20747,7 +20747,10 @@ try { NLConnect | Out-Null; Unset
                 J.update(msg=f'第 {k + 1}/{n} 段：{lab} {fmt_elapsed(b - a)}（{"整支複製" if whole else "照原本解析度剪"}）', done=k)
                 if whole: cmd = [ff, '-y', '-v', 'error', '-i', str(src), '-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-movflags', '+faststart', str(part)]
                 else: cmd = [ff, '-y', '-v', 'error', '-ss', f'{max(0.0, off):.3f}', '-i', str(src), '-t', f'{b - a:.3f}', '-map', '0:v:0', '-map', '0:a:0?'] + va + ['-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', str(part)]
-                r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=4 * 3600, **_no_window_kwargs(idle=True))
+                r = None
+                if not whole and enc != 'libx264':                                         # V1.1.85 先連解碼都交給顯示卡
+                    r = subprocess.run(cmd[:4] + ['-hwaccel', 'auto'] + cmd[4:], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=4 * 3600, **_no_window_kwargs(idle=True))
+                if r is None or r.returncode != 0: r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=4 * 3600, **_no_window_kwargs(idle=True))
                 if r.returncode != 0 and not whole and enc != 'libx264':                   # 顯示卡不行就用 CPU 再做一次
                     cmd = [c for c in cmd]; vi = cmd.index(va[0]); cmd[vi:vi + len(va)] = self._video_encoder_args('libx264')
                     r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=4 * 3600, **_no_window_kwargs(idle=True))
@@ -37371,10 +37374,13 @@ $r | ConvertTo-Json -Depth 4 -Compress
             ff = self._experiment_ffmpeg()
             if not ff: return None
             tmp = out.with_name(f'{out.stem}.{threading.get_ident()}.part.jpg')
-            subprocess.run([ff, '-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-ss', f'{t:.2f}', '-i', str(p), '-t', f'{d:.2f}', '-an', '-sn',
-                            '-vf', f'fps={5 / d:.4f},scale=144:-2,tile=5x1', '-frames:v', '1', '-q:v', '5', str(tmp)],
-                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, **_no_window_kwargs(idle=True))
-            if tmp.is_file() and tmp.stat().st_size > 500: os.replace(tmp, out); return out
+            for hw_ in (['-hwaccel', 'auto'], []):                               # V1.1.85 先用顯示卡解碼，不行再 CPU
+                try:
+                    subprocess.run([ff, '-hide_banner', '-loglevel', 'error', '-nostdin', '-y'] + hw_ + ['-ss', f'{t:.2f}', '-i', str(p), '-t', f'{d:.2f}', '-an', '-sn',
+                                    '-vf', f'fps={5 / d:.4f},scale=144:-2,tile=5x1', '-frames:v', '1', '-q:v', '5', str(tmp)],
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, **_no_window_kwargs(idle=True))
+                except Exception: pass
+                if tmp.is_file() and tmp.stat().st_size > 500: os.replace(tmp, out); return out
         return None
 
     @staticmethod
@@ -37439,10 +37445,11 @@ $r | ConvertTo-Json -Depth 4 -Compress
             ff, enc = self._pfx_ffenc()
             if not ff: return {'ok': False, 'message': '找不到 ffmpeg', 'why': '找不到 ffmpeg'}
             tmp = out.with_name(f'{out.stem}.{threading.get_ident()}.part.mp4')
-            for e_ in ([enc, 'libx264'] if enc != 'libx264' else ['libx264']):
+            tries = ([(enc, ['-hwaccel', 'auto']), (enc, []), ('libx264', [])] if enc != 'libx264' else [('libx264', [])])   # V1.1.85 有顯示卡：解碼也交給顯示卡（不行再用 CPU）
+            for e_, hw_ in tries:
                 va = self._video_encoder_args(e_) if e_ != 'libx264' else ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28', '-pix_fmt', 'yuv420p', '-threads', '2']
                 try:
-                    r = subprocess.run([ff, '-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-ss', f'{t0:.2f}', '-i', str(p), '-t', f'{dur:.2f}', '-an', '-sn',
+                    r = subprocess.run([ff, '-hide_banner', '-loglevel', 'error', '-nostdin', '-y'] + hw_ + ['-ss', f'{t0:.2f}', '-i', str(p), '-t', f'{dur:.2f}', '-an', '-sn',
                                         '-vf', f'scale={self.GAV_PXW}:-2,fps=30'] + va + ['-g', '30', '-movflags', '+faststart', str(tmp)],
                                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=300, **_no_window_kwargs(idle=True))
                     if r.returncode == 0 and tmp.is_file() and tmp.stat().st_size > 1000: why = ''; break
@@ -37597,8 +37604,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     vf = f"fps={fps},scale={cw}:{ch}:force_original_aspect_ratio=increase,crop={cw}:{ch}:(iw-{cw})/2:(ih-{ch})*{fyf:.4f},setsar=1" + (f",tpad=start_mode=clone:start_duration={pad:.2f}" if pad > 0 else '') + f",tpad=stop_mode=clone:stop_duration={D:.2f}"
                     if fast and px_off is not None and str(p).startswith(str(self._gav_dir('gav_px'))):
                         pre[i] = (p, max(0.0, st), max(0.1, D - pad), vf); continue
-                    for e_ in ([enc, 'libx264'] if enc != 'libx264' else ['libx264']):
-                        cmd = [ff, '-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-ss', f'{max(0.0, st):.3f}', '-i', str(p), '-t', f'{max(0.1, D - pad):.3f}', '-vf', vf, '-t', f'{D:.3f}'] + va(e_)
+                    for e_, hw_ in ([(enc, ['-hwaccel', 'auto']), (enc, []), ('libx264', [])] if enc != 'libx264' else [('libx264', [])]):
+                        cmd = [ff, '-hide_banner', '-loglevel', 'error', '-nostdin', '-y'] + hw_ + ['-ss', f'{max(0.0, st):.3f}', '-i', str(p), '-t', f'{max(0.1, D - pad):.3f}', '-vf', vf, '-t', f'{D:.3f}'] + va(e_)
                         cmd += (['-af', f'aresample=48000,apad=whole_dur={D:.3f}', '-c:a', 'aac', '-b:a', '128k', '-ac', '2'] if aud else ['-an']) + [str(o)]
                         r = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=600, **_no_window_kwargs(idle=True))
                         if r.returncode == 0 and o.is_file() and o.stat().st_size > 1000: ok = True; break
@@ -37763,9 +37770,11 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     if not bz: break
                     J['msg'] = '電腦忙，先等'; time.sleep(5)
                 o = tmpd / f'{k:04d}.mp4'
-                r = subprocess.run([ff, '-y', '-v', 'error', '-ss', f'{a:.3f}', '-i', str(segs[i][0]), '-t', f'{b - a:.3f}', '-map', '0:v:0', '-map', '0:a:0?'] + va +
-                                   ['-r', '30', '-af', 'aresample=async=1:first_pts=0,apad', '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart', str(o)],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=900, **_no_window_kwargs(idle=True))   # 輸入端 -ss＋重新壓縮＝對到那一格；輸出 -t 讓影音都剛好那麼長
+                for hw_ in ((['-hwaccel', 'auto'], []) if enc != 'libx264' else ([],)):   # V1.1.85 先用顯示卡解碼，不行再 CPU
+                    r = subprocess.run([ff, '-y', '-v', 'error'] + hw_ + ['-ss', f'{a:.3f}', '-i', str(segs[i][0]), '-t', f'{b - a:.3f}', '-map', '0:v:0', '-map', '0:a:0?'] + va +
+                                       ['-r', '30', '-af', 'aresample=async=1:first_pts=0,apad', '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart', str(o)],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=900, **_no_window_kwargs(idle=True))   # 輸入端 -ss＋重新壓縮＝對到那一格；輸出 -t 讓影音都剛好那麼長
+                    if r.returncode == 0 and o.is_file(): break
                 if r.returncode == 0 and o.is_file():
                     parts.append(o)
                     try:
