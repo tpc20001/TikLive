@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.94"
+APP_VERSION = "1.1.95"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -30998,6 +30998,13 @@ $r | ConvertTo-Json -Depth 4 -Compress
         finally:
             st['run'] = False
 
+    # ---------- TK_V1.0.79 IG 貼文／Reels（像 Repost app）：貼網址 → 照片存 JPG、影片存 MP4 → 跟 TKDownloader 同一顆硬碟的 IGDownloader ----------
+    # 只抓「公開」貼文；不登入、不用帳號密碼。私人帳號、限時動態（要登入）抓不到會直接說。
+    IGDL_DIR = 'IGDownloader'
+    _IGDL_RE = re.compile(r'https?://(?:www\.|m\.)?instagram\.com/(?:[A-Za-z0-9._]+/)?(p|reels?|tv)/([A-Za-z0-9_-]{5,})[^\s]*')
+    _IG_BASE = 'https://www.instagram.com'
+    _IG_APP = '936619743392459'
+
     def _igdl_dir(self):
         try: anc = Path(self.video_root()).anchor
         except Exception: anc = ''
@@ -51481,14 +51488,14 @@ function gavDraw(){if(GAV.st==="grid")return gavGrid();if(GAV.st==="ses")return 
 function gavFilt(){return GAV.rows.filter(r=>(!GAV.fu||r.u===GAV.fu)&&(!GAV.fg||r.g===GAV.fg)&&r.dia>=GAV.mn);}
 function gavPick(){GAV.st="pick";const B=gavBox();if(!B)return;const d=GAV.d||{},R=GAV.rows;
   const us={},gs={};R.forEach(r=>{if(r.dia<GAV.mn)return;const u=us[r.u]||(us[r.u]={n:0,dia:0,nick:r.nick});u.n++;u.dia+=r.dia;if(!GAV.fu||r.u===GAV.fu){const g=gs[r.g]||(gs[r.g]={n:0,dia:r.dia});g.n++;}});
-  const F=gavFilt(),D=GAV.D;
+  const F=gavFilt(),D=GAV.D,inG=new Set(GAV.cells.map(c=>c.rid));
   B.innerHTML=`<div class="gvC"><div class="gvR"><button class="gb" data-g="back">‹ 換場次</button><h3>🎛 #${String(GAV.sid).padStart(5,"0")} 挑禮物</h3></div>
 <div class="gvS">看得到的禮物 ${R.length} 個（照「🧩 手機版合併」的結果：${d.nup?`上傳的錄屏 ${d.nup} 支蓋掉的時間用上傳的，`:""}其他用手機特效，共 ${d.segs||0} 段）。每個禮物 5 張圖＝從送禮${gavSg(-1)}開始 ${D} 秒平均取 5 張，看主播表情好不好看，點一下選／不選。</div>
 <div class="gvR"><span class="gvS">送禮的人</span><select data-g="fu"><option value="">全部（${Object.keys(us).length} 位）</option>${Object.entries(us).sort((a,b)=>b[1].dia-a[1].dia).map(([u,x])=>`<option value="${rvE(u)}" ${u===GAV.fu?"selected":""}>${rvE(x.nick)}（${x.n} 個・${x.dia}💎）</option>`).join("")}</select>
 <span class="gvS">禮物</span><select data-g="fg"><option value="">全部</option>${Object.entries(gs).sort((a,b)=>b[1].dia-a[1].dia).map(([g,x])=>`<option value="${rvE(g)}" ${g===GAV.fg?"selected":""}>${rvE(g)}（${x.n} 個・${x.dia}💎）</option>`).join("")}</select>
 <span class="gvS">單次 ≥</span><select data-g="mn">${[1,10,100,500,1000,2000,5000].map(v=>`<option ${v===GAV.mn?"selected":""}>${v}</option>`).join("")}</select><span class="gvS">鑽</span></div>
 <div class="gvR"><span class="gvS">符合 ${F.length} 個</span><button class="gb" data-g="all">✔ 全選這些</button><button class="gb" data-g="none">✕ 這些全不選</button><span class="gvS">已選 ${GAV.pick.size} 個</span><button class="gb ${GAV.cmpL?"on":""}" data-g="cmpL">${GAV.cmpL?"▤ 大圖":"▦ 小圖（一次看更多）"}</button></div></div>
-<div class="gvL${GAV.cmpL?" cmp":""}">${F.slice(0,400).map(r=>{const o=gavO0(r.g),on=GAV.pick.has(r.rid);return `<div class="gvI${on?" on":""}" data-g="pk" data-rid="${r.rid}"><span class="ck">${on?"☑":"☐"}</span><img loading="lazy" src="${rvB()}/api/pc/pfx/gav/th?f=${r.f}&t=${Math.max(0,r.pos+o).toFixed(1)}&d=${D}" alt=""><div class="tx"><b>${rvE(r.g)}${r.cnt>1?" ×"+r.cnt:""} <span class="gvS">${r.dia}💎</span></b><span>${rvE(r.nick)}</span><span class="gvS">${mxT(r.ts-(d.live||r.ts))}${r.up?" ・📤 上傳的":""}${r.al?"":" ・時間未對齊"}</span></div></div>`;}).join("")||'<div class="gvS">沒有符合的禮物</div>'}${F.length>400?`<div class="gvS">只列前 400 個，請用上面篩選</div>`:""}</div>`;
+<div class="gvL${GAV.cmpL?" cmp":""}">${F.slice(0,400).map(r=>{const o=gavO0(r.g),on=GAV.pick.has(r.rid);return `<div class="gvI${on?" on":""}" data-g="pk" data-rid="${r.rid}"><span class="ck">${on?"☑":"☐"}</span><img loading="lazy" src="${rvB()}/api/pc/pfx/gav/th?f=${r.f}&t=${Math.max(0,r.pos+o).toFixed(1)}&d=${D}" alt=""><div class="tx"><b>${rvE(r.g)}${r.cnt>1?" ×"+r.cnt:""} <span class="gvS">${r.dia}💎</span>${inG.has(r.rid)?' <span class="gvS" style="color:#f0ad4e">📌 在陣列</span>':""}</b><span>${rvE(r.nick)}</span><span class="gvS">${mxT(r.ts-(d.live||r.ts))}${r.up?" ・📤 上傳的":""}${r.al?"":" ・時間未對齊"}</span></div></div>`;}).join("")||'<div class="gvS">沒有符合的禮物</div>'}${F.length>400?`<div class="gvS">只列前 400 個，請用上面篩選</div>`:""}</div>`;
   gavBar(`<span class="n">已選 ${GAV.pick.size} 個</span>${GAV.cells.length?`<button data-g="togrid">回陣列（${GAV.cells.length} 格）</button>`:""}<button class="go" data-g="next" ${GAV.pick.size?"":"disabled"}>下一步：排成陣列 ▶</button>`);}
 function gavSg(o){return o<0?"前 "+(-o)+" 秒":o>0?"後 "+o+" 秒":"當下";}
 function gavToGrid(){const old={};GAV.cells.forEach(c=>old[c.rid]=c);GAV.cells=[...GAV.pick].map(rid=>GAV.R[rid]).filter(Boolean).sort((a,b)=>a.ts-b.ts).map(r=>old[r.rid]||{rid:r.rid,o:gavO0(r.g)});
@@ -51670,8 +51677,8 @@ function mxAlDraw(){const A=MX.al,B=document.getElementById("mxB"),F=document.ge
   B.innerHTML=`<div class="geS">① 上面播<b>上傳的</b>、下面播<b>這場</b>；② 兩邊各自找到<b>同一瞬間</b>停住（同一個禮物特效剛出現、主播講同一句話、拍手…，可以點下面的禮物清單跳過去）；③ 按「🎯 這兩個是同一刻」。程式會再用<b>聲音在前後 2 秒內</b>找最準的那一點。</div>
 <div class="mxAG"><div class="mxAV"><div class="geR"><b>📤 上傳的</b><span class="geS">${rvE(x.name)}</span><span class="mxTt" id="mxUt">0:00.0</span></div><video id="mxU" playsinline preload="metadata" src="${rvB()}/phrec/${x.id}"></video>
 <input type="range" id="mxUr" min="0" max="${Math.max(1,x.dur||1)}" step="0.1" value="0"><div class="geR">${bt("up","","▶／⏸")}${stp("us")}${bt("um","","🔇")}</div></div>
-<div class="mxAV"><div class="geR"><b>🎬 這場</b><select id="mxRs">${A.refs.rec.length?`<option value="rec" ${A.mode==="rec"?"selected":""}>原本錄的</option>`:""}${A.refs.ph.length?`<option value="ph" ${A.mode==="ph"?"selected":""}>手機特效</option>`:""}</select><span class="mxTt" id="mxRt">開播 0:00.0</span></div>
-${(A.refs[A.mode]||[]).length?`<video id="mxR" playsinline preload="metadata" muted></video>`:`<div class="pfBad">這場沒有可以播的影片（原本錄的還是 FLV？）</div>`}
+<div class="mxAV"><div class="geR"><b>🎬 這場</b><select id="mxRs" ${A.refs.rec.length||A.refs.ph.length?"":'style="display:none"'}>${A.refs.rec.length?`<option value="rec" ${A.mode==="rec"?"selected":""}>原本錄的</option>`:""}${A.refs.ph.length?`<option value="ph" ${A.mode==="ph"?"selected":""}>手機特效</option>`:""}</select><span class="mxTt" id="mxRt">開播 0:00.0</span></div>
+${(A.refs[A.mode]||[]).length?`<video id="mxR" playsinline preload="metadata" muted></video>`:`<div class="pfBad">這場沒有可以播的影片（原本錄的還是 FLV、或已經刪了）→ 直接按下面「🎧 讓電腦用聲音整場找」</div>`}
 <input type="range" id="mxRr" min="0" max="${tot}" step="0.1" value="0"><div class="geR">${bt("rp","","▶／⏸")}${stp("rs")}${bt("rm","","🔈")}</div></div></div>
 <div class="geR" style="justify-content:center"><button class="gb" data-m="glob" title="不用自己找：電腦拿這支的聲音在整場錄音裡找位置">🎧 讓電腦用聲音整場找</button><button class="gb go" data-m="alok">🎯 這兩個是同一刻</button><label class="geS"><input type="checkbox" id="mxLk" ${A.link?"checked":""}> 🔗 上面動、下面跟著（照目前的對齊）</label></div>
 <div class="geS" id="mxAs">${x.man?"這支已經手動對齊過；":""}目前：這支從${x.s<0?"開播前 "+mxT1(-x.s):"開播 "+mxT1(x.s)} 開始。${bt("nd",-.5,"−0.5 秒")}${bt("nd",-.1,"−0.1")}${bt("nd",.1,"+0.1")}${bt("nd",.5,"+0.5 秒")}（只挪、不比聲音）</div>
