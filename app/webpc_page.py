@@ -19,6 +19,7 @@ body{background:var(--bg);color:var(--text);font:13px "Yu Gothic UI","Microsoft 
 button,input,select,textarea{font:inherit;color:inherit}
 button{background:var(--button);border:1px solid var(--border_strong);border-radius:8px;padding:5px 9px;cursor:pointer;color:var(--text)}
 button:hover{background:var(--button_hover)}button:disabled{opacity:.45;cursor:default}
+a{color:#5aa9ff}a.pill,a.gb,a.pfB{color:inherit;text-decoration:none}
 button.start,button.sstart{background:#e51e63;border:0;color:#fff;font-weight:800}button.start:hover,button.sstart:hover{background:#f0306f}
 input,select,textarea{background:var(--input);border:1px solid var(--border_strong);border-radius:7px;padding:4px 7px;color:var(--text_strong)}
 input[type=checkbox],input[type=range]{padding:0}
