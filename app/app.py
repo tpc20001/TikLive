@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.86"
+APP_VERSION = "1.1.87"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -37560,6 +37560,32 @@ $r | ConvertTo-Json -Depth 4 -Compress
             self._gav_pxidx_save()
         return {'ok': True, 'n': n, 't0': t0, 'L': dur}
 
+    def _gav_onset(self, f, pos):
+        """V1.1.87 🪄 找禮物特效出現的時間（相對送禮那一刻幾秒）：小預覽影片縮成 16×28 小圖（每秒 15 張），
+        送禮前 3～1 秒的畫面當「平常的樣子」（逐點中位數），之後每張跟它差多少；送禮前 1 秒～後 8 秒第一個「差很多而且持續 0.3 秒」的點＝特效跳出來. 找不到回 None."""
+        a = float(pos) - 3.0; t0, L = self._gav_win(a, float(pos) + 9.0)
+        x = self._gav_px(f, t0=t0, L=L, a=max(0.0, a), b=float(pos) + 9.0, minver=2)
+        if not x.get('ok'): return None
+        p = self._gav_dir('gav_px') / x['n']; ss = max(0.0, a - float(x['t0'])); ff = self._experiment_ffmpeg()
+        if not ff: return None
+        W_, H_, FPS = 16, 28, 15
+        r = subprocess.run([ff, '-hide_banner', '-loglevel', 'error', '-nostdin', '-ss', f'{ss:.2f}', '-i', str(p), '-t', '12', '-an',
+                            '-vf', f'crop=iw:ih*0.85:0:ih*0.15,fps={FPS},scale={W_}:{H_}:flags=area', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=60, **_no_window_kwargs(idle=True))
+        fs = W_ * H_ * 3; raw = r.stdout; F = [raw[k:k + fs] for k in range(0, len(raw) - fs + 1, fs)]
+        g0 = float(pos) - (float(x['t0']) + ss)                                 # 送禮在這段的第幾秒（通常 3）
+        nb = int(max(0.0, g0 - 0.8) * FPS)
+        if nb < 8 or len(F) < nb + 10: return None
+        base = bytes(sorted(fr[k] for fr in F[:nb])[nb // 2] for k in range(fs))
+        D = [sum(abs(a_ - b_) for a_, b_ in zip(fr, base)) / fs for fr in F]
+        bd = sorted(D[:nb]); med = bd[len(bd) // 2]; mad = sorted(abs(v - med) for v in bd)[len(bd) // 2] or 0.5
+        thr = med + max(8 * mad, 6.0)
+        for i_ in range(len(D)):
+            tt = i_ / FPS
+            if tt < g0 - 1.0 or tt > g0 + 8.0: continue
+            if D[i_] > thr and all(D[k] > thr * 0.8 for k in range(i_, min(len(D), i_ + 5))): return round(tt - g0, 2)
+        return None
+
     def _gav_pxfile(self, n):
         if not re.fullmatch(r'[0-9a-f]{20}\.mp4', str(n or '')): return None
         p = self._gav_dir('gav_px') / n; return p if p.is_file() else None
@@ -37592,7 +37618,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 with open(lp, 'a', encoding='utf-8') as fh:
                     for x in log[:500]:
                         fh.write(json.dumps({'t': round(time.time(), 1), 'sid': sid, 'host': hu, 'rid': int(x.get('rid') or 0), 'g': str(x.get('g') or '')[:40], 'dia': int(x.get('dia') or 0),
-                                             'giver': str(x.get('u') or '')[:60], 'from': x.get('from'), 'to': x.get('to'), 'D': W['D'], 'end': round(float(x['to']) + W['D'], 2) if x.get('to') is not None else None, 'al': bool(x.get('al')), 'live_n': ln, 'n': len(W['cells'])}, ensure_ascii=False) + '\n')
+                                             'giver': str(x.get('u') or '')[:60], 'from': x.get('from'), 'to': x.get('to'), 'auto': bool(x.get('auto')), 'D': W['D'], 'end': round(float(x['to']) + W['D'], 2) if x.get('to') is not None else None, 'al': bool(x.get('al')), 'live_n': ln, 'n': len(W['cells'])}, ensure_ascii=False) + '\n')
                 self.__dict__.pop('_gav_def_c', None)
             except Exception: pass
         return {'ok': True}
@@ -38225,6 +38251,12 @@ $r | ConvertTo-Json -Depth 4 -Compress
         if op == 'mixalign': return self._mix_align(d)                         # V1.1.76
         if op == 'gav_save': return self._gav_save(d)                           # V1.1.77 禮物陣列影片
         if op == 'gav_out': return self._gav_out(d)
+        if op == 'gav_onset':                                                   # V1.1.87 🪄 自動對齊：每格找特效出現的時間
+            out = {}
+            for c in (d.get('cells') or [])[:120]:
+                try: out[str(int(c['rid']))] = self._gav_onset(c['f'], float(c['pos']))
+                except Exception: out[str(c.get('rid'))] = None
+            return {'ok': True, 'on': out}
         if op == 'glearn': return self._pfx_learn_add(d)
         if op == 'reboot':
             T = self._pfx_tools(); dev = S.get('dev') or {}
@@ -46609,7 +46641,7 @@ const RULES=[
   {t:"空間不夠時",d:"<ul><li>SSD 剩不到 <b>"+RU_V('rec.ssd_min_free','GB',60)+"</b>：新的錄影改成直接錄在影片庫硬碟。</li><li>影片硬碟剩不到 <b>"+RU_V('rec.video_min_free','GB',30)+"</b>：不開始新的錄影（<b>聲音照錄</b>）。</li><li>🛡 C 槽守門員每分鐘看 C 剩多少、減少多快：第 1 級先停不急的背景工作；第 2 級全速把東西搬走；第 3 級（剩不到 15 GB 或 20 分鐘內會滿）才會一位一位停掉正在錄到 C 的影片（F → E → 未分級先停）。</li></ul>"},
   {t:"同一場直播的判定（斷線、重開）",d:"<ul><li>主播斷線後 <b>"+RU_V('conn.grace_minutes','分鐘',10)+"內</b>連回同一個直播間＝<b>續寫同一場</b>（錄影會分成第 2 段、第 3 段…）。</li><li>直播中卻 <b>"+RU_V('monitor.silent_min','分鐘',30)+"</b>沒有任何留言、禮物、進場、人數也沒變（而且沒在錄影）→ 重新連一次確認：還在播就續寫，結束了就把結束時間改回最後有資料的時間。</li><li>程式重開、斷電、超過 10 分鐘才連回來 → 會變成<b>另一場</b>。這種被切開的，用「⧉ 合併重複場次」合回一場（見「場次合併」）。</li></ul>"},
   {t:"開程式、熱更新時的監控",d:"<ul><li>開程式 3 秒後自動開始監控（設定可以關）。正在錄的場次在熱更新、重開時會<b>接著錄同一場</b>。</li><li>搬硬碟切換後，如果找不到影片硬碟（例如 R 槽代號跑掉），程式<b>先不開始監控</b>，不會錄到別的地方，會提示你去磁碟管理改代號。</li></ul>"},
-  {t:"📲 手機錄特效",d:"<ul><li>一支安卓手機（紅米 10）用 USB 接電腦，裝好 scrcpy（工具頁可自動從官方 GitHub 下載）。</li><li>主播開播 → 手機自己亮起來、打開那個直播間 → 錄下手機畫面＋聲音（有禮物特效）。一支手機一次錄一場。</li><li>錄誰：<b>S 級</b>的主播，照「工具 → 📲 手機錄特效」裡拖好的順序；按「▶ 開始」後，排最前面、正在直播的那位先錄，他下播換下一位還在播的。要加人＝在審核改成 S。</li><li>改順序要按右下角「✔ 套用」才生效；套用後（或排更前面的開播了）正在錄的不是第一順位 → 倒數 10 秒停掉、換錄新的那位。</li><li>主播斷線／下播超過 90 秒才停；TikTok 被關掉或跳走會自己重新打開直播間；拔線再插回、scrcpy 中斷 → 接著錄下一段（_p2、_p3…）。</li><li>手機超過 46°C 先停錄，降到 41°C 再繼續。</li><li>先錄在 SSD（MKV，斷電也播得了），結束後不重新壓縮換成 MP4（idle），搬到影片資料夾 <b>TikLive_手機特效\\帳號\\</b>；不到 15 秒的段丟掉。</li><li>回放：同一場可以切換「原本／手機」版本（用聲音對齊；對不上用錄影時間，可能差幾秒）。剪輯器那場的來源最後多一個手機特效檔。</li><li>S 級：手機特效版也排進 YouTube（標題加「手機特效版」，跟原本的是不同一部）。容量預測也算進去。</li><li>🎁 禮物剪輯：「錄好的」那場按「禮物剪輯」→ 選一位大哥（不算 10 鑽以下），或不分是誰、單次 ≥ 2000 鑽的全部 → 每個禮物一格（一次顯示 10 格，往右滑再載入）；點一格只載那一小段，用 ±1／±5 調送禮前、送禮後幾秒，按 OK 換下一格；沒調的用預設 → 全部接成一支 MP4（連在一起的併成一段，用顯示卡壓縮）。</li><li>學習時間差：每次按 OK 都記下來（禮物、你調的秒數、當時幾個人在播…）。同一種禮物有 2 筆以上就用它們當預設：取中位數、差太多的先不算、其他平均；之後資料夠了可以分析延遲原因。</li><li>回放切到「手機」版本時，程式自己畫的送禮動畫不顯示（手機畫面本來就有真的特效）。</li><li>🧩 手機版合併：同一場有手機特效（自動錄）和上傳的手機／平板錄屏（用「手機錄屏」上傳，聲音自動對上這場）→ 回放的「📱 手機」預設用上傳的把重疊時間蓋掉；「錄好的」按「🧩 合併」可以改成只蓋幾分到幾分，也可以照結果輸出：每段各一支（各自原本的解析度，不混在一起、不補黑邊；被上傳的蓋掉的手機特效不輸出；整支用到直接複製，只用到一部分照原解析度剪），放在「暱稱_開播_#場次_手機合併」資料夾。</li><li>🎯 手動對齊：上傳的位置不對（聲音對不上、被放錯時間）→ 合併畫面每支上傳的按「🎯 手動對齊位置」：上面播上傳的、下面播這場（原本錄的或手機特效，可以點禮物清單跳過去），兩邊停在同一瞬間按「🎯 這兩個是同一刻」→ 程式再用聲音在前後 2 秒內找最準的一點（找不到就照你對的）；聲音沒對上（用錄影時間推的）的上傳，在「手機錄屏」上傳頁那支、和手機錄特效頁最上面都會出現「🎯」按鈕，一按直接進對齊畫面；之後可以 ±0.1／±0.5 秒微調、「▶ 兩個一起播」檢查；存過的「蓋幾分到幾分」會跟著一起挪。</li><li>🎛 禮物陣列影片（工具／網頁版第 61 頁，或「錄好的」那場按「🎛 禮物陣列」，跟批量剪輯、GIF 陣列分開）：選一場 → 用「送禮的人／禮物／單次 ≥ 幾鑽」篩，每個禮物 5 張預覽圖（從開始秒數起每格長度內平均 5 張）看表情挑 → 排成陣列（畫面照「🧩 手機版合併」的結果：上傳的平板／手機錄屏蓋掉的時間用上傳的，被取代的手機特效不會出現），全部格子一起從頭循環播（每格是送禮前 10 秒～後 20 秒的小預覽影片，顯示卡壓縮、存 SSD）→ 點一格用 −0.1／+0.1（按住一直調）、−1／+1 調它從哪裡開始，其他格照播；「☑ 多選」「同一種禮物」可以一起調；◀ ▶ 換位置、✕ 拿掉 → 選每格秒數、排法（幾欄×幾列）、長邊、要不要聲音 → 輸出一支 MP4（存在 TikLive_手機特效\_禮物陣列\，背景一次一件、電腦忙先等）。「⏱ 前後」開始／結束各有 −1／−0.1／+0.1／+1（按住一直調），一起改全部格子，每格一樣長，時間條看黃線＝送禮、藍框＝要的那段；「🧩 疊法」跟截圖全覽一樣：間距（負＝疊在一起）、左右疊、上下疊、臉位置 ▲▼，另外可以勾「疊的地方柔化過渡」（輸出也一樣）；每格的小預覽影片前面多留 15 秒、後面多留 20 秒，調前後大多不用重做，超出才只重做那一格；做好的存在電腦 SSD（最多 2 萬支），換排版、換秒數、下次打開都直接用，離開頁面電腦也會在背景繼續做；上面有進度條和大概還要多久，輸出也有；某格讀不到 → 點那格看原因、按「🔄 重新讀取」。選一格可以「🔍 放大跟上一格比」（兩格並排放大一起播，在那裡 ±0.1，◀ ▶ 換下一組）；電腦鍵盤 ←→ ±0.1（Shift ±1）、↑↓ 換格、空白鍵 播放／暫停、Esc 取消；「排序」可以照送禮時間／禮物種類／送禮的人／鑽石排；輸出時每格不大於 360 寬直接用小預覽影片一次拼完（快），要聲音或每格更大才回原檔。每次調整都記下來（_DB_SSD\pfx_gav_log.jsonl：哪種禮物、誰送、調前調後、當時幾個人在播），同一種禮物 2 格以上就自動當下次的預設開始秒數；工作區自動存，下次打開同一場接著做。</li><li>✂ 剪輯：那場有手機特效版會先問要剪「原本錄的」還是「手機特效版」；沒有就直接開。</li><li>看畫面：錄影中每 30 秒截一張手機畫面（頁面看得到），也讀畫面上的字、看現在是不是直播間。黑畫面（螢幕關了、直播間沒畫面）、TikTok 顯示「發生錯誤／請稍後再試」、跑到首頁不在直播間、一模一樣 2 分鐘（卡住）、錄影檔沒在長 → 看到就馬上動手，30 秒後還不對換下一招：①完全關掉 TikTok 重開直播間（每次開直播間都先這樣，避免叫回上一場已結束的）②先進另一位正在播的直播間 6 秒再回來 ③再關掉 TikTok 重開 ④檢查手機網路，不通就關掉 Wi-Fi 再打開 ⑤重開錄影 ⑥重開手機（6 小時最多一次）。小米「充電速度慢」這類跳出來的視窗按返回關掉。只是畫面沒動（主播可能停在同一畫面）救 3 招後改 3 分鐘再看。螢幕設成永遠不自己關。</li><li>自己處理：通知欄被拉下來、USB 用途選單、系統對話框 → 20 秒內自己收掉；離開 TikTok 會重新打開直播間；連不上 3 分鐘重新啟動 adb；處理不了的（找不到手機、電量低沒充電、在播卻沒在錄）會出現在狀態卡和這頁最上面。</li><li>聲音：開直播間前先把手機媒體音量調到 0（錄影還沒開始那幾秒不出聲），錄影接手聲音後（手機本來就不出聲）調回原本的音量，確保錄得到聲音。</li><li>螢幕：下播停錄 → 回桌面、把 TikTok 完全關掉（主帳號＋小米分身，不在背景一直播、耗電、出聲）；沒在錄、1 分鐘沒人操作 → 回桌面、亮度最低、關螢幕待機；開播時亮起來（亮度照設定，預設 50%）→ 回桌面 → 進直播間，開錄前先看一眼畫面，黑的就回桌面再開一次。頁面有手動按鈕：亮屏、熄屏、回桌面、開 TikTok、截一張、亮度拉桿（任何裝置都能按）。</li><li>SIM 卡：錄影手機不要插中國的 SIM 卡（TikTok 會把手機當成在中國，整頁「發生錯誤」、不能登入）；偵測到會在頁面最上面提醒。只用 Wi-Fi 就好。</li><li>帳號：有小米分身（雙開，系統使用者 999）登入另一個 TikTok 帳號時，每一場輪流用；一個帳號一直「發生錯誤」（可能被 TikTok 擋）就換另一個，被擋的休息 30 分鐘。兩個都不行就不再一直重開，改成等 5、10、20 分鐘再試，並提醒你（重開手機對這種沒用，只用在黑畫面）。</li><li>手機畫面每 30 秒截一張顯示在頁面（螢幕關著不截）；錄影中的截圖另外存成那支影片的「預覽」（檔名＝影片第幾秒），在「錄好的」按 🖼 預覽看，點一張從那裡播。要先開小米「USB 偵錯（安全設定）」程式才能按電源鍵。</li><li>每週二、週五凌晨 3～7 點（沒在錄、S 級都沒在播時）自動重開手機一次；</li><li>全部在背景執行緒：手機只把壓好的畫面傳過來，電腦不解碼、不開視窗。</li></ul>"},
+  {t:"📲 手機錄特效",d:"<ul><li>一支安卓手機（紅米 10）用 USB 接電腦，裝好 scrcpy（工具頁可自動從官方 GitHub 下載）。</li><li>主播開播 → 手機自己亮起來、打開那個直播間 → 錄下手機畫面＋聲音（有禮物特效）。一支手機一次錄一場。</li><li>錄誰：<b>S 級</b>的主播，照「工具 → 📲 手機錄特效」裡拖好的順序；按「▶ 開始」後，排最前面、正在直播的那位先錄，他下播換下一位還在播的。要加人＝在審核改成 S。</li><li>改順序要按右下角「✔ 套用」才生效；套用後（或排更前面的開播了）正在錄的不是第一順位 → 倒數 10 秒停掉、換錄新的那位。</li><li>主播斷線／下播超過 90 秒才停；TikTok 被關掉或跳走會自己重新打開直播間；拔線再插回、scrcpy 中斷 → 接著錄下一段（_p2、_p3…）。</li><li>手機超過 46°C 先停錄，降到 41°C 再繼續。</li><li>先錄在 SSD（MKV，斷電也播得了），結束後不重新壓縮換成 MP4（idle），搬到影片資料夾 <b>TikLive_手機特效\\帳號\\</b>；不到 15 秒的段丟掉。</li><li>回放：同一場可以切換「原本／手機」版本（用聲音對齊；對不上用錄影時間，可能差幾秒）。剪輯器那場的來源最後多一個手機特效檔。</li><li>S 級：手機特效版也排進 YouTube（標題加「手機特效版」，跟原本的是不同一部）。容量預測也算進去。</li><li>🎁 禮物剪輯：「錄好的」那場按「禮物剪輯」→ 選一位大哥（不算 10 鑽以下），或不分是誰、單次 ≥ 2000 鑽的全部 → 每個禮物一格（一次顯示 10 格，往右滑再載入）；點一格只載那一小段，用 ±1／±5 調送禮前、送禮後幾秒，按 OK 換下一格；沒調的用預設 → 全部接成一支 MP4（連在一起的併成一段，用顯示卡壓縮）。</li><li>學習時間差：每次按 OK 都記下來（禮物、你調的秒數、當時幾個人在播…）。同一種禮物有 2 筆以上就用它們當預設：取中位數、差太多的先不算、其他平均；之後資料夠了可以分析延遲原因。</li><li>回放切到「手機」版本時，程式自己畫的送禮動畫不顯示（手機畫面本來就有真的特效）。</li><li>🧩 手機版合併：同一場有手機特效（自動錄）和上傳的手機／平板錄屏（用「手機錄屏」上傳，聲音自動對上這場）→ 回放的「📱 手機」預設用上傳的把重疊時間蓋掉；「錄好的」按「🧩 合併」可以改成只蓋幾分到幾分，也可以照結果輸出：每段各一支（各自原本的解析度，不混在一起、不補黑邊；被上傳的蓋掉的手機特效不輸出；整支用到直接複製，只用到一部分照原解析度剪），放在「暱稱_開播_#場次_手機合併」資料夾。</li><li>🎯 手動對齊：上傳的位置不對（聲音對不上、被放錯時間）→ 合併畫面每支上傳的按「🎯 手動對齊位置」：上面播上傳的、下面播這場（原本錄的或手機特效，可以點禮物清單跳過去），兩邊停在同一瞬間按「🎯 這兩個是同一刻」→ 程式再用聲音在前後 2 秒內找最準的一點（找不到就照你對的）；聲音沒對上（用錄影時間推的）的上傳，在「手機錄屏」上傳頁那支、和手機錄特效頁最上面都會出現「🎯」按鈕，一按直接進對齊畫面；之後可以 ±0.1／±0.5 秒微調、「▶ 兩個一起播」檢查；存過的「蓋幾分到幾分」會跟著一起挪。</li><li>🎛 禮物陣列影片（工具／網頁版第 61 頁，或「錄好的」那場按「🎛 禮物陣列」，跟批量剪輯、GIF 陣列分開）：選一場 → 用「送禮的人／禮物／單次 ≥ 幾鑽」篩，每個禮物 5 張預覽圖（從開始秒數起每格長度內平均 5 張）看表情挑 → 排成陣列（畫面照「🧩 手機版合併」的結果：上傳的平板／手機錄屏蓋掉的時間用上傳的，被取代的手機特效不會出現），全部格子一起從頭循環播（每格是送禮前 10 秒～後 20 秒的小預覽影片，顯示卡壓縮、存 SSD）→ 點一格用 −0.1／+0.1（按住一直調）、−1／+1 調它從哪裡開始，其他格照播；「☑ 多選」「同一種禮物」可以一起調；◀ ▶ 換位置、✕ 拿掉 → 選每格秒數、排法（幾欄×幾列）、長邊、要不要聲音 → 輸出一支 MP4（存在 TikLive_手機特效\_禮物陣列\，背景一次一件、電腦忙先等）。「⏱ 前後」開始／結束各有 −1／−0.1／+0.1／+1（按住一直調），一起改全部格子，每格一樣長，時間條看黃線＝送禮、藍框＝要的那段；「🧩 疊法」跟截圖全覽一樣：間距（負＝疊在一起）、左右疊、上下疊、臉位置 ▲▼，另外可以勾「疊的地方柔化過渡」（輸出也一樣）；每格的小預覽影片前面多留 15 秒、後面多留 20 秒，調前後大多不用重做，超出才只重做那一格；做好的存在電腦 SSD（最多 2 萬支），換排版、換秒數、下次打開都直接用，離開頁面電腦也會在背景繼續做；上面有進度條和大概還要多久，輸出也有；某格讀不到 → 點那格看原因、按「🔄 重新讀取」。「🪄 自動對齊特效」：電腦找每格特效跳出來的時間（小預覽影片跟送禮前的畫面比，差很多而且持續的那一刻），讓每格的特效都在第 N 秒出現（「特效前留 0.5～3 秒」可選；選了格子只做選的，找不到的格子會幫你選起來）；選一格可以「🔍 放大跟上一格比」（兩格並排放大一起播，在那裡 ±0.1，◀ ▶ 換下一組）；電腦鍵盤 ←→ ±0.1（Shift ±1）、↑↓ 換格、空白鍵 播放／暫停、Esc 取消；「排序」可以照送禮時間／禮物種類／送禮的人／鑽石排；輸出時每格不大於 360 寬直接用小預覽影片一次拼完（快），要聲音或每格更大才回原檔。每次調整都記下來（_DB_SSD\pfx_gav_log.jsonl：哪種禮物、誰送、調前調後、當時幾個人在播），同一種禮物 2 格以上就自動當下次的預設開始秒數；工作區自動存，下次打開同一場接著做。</li><li>✂ 剪輯：那場有手機特效版會先問要剪「原本錄的」還是「手機特效版」；沒有就直接開。</li><li>看畫面：錄影中每 30 秒截一張手機畫面（頁面看得到），也讀畫面上的字、看現在是不是直播間。黑畫面（螢幕關了、直播間沒畫面）、TikTok 顯示「發生錯誤／請稍後再試」、跑到首頁不在直播間、一模一樣 2 分鐘（卡住）、錄影檔沒在長 → 看到就馬上動手，30 秒後還不對換下一招：①完全關掉 TikTok 重開直播間（每次開直播間都先這樣，避免叫回上一場已結束的）②先進另一位正在播的直播間 6 秒再回來 ③再關掉 TikTok 重開 ④檢查手機網路，不通就關掉 Wi-Fi 再打開 ⑤重開錄影 ⑥重開手機（6 小時最多一次）。小米「充電速度慢」這類跳出來的視窗按返回關掉。只是畫面沒動（主播可能停在同一畫面）救 3 招後改 3 分鐘再看。螢幕設成永遠不自己關。</li><li>自己處理：通知欄被拉下來、USB 用途選單、系統對話框 → 20 秒內自己收掉；離開 TikTok 會重新打開直播間；連不上 3 分鐘重新啟動 adb；處理不了的（找不到手機、電量低沒充電、在播卻沒在錄）會出現在狀態卡和這頁最上面。</li><li>聲音：開直播間前先把手機媒體音量調到 0（錄影還沒開始那幾秒不出聲），錄影接手聲音後（手機本來就不出聲）調回原本的音量，確保錄得到聲音。</li><li>螢幕：下播停錄 → 回桌面、把 TikTok 完全關掉（主帳號＋小米分身，不在背景一直播、耗電、出聲）；沒在錄、1 分鐘沒人操作 → 回桌面、亮度最低、關螢幕待機；開播時亮起來（亮度照設定，預設 50%）→ 回桌面 → 進直播間，開錄前先看一眼畫面，黑的就回桌面再開一次。頁面有手動按鈕：亮屏、熄屏、回桌面、開 TikTok、截一張、亮度拉桿（任何裝置都能按）。</li><li>SIM 卡：錄影手機不要插中國的 SIM 卡（TikTok 會把手機當成在中國，整頁「發生錯誤」、不能登入）；偵測到會在頁面最上面提醒。只用 Wi-Fi 就好。</li><li>帳號：有小米分身（雙開，系統使用者 999）登入另一個 TikTok 帳號時，每一場輪流用；一個帳號一直「發生錯誤」（可能被 TikTok 擋）就換另一個，被擋的休息 30 分鐘。兩個都不行就不再一直重開，改成等 5、10、20 分鐘再試，並提醒你（重開手機對這種沒用，只用在黑畫面）。</li><li>手機畫面每 30 秒截一張顯示在頁面（螢幕關著不截）；錄影中的截圖另外存成那支影片的「預覽」（檔名＝影片第幾秒），在「錄好的」按 🖼 預覽看，點一張從那裡播。要先開小米「USB 偵錯（安全設定）」程式才能按電源鍵。</li><li>每週二、週五凌晨 3～7 點（沒在錄、S 級都沒在播時）自動重開手機一次；</li><li>全部在背景執行緒：手機只把壓好的畫面傳過來，電腦不解碼、不開視窗。</li></ul>"},
   {t:"⏸ 暫停監控並封存",d:"<ul><li>主播分類（或審核、檔案總管）<b>長按主播</b> → 主播選單 →「⏸ 暫停監控並封存」。</li><li>從那一刻起<b>不再連線、不錄新的</b>（直播中的話那一場停在那裡、照常收尾）；主播清單、等級、分類、<b>以前的場次全部留著</b>，照常轉檔、整理、照等級排隊上傳 YouTube、照保留天數刪原檔。</li><li>在主播分類移到最下面「⏸ 暫停監控（封存）」那區；<b>審核頁</b>也收到最下面同一欄「⏸ 封存」（保留原本的等級、照等級排、灰階，點進去一樣看以前的紀錄）。同一個選單按「▶ 恢復監控」就接回來。</li><li>封存中的主播又被<b>新增</b>（貼 TikTok 連結、@帳號、匯入）：會先問「目前封存中，要解封嗎？」— 解封＝移回來繼續監控；取消＝取消新增、維持封存。</li><li>每一次封存／解封都會記下來（時間、從哪裡按的），長按主播的小視窗最上面「🗄 封存紀錄」看得到。</li><li>跟「🗑 刪除主播」不一樣：刪除＝整位全部刪掉（等於標 F 再處置）。</li></ul>"},
   {t:"只錄聲音的主播（照審核等級 G）",d:"<ul><li><b>在「主播審核」標 G＝只錄聲音</b>；改成別的等級就恢復錄影片。以前另外的「只錄聲音的主播」清單已經拿掉，程式每分鐘照等級對一次，以審核等級為準。</li><li>G 的主播直播中照樣錄畫面（FLV 先放 C 槽），下播後截 60 張圖＋字幕，自動傳 YouTube，傳好才移走原檔。</li><li>直播中每 <b>"+RU_V('rec.snap_min','分鐘',2)+"</b>另外拍一張快照，回放時在影片的位置左右翻看。</li></ul>"}]},
  {k:"play",i:"📺",c:"#4dc9ff",t:"回放與直播中觀看：延遲、預載入",s:[
@@ -51369,6 +51401,7 @@ function gavGrid(){GAV.st="grid";const B=gavBox();if(!B)return;const n=GAV.cells
 <label class="gvS"><input type="checkbox" data-g="fe" ${GAV.L.fe?"checked":""}> 疊的地方柔化過渡</label><label class="gvS"><input type="checkbox" data-g="nolb" ${GAV.L.nolb?"checked":""}> 藏起格子下面的字</label></div>
 <div class="gvR"><button class="gb" data-g="play">${GAV.paused?"▶ 播放":"⏸ 暫停"}</button>
 <span class="gvS">排法</span><select data-g="C">${L.map(([c,r])=>`<option value="${c}" ${c===C?"selected":""}>${c} 欄 × ${r} 列${c*r>n?`（空 ${c*r-n} 格）`:""}</option>`).join("")}</select>
+<button class="gb go" data-g="auto">🪄 自動對齊特效</button><select data-g="lead" title="特效出現前留幾秒">${[0.5,1,1.5,2,3].map(v=>`<option value="${v}" ${v===(GAV.lead||1)?"selected":""}>特效前留 ${v} 秒</option>`).join("")}</select>
 <span class="gvS">排序</span><select data-g="sort"><option value="">（不動）</option><option value="t">送禮時間</option><option value="g">禮物種類</option><option value="u">送禮的人</option><option value="d">鑽石多→少</option></select>
 <button class="gb ${GAV.multi?"on":""}" data-g="multi">☑ 多選${GAV.multi?"中":""}</button><button class="gb" data-g="selall">全選</button><button class="gb ${GAV.big?"on":""}" data-g="zoom">${GAV.big?"🔍 縮回一頁":"🔍 放大格子"}</button></div>
 <details class="gvHelp"><summary>ⓘ 怎麼用（鍵盤：←→ ±0.1、Shift ±1、↑↓ 換格、空白鍵 播放／暫停、Esc 取消）</summary><div class="gvS">「⏱ 前後」：開始／結束一起改全部格子（按住一直調）——開始往後＝每格頭剪掉、結束往前＝尾剪掉，每格一樣長；時間條＝選的那格（沒選看第 1 格）：黃線＝送禮、藍框＝要的那段、白線＝現在播到哪。全部格子一起從頭循環播。點一格＝選它，下面用 −0.1／+0.1 調它從哪裡開始（按住會一直調），其他格繼續播；先把第 1 格定好，再拿第 2 格去對第 1 格…。開「多選」可以一次調好幾格；「同一種禮物」一鍵選好同種的。每次調整都會記下來（之後當預設、做分析）。</div></details></div>
@@ -51410,6 +51443,17 @@ function gavCmp(){const c=gavTlCell();if(!c)return;const i=GAV.cells.indexOf(c),
   o.innerHTML=`<div class="gcH"><b>🔍 第 ${i+1} 格 對 第 ${i} 格</b><span class="gvS">右邊（選的）對齊左邊（上一格）：看同一個動作出現的時間，用下面 ±0.1 調右邊</span><button class="gb" data-g="cmpx">✕ 關閉</button></div>
 <div class="gcB">${vd(p)}${vd(c)}</div><div class="gcF"><button class="gb" data-g="cmpm" data-v="-1">◀ 上一組</button><button class="gb gvBig" data-g="nd" data-v="-1">−1</button><button class="gb gvBig" data-g="nd" data-v="-0.1">−0.1</button><button class="gb gvBig" data-g="nd" data-v="0.1">+0.1</button><button class="gb gvBig" data-g="nd" data-v="1">+1</button><button class="gb" data-g="cmpm" data-v="1">下一組 ▶</button></div>`;
   o.querySelectorAll("video").forEach(v=>v.addEventListener("loadeddata",()=>{v.dataset.ok="1";const x=GAV.cells.find(z=>z.rid===+v.dataset.rid);if(x)x.force=1;},{once:true}));}
+/* V1.1.87 🪄 自動對齊：電腦找每格「特效跳出來」的時間，讓每格的特效都在同一秒出現（選了格子只做選的） */
+async function gavAuto(){const T=GAV.sel.size?GAV.cells.filter(c=>GAV.sel.has(c.rid)):GAV.cells.slice(),lead=GAV.lead||1;if(!T.length)return;
+  if(!confirm(`🪄 ${T.length} 格：電腦找每格特效跳出來的時間，讓特效都在每格第 ${lead} 秒出現？\n找不到的格子不動（做完會幫你選起來，自己再 ±0.1）。`))return;
+  const P=document.getElementById("gavPg"),nf=[];let k=0,ok=0;
+  for(let i=0;i<T.length;i+=8){const ch=T.slice(i,i+8);if(P)P.innerHTML=`<div class="gvPb"><i style="width:${(i/T.length*100).toFixed(1)}%"></i></div><div class="gvS">🪄 找特效出現的時間… ${i}/${T.length} 格</div>`;
+    let r=null;try{r=await rvPost("/api/pc/pfx/set",{op:"gav_onset",sid:GAV.sid,cells:ch.map(c=>({rid:c.rid,f:GAV.R[c.rid].f,pos:GAV.R[c.rid].pos}))});}catch(e){}
+    for(const c of ch){const on=r&&r.on?r.on[String(c.rid)]:null;if(on==null){nf.push(c.rid);continue;}const R_=GAV.R[c.rid];const L=GAV.log[c.rid]||(GAV.log[c.rid]={rid:c.rid,g:R_.g,dia:R_.dia,u:R_.u,al:R_.al,from:c.o});
+      c.o=Math.round((on-lead)*10)/10;gavClampC(c);L.to=c.o;L.auto=1;c.force=1;gavPxNeed(c);ok++;const s_=document.querySelector(`#gavG [data-o="${c.rid}"]`);if(s_)s_.textContent=gavOs(c.o);}}
+  gavPxRun();GAV.pgS=null;gavPgDraw();gavTl();gavSave();
+  if(nf.length){GAV.multi=true;GAV.sel=new Set(nf);document.querySelectorAll("#gavG .gvCell[data-rid]").forEach(x=>x.classList.toggle("sel",GAV.sel.has(+x.dataset.rid)));gavSelBar();}
+  if(typeof toast==="function")toast(`🪄 對好 ${ok} 格${nf.length?`，${nf.length} 格找不到（已幫你選起來，自己調）`:""}`);else alert(`🪄 對好 ${ok} 格${nf.length?`，${nf.length} 格找不到`:""}`);}
 function gavCmpClose(){const o=document.getElementById("gavCmp");if(o)o.remove();}
 document.addEventListener("keydown",e=>{if(GAV.st!=="grid"||!document.getElementById("gavG"))return;const t=e.target;if(t&&/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName))return;   /* V1.1.82 鍵盤：←→ ±0.1（Shift ±1）、↑↓ 換格、空白鍵 播放／暫停、Esc 取消 */
   const k=e.key;if(k==="ArrowLeft"||k==="ArrowRight"){if(!GAV.sel.size)return;gavNudge((k==="ArrowLeft"?-1:1)*(e.shiftKey?1:0.1));e.preventDefault();}
@@ -51487,7 +51531,7 @@ async function gavClick(e){const b=e.target.closest("[data-g]");if(!b)return;con
   if(g==="same"){const gs=new Set([...GAV.sel].map(rid=>(GAV.R[rid]||{}).g));GAV.multi=true;GAV.cells.forEach(c=>{if(gs.has((GAV.R[c.rid]||{}).g))GAV.sel.add(c.rid);});gavGrid();return;}
   if(g==="gp"){GAV.L.gap=b.dataset.v==="0r"?0:Math.max(-0.5,Math.min(0.5,Math.round(GAV.L.gap*100+(+b.dataset.v))/100));gavLayout();gavOutHint();gavLaySave();return;}
   if(g==="zh"||g==="zv"){GAV.L[g]=b.dataset.v;gavLayout();gavLaySave();return;}if(g==="fy"){GAV.L.fy=Math.max(-50,Math.min(50,GAV.L.fy+(+b.dataset.v)));gavLayout();gavLaySave();return;}
-  if(g==="cmp"){gavCmp();return;}if(g==="cmpx"){gavCmpClose();return;}
+  if(g==="auto"){gavAuto();return;}if(g==="cmp"){gavCmp();return;}if(g==="cmpx"){gavCmpClose();return;}
   if(g==="cmpm"){const c=gavTlCell(),i=Math.max(0,Math.min(GAV.cells.length-1,GAV.cells.indexOf(c)+(+b.dataset.v)));GAV.sel=new Set([GAV.cells[i].rid]);GAV.multi=false;document.querySelectorAll("#gavG .gvCell[data-rid]").forEach(x=>x.classList.toggle("sel",GAV.sel.has(+x.dataset.rid)));gavSelBar();gavTl();gavCmp();return;}
   if(g==="rt"){const c=GAV.cells.find(x=>GAV.sel.has(x.rid));if(!c)return;c.err=null;c.retry=1;c.pxk=null;const el=gavCellEl(c.rid);if(el){const ld=el.querySelector(".ld")||el.appendChild(Object.assign(document.createElement("div"),{className:"ld"}));ld.className="ld";ld.textContent="⏳ 重新讀取…";}gavPxNeed(c);gavPxRun();gavSelBar();return;}
   if(g==="nd"){gavNudge(+b.dataset.v);return;}if(g==="tr"){gavTrim(b.dataset.w,+b.dataset.v);return;}
@@ -51501,6 +51545,7 @@ function gavChange(e){const b=e.target.closest("[data-g]");if(!b)return;const g=
   if(g==="fu"){GAV.fu=v;GAV.fg="";gavPick();}else if(g==="fg"){GAV.fg=v;gavPick();}else if(g==="mn"){GAV.mn=+v;gavPick();}
   else if(g==="D"){GAV.D=+v;GAV.cells.forEach(gavClampC);GAV.c=0;gavGrid();gavSave();}else if(g==="C"){GAV.C=+v;gavGrid();gavSave();}else if(g==="sort"&&v){const R_=GAV.R,k={t:c=>R_[c.rid].ts,g:c=>R_[c.rid].g+"\u0000"+String(R_[c.rid].ts).padStart(14,"0"),u:c=>R_[c.rid].u+"\u0000"+String(R_[c.rid].ts).padStart(14,"0"),d:c=>-R_[c.rid].dia*1e10+R_[c.rid].ts}[v];
     GAV.cells.sort((a,b)=>{const x=k(a),y=k(b);return x<y?-1:x>y?1:0;});gavGrid();gavSave();}
+  else if(g==="lead"){GAV.lead=+v;}
   else if(g==="long"){GAV.long=+v;gavOutHint();}else if(g==="aud"){GAV.aud=!!v;gavOutHint();}else if(g==="fe"||g==="nolb"){GAV.L[g]=!!v;gavLayout();gavLaySave();}}
 /* V1.1.76 🎯 手動對齊：上下兩個播放器對同一瞬間，再用聲音前後 2 秒自動微調 */
 function mxT1(t){const g=t<0?"-":"";t=Math.abs(t||0);const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=t%60;return g+(h?h+":"+String(m).padStart(2,"0"):m)+":"+s.toFixed(1).padStart(4,"0");}
