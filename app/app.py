@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.06"
+APP_VERSION = "1.2.07"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -30207,7 +30207,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         return {'--'+k:th[v] for k,v in m.items() if v in th}
 
     def _web_page_html(self, base):   # V1.1.96 同一組（網址／主題／電腦名）只組一次，並拿掉版本註解（頁面小 5%）
-        k=(base,THEME_MODE.get('mode','dark'),self.pc_role_name(),self.pc_role(),id(WEB_DASHBOARD_HTML))
+        k=(base,THEME_MODE.get('mode','dark'),self.pc_role_name(),self.pc_role(),APP_VERSION,len(WEB_DASHBOARD_HTML),hash(WEB_DASHBOARD_HTML))   # V1.2.07 熱更新後一定重組（不靠記憶體位址）
         c=getattr(self,'_wph_c',None)
         if c and c[0]==k: return c[1]
         h=_PAGE_SLIM.sub(' ',self._web_page_html0(base)); self._wph_c=(k,h); return h
