@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.14"
+APP_VERSION = "1.2.15"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -50321,7 +50321,7 @@ function csCss(){if(document.getElementById("csCss"))return;const st=document.cr
 #csOv .csC button{flex:0 0 auto;width:24px;height:24px;border-radius:6px;border:1px solid #3a4352;background:#1f2631;color:#dfe5ee;cursor:pointer;padding:0;font-size:14px}
 #csOv .csC .v{flex:0 0 auto;text-align:right;font-variant-numeric:tabular-nums;color:#ffd27a;font-size:12.5px;white-space:nowrap}
 #csOv .csCv{display:block;width:calc(100% - 28px);height:250px;margin:4px 14px 0}
-#csOv .csSum{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 14px 4px;font-size:13px}
+#csOv .csSum{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 14px 4px;font-size:13px}.csSum>span{min-width:min(100%,18em);max-width:100%}   /* V1.2.15 長的那條不會被擠成一個字一行（太窄就換到下一行） */
 #csOv .csSum span{white-space:normal;overflow:visible;max-width:none;text-overflow:clip}#csOv .csSum span b{color:#fff}#csOv .csSum .bad b{color:#ff6b6b}#csOv .csSum .ok b{color:#45d483}#csOv .csSum .wn b{color:#f0ad4e}
 #csOv .csN{padding:2px 14px 6px;color:#8b95a4;font-size:11.5px;line-height:1.5}
 #csOv .csB{display:flex;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid #232a36;position:sticky;bottom:0;background:#12161d}
