@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.05"
+APP_VERSION = "1.2.06"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -51390,7 +51390,7 @@ function gavBar(h){let b=document.getElementById("gavBar");if(!h){if(b)b.remove(
   clearInterval(GAV.bw);GAV.bw=setInterval(()=>{const B=gavBox();if(!B||!B.isConnected||B.offsetParent===null){const x=document.getElementById("gavBar");if(x)x.remove();clearInterval(GAV.bw);}},800);}b.innerHTML=h;}
 function gavLeft(){return !GAV.root||!GAV.root.isConnected||!gavBox();}
 async function gavSes(){GAV.st="ses";gavBar("");let j=null;try{j=await rvGet("/api/pc/pfx/gav/ses");}catch(e){}const B=gavBox();if(!B)return;const L=(j&&j.L)||[];
-  B.innerHTML=`<div class="gvC"><h3>🎛 禮物陣列影片</h3><div class="gvS">用手機錄到的特效（每一種禮物都有）：選一場 → 挑送禮（看 5 張預覽圖挑表情好看的）→ 排成陣列一起循環播、每格 ±0.1 秒對齊 → 選排法輸出一支 MP4。跟批量剪輯、GIF 陣列是分開的。</div></div>
+  B.innerHTML=`<div class="gvC">${gavPhone()?"":"<h3>🎛 禮物陣列影片</h3>"}<div class="gvS">選一場 → 挑送禮（5 張預覽挑表情好看的）→ 陣列一起循環播、每格 ±0.1 秒對齊 → 選排法輸出 MP4。</div></div>
 <details class="gvC" id="gavSt"><summary><b>📊 調整紀錄分析</b> <span class="gvS">（每次調的開始時間都記下來；看哪種禮物、哪位送禮者、開播人數多的時候延遲比較大）</span></summary><div id="gavStB" class="gvS">讀取中…</div></details>
 <div class="gvC"><b>選一場（有手機特效的）</b><div class="gvL">${L.map(x=>`<div class="gvSes" data-g="ses" data-sid="${x.sid}">${x.g?`<b style="color:${x.g==="S"?"#ff5a7a":"#8a93a3"}">${rvE(x.g)}</b>`:""}<b>${rvE(x.name||x.u)}</b><span class="gvS">#${String(x.sid).padStart(5,"0")} · ${x.t?new Date(x.t*1000).toLocaleString("zh-TW",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}):""} · ${x.n?x.n+" 段手機特效":""}${x.up?(x.n?"＋":"")+x.up+" 支上傳的錄屏":""}</span></div>`).join("")||'<div class="gvS">還沒有手機特效錄影</div>'}</div></div>`;}
 document.addEventListener("toggle",e=>{if(e.target&&e.target.id==="gavSt"&&e.target.open)gavStats();},true);
@@ -51467,7 +51467,7 @@ function gavPgDraw(){const P=document.getElementById("gavPg");if(!P)return;const
   const now=Date.now();if(!GAV.pgS||GAV.pgS.n!==n)GAV.pgS={t:now,ok0:ok,n};const dn=ok-GAV.pgS.ok0,el=(now-GAV.pgS.t)/1000,eta=dn>0?el/dn*left:null;
   P.innerHTML=`<div class="gvPb"><i style="width:${(ok/n*100).toFixed(1)}%"></i></div><div class="gvS">📦 正在準備每格的小預覽影片（電腦一次做 2 格）：<b>${ok}/${n}</b> 格好了${bad?`、${bad} 格讀不到`:""}・${eta!=null?`大概還要 <b>${gavFmt(eta)}</b>`:"估算中…"}。好了的格子會先開始播；離開這頁電腦也會繼續做。</div>`;}
 function gavOutHint(){const h=document.getElementById("gavOh");if(!h)return;const n=GAV.cells.length,C=GAV.C||1,R=Math.ceil(n/C),g=GAV.L.gap,k=GAV.long/Math.max(C+(C-1)*g,R*16/9+(R-1)*g),cw=Math.round(k),W=Math.round(k*(C+(C-1)*g)),H=Math.round(k*(R*16/9+(R-1)*g));
-  const fast=!GAV.aud&&cw<=396;h.innerHTML=`輸出 ${W}×${H}、每格約 ${cw}×${Math.round(cw*16/9)}：${fast?`<b style="color:#45d483">⚡ 快速</b>：直接用上面已經做好的小預覽影片拼（每格 360 寬、30 張／秒，畫質跟上面看到的一樣），通常幾十秒`:`<b style="color:#f0ad4e">🐢 從原檔重抓</b>（${GAV.aud?"要聲音":"每格比 360 寬還大"}），畫質最好但比較久（每格要回原檔解一次）`}。每格越大越清楚：同樣排法選長邊 3840 會清楚很多。`;}
+  const fast=!GAV.aud&&cw<=396;h.innerHTML=`輸出 ${W}×${H}（每格 ${cw}×${Math.round(cw*16/9)}）· ${fast?`<b style="color:#45d483">⚡ 快速</b>：用已做好的預覽拼，幾十秒`:`<b style="color:#f0ad4e">🐢 回原檔重抓</b>（${GAV.aud?"要聲音":"每格大於 360 寬"}）：最清楚、比較久`}`;h.title="⚡ 快速＝每格 360 寬、30 張／秒，畫質跟上面看到的一樣；🐢＝每格回原檔解一次。長邊選越大每格越清楚（例：3840）";}   /* V1.2.06 說明縮短，細節放滑鼠提示 */
 function gavTlCell(){return GAV.cells.find(c=>GAV.sel.has(c.rid))||GAV.cells[0];}
 /* V1.1.82 🔍 放大比對：選的那格跟上一格並排放大，一起循環播；在這裡 ±0.1 對齊，◀ ▶ 換下一組 */
 function gavCmp(){const c=gavTlCell();if(!c)return;const i=GAV.cells.indexOf(c),p=GAV.cells[i-1];let o=document.getElementById("gavCmp");if(!o){o=document.createElement("div");o.id="gavCmp";document.body.appendChild(o);o.addEventListener("click",gavClick);gavHoldWire(o);}
