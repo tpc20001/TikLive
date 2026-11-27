@@ -921,16 +921,16 @@ def route(win, sock, method, rest, q, body):
         d_ = q.get('days', '14'); _bg(win, sock, lambda: win._gsd_info(d_)); return True
     if name == 'health' and method == 'GET':                             # TK_V1.0.69 一頁健檢（只讀）
         _bg(win, sock, win._health_page); return True
-    if name == 'pfx' and method == 'GET': J(win._pfx_info_web()); return True          # V1.1.63 手機錄特效狀態（只讀）
-    if name == 'pfx/gifts' and method == 'GET': J(win._pfx_gifts(q.get('sid', '0'), int(q.get('min', '10') or 10))); return True   # V1.1.66 這場送禮的人（只讀）
-    if name == 'pfx/gtiles' and method == 'GET': J(win._pfx_gtiles(int(q.get('sid', '0') or 0), 'big' if q.get('mode') == 'big' else 'user', q.get('u', ''), int(q.get('min', '10') or 10))); return True   # V1.1.67 禮物格子（只讀）
+    if name == 'pfx' and method == 'GET': _bg(win, sock, win._pfx_info_web); return True   # V1.1.82 背景算（不佔畫面執行緒）          # V1.1.63 手機錄特效狀態（只讀）
+    if name == 'pfx/gifts' and method == 'GET': s_, m_ = q.get('sid', '0'), int(q.get('min', '10') or 10); _bg(win, sock, lambda: win._pfx_gifts(s_, m_)); return True   # V1.1.66 這場送禮的人（只讀）
+    if name == 'pfx/gtiles' and method == 'GET': a_ = (int(q.get('sid', '0') or 0), 'big' if q.get('mode') == 'big' else 'user', q.get('u', ''), int(q.get('min', '10') or 10)); _bg(win, sock, lambda: win._pfx_gtiles(*a_)); return True   # V1.1.67 禮物格子（只讀）
     if name == 'pfx/has' and method == 'GET':                                    # V1.1.67 這場有沒有手機特效版（剪刀先選版本用）
-        J({'ok': True, 'files': [Path(x['f']).name for x in win._pfx_idx() if str(x.get('sid')) == str(q.get('sid', '')) and Path(x['f']).is_file()]}); return True
+        s_ = str(q.get('sid', '')); _bg(win, sock, lambda: {'ok': True, 'files': [Path(x['f']).name for x in win._pfx_idx() if str(x.get('sid')) == s_ and not x.get('mix') and Path(x['f']).is_file()]}); return True
     if name == 'pfx/shot' and method == 'GET':                                   # V1.1.69 手機最近一張畫面（只讀）
         p_ = win._pfx_shot_file()
         if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True
         win._web_send_file(sock, p_, 'image/jpeg' if p_.suffix == '.jpg' else 'image/png'); return True
-    if name == 'pfx/thumbs' and method == 'GET': J(win._pfx_thumbs(q.get('i', '-1'))); return True   # V1.1.71 手機特效預覽圖（只讀）
+    if name == 'pfx/thumbs' and method == 'GET': i_ = q.get('i', '-1'); _bg(win, sock, lambda: win._pfx_thumbs(i_)); return True   # V1.1.71 手機特效預覽圖（只讀）
     if name == 'pfx/thumb' and method == 'GET':
         p_ = win._pfx_thumb(q.get('i', '-1'), q.get('t', '0'))
         if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True
@@ -953,7 +953,7 @@ def route(win, sock, method, rest, q, body):
         p_ = win._gav_file(q.get('f', ''))
         if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True
         win._web_send_file(sock, p_, 'video/mp4', dlname=p_.name if q.get('dl') == '1' else ''); return True   # V1.1.81 dl=1＝存到手機
-    if name == 'pfx/mix' and method == 'GET': J(win._mix_info(int(q.get('sid', '0') or 0))); return True   # V1.1.75 手機版合併（只讀）
+    if name == 'pfx/mix' and method == 'GET': s_ = int(q.get('sid', '0') or 0); _bg(win, sock, lambda: win._mix_info(s_)); return True   # V1.1.75 手機版合併（只讀）
     if name == 'pfx/gfile' and method == 'GET':
         p_ = win._pfx_gfile(q.get('f', ''))
         if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True
@@ -1174,7 +1174,9 @@ def route(win, sock, method, rest, q, body):
     if name == 'cloud/set': J(win._cu_set(d)); return True
     if name == 'merge/run': J(win._web_merge_run(d)); return True
     if name == 'capsim/apply': J(win._capsim_apply(d)); return True
-    if name == 'pfx/set': J(win._pfx_set(d)); return True                      # V1.1.63 手機錄特效（要密碼）
+    if name == 'pfx/set':
+        if str(d.get('op') or '') in ('gav_save', 'mix', 'glearn'): _bg(win, sock, lambda: win._pfx_set(d)); return True   # V1.1.82 寫檔／查資料庫的放背景
+        J(win._pfx_set(d)); return True                      # V1.1.63 手機錄特效（要密碼）
     if name == 'host/pause': J(win._host_pause(d.get('u'), bool(d.get('on')), src=str(d.get('src') or '網頁')[:20])); return True     # V1.1.45 ⏸ 暫停監控並封存／恢復（要密碼）                  # V1.1.42 容量預測套用（要密碼）
     if name == 'rules/set': J(win._rules_set(d)); return True                        # V1.1.35 規則頁改數字（要密碼）                    # V1.1.25 合併重複場次（要密碼）                      # V1.1.13 ☁ 雲端更新：檢查／更新／略過（要密碼）                      # V1.1.07 搬硬碟（要密碼）
     if name == 'th/alert':                                                         # TK_V1.0.100 解除斷電警報（要密碼）

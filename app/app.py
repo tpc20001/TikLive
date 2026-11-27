@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.81"
+APP_VERSION = "1.1.82"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -13125,19 +13125,6 @@ class MainWindow(QMainWindow):
         try: return self._shot10_count(int(sid)) >= 18
         except Exception: return False
 
-    def _yt_g_ready(self):
-        """TK_V1.0.92 G 級（只錄聲音）下播後：60 張截圖好了、字幕好了（字幕 2 天還沒好就不等）→ 自動排進 YouTube."""
-        out = []
-        try:
-            gs = self._g_sids(); vi = self._vb_index() or {}; now = time.time(); sd = _stt_subs_dir()
-            for sid, e in self._nvt_load().items():
-                sid = int(sid)
-                if sid not in gs or not vi.get(sid) or not self._shotg_has(sid): continue
-                if not (sd / f'{sid}.json').exists() and now - float(e.get('t') or 0) < 2 * 86400: continue
-                out.append(sid)
-        except Exception: pass
-        return out
-
     def _yt_enqueue(self, sids=None, why='auto'):
         """把場次的每個 MP4 排進去（已經排過／傳過的不重複）. sids=None：照設定的等級自動找."""
         st = self._yt_state()
@@ -15016,9 +15003,6 @@ try { NLConnect | Out-Null; Unset
             except Exception: pass
         except Exception: want = []
         if want and not self._lv_state().get('running') and not self._purge_state().get('running'): self._yt_delete_ready(want)
-
-    def _yt_links(self, sid):
-        return [{'k': x.get('k'), 'n': x.get('n'), 'url': x.get('url'), 'name': x['name'], 'L0': x.get('L0')} for x in self._yt_q()['items'] if int(x['sid']) == int(sid) and x.get('url')]
 
     def _yt_linkmap(self):
         """{sid: [(L0, url), ...]}（已經在 YouTube 處理好的）；30 秒快取."""
@@ -21398,13 +21382,18 @@ try { NLConnect | Out-Null; Unset
             p = Path(it['part']); return p.stat().st_size if p.exists() else (int(it['size']) if it.get('done') else 0)
         except Exception: return 0
 
+    @staticmethod
+    def _phr_unal(x):
+        """V1.1.82 上傳的錄屏已歸到某場、但聲音沒對上（用錄影時間推的）而且還沒手動對齊 → 位置可能不對."""
+        return bool(x and x.get('st') == 'ok' and not x.get('pfx') and not x.get('psid') and x.get('sid') and x.get('align') != 'man' and '用錄影時間' in str(x.get('msg') or ''))
+
     def _pup_info(self):
         D = self._pup_db(); now = time.time(); L = []
         for it in sorted(D['items'].values(), key=lambda x: -(x.get('t') or 0)):
             if it.get('done') and now - float(it['done']) > 3 * 86400: continue
             g = self._pup_got(it); ph = self._phr_db()['items'].get(str(it.get('iid') or '')) or {}
             L.append({k: it.get(k) for k in ('id', 'name', 'size', 'dest', 'u', 't', 'done', 'iid')} | {'got': g, 'stale': (not it.get('done')) and now - float(it.get('tl') or 0) > 20,
-                      'st': ph.get('st'), 'msg': ph.get('msg'), 'psid': ph.get('psid'), 'sid': ph.get('sid')})
+                      'st': ph.get('st'), 'msg': ph.get('msg'), 'psid': ph.get('psid'), 'sid': ph.get('sid'), 'iid': str(it.get('iid') or ''), 'unal': self._phr_unal(ph)})
         return {'ok': True, 'items': L[:300], 'ssd': self._pup_space('ssd'), 'hdd': self._pup_space('hdd'), 'sessions': self._pup_sessions(7), 'users': self._pup_ask()['users']}
 
     def _pup_plan(self, files):
@@ -22196,59 +22185,6 @@ try { NLConnect | Out-Null; Unset
             try: self.start_monitor(auto=True)
             except Exception: self._ui_error('net rebuild')
         return done
-
-    def _netfix_tick(self):
-        """Every minute (from the self-check). V0.7.42.025 原本跟每 2 秒的流量 _net_tick 同名、被後面那個蓋掉，一直沒在跑（自動清 DNS／每天重建／開播少自動處理）。
-        連線一直很穩，所以維持不自動跑；只保留程式碼。手動「重建連線」的排隊改由 _netfix_queue 處理."""
-        N = self._netfix(); now = time.time()
-        if N['rebuild']: self._net_rebuild_step()
-        if not self.engines: N['low_since'] = 0; return
-        try: auto = bool(self.cfg('net.autoheal')); dns_h = float(self.cfg('net.dns_flush_h') or 0); rh = int(self.cfg('net.refresh_hour'))
-        except Exception: auto, dns_h, rh = True, 6, 5
-        # 定期保養：清 DNS 快取（不會切斷任何連線）、每天一次慢慢重建沒在直播的連線
-        if dns_h > 0 and now - N.get('dns_t', now) > dns_h * 3600:
-            N['dns_t'] = now
-            self._net_flush_dns_bg(lambda ok, msg, dns_h=dns_h: self._nf_act(f'定期清 DNS 快取（每 {dns_h:g} 小時）：{"成功" if ok else "失敗 " + msg}'))
-        today = datetime.now().strftime('%Y-%m-%d')
-        if rh >= 0 and datetime.now().hour == rh and N.get('refresh_day') != today and now - getattr(self, '_t_started', now) > 3600:
-            N['refresh_day'] = today; n = self._net_rebuild_start('daily'); self._nf_act(f'每天 {rh}:00 的保養：慢慢重建 {n} 位沒在直播的主播連線（每分鐘 12 位）')
-        # 開播率跟平常比
-        if now - N.get('exp_t', 0) > 300:
-            N['exp_t'] = now
-            def calc():
-                try: N['exp'] = self._conn_expected()[0]
-                except Exception: pass
-            threading.Thread(target=calc, daemon=True).start()
-        exp = N.get('exp'); live = sum(1 for v in list(self.engine_status.values()) if v == 'LIVE')
-        N['live'] = live
-        low = exp is not None and exp >= 5 and live < exp * 0.2 and now - getattr(self, '_t_started', now) > 900
-        if not low:
-            if N.get('low_since'): self._nf_act(f'開播數回到正常（{live} 位，平常這時段約 {exp:g} 位）') if N.get('step') else None
-            N.update(low_since=0, step=0); return
-        N['low_since'] = N.get('low_since') or now
-        if not auto or now < N.get('cool_until', 0): return
-        mins = (now - N['low_since']) / 60
-        if N['step'] == 0 and mins >= 10:
-            N['step'] = 1; N['step_t'] = now
-            def after(r):
-                v = (r.get('verdict') or ('?', ''))
-                if v[0] in ('ok', 'tt_down', 'tcp_full'):
-                    self._net_flush_dns_bg(lambda ok, msg, v=v: self._nf_act(f'直播中只有 {live} 位（平常這時段約 {exp:g} 位，不到 2 成）→ 診斷：{v[1]} → 清 DNS 快取 {"成功" if ok else "失敗 " + msg}'))
-                else:
-                    self._nf_act(f'直播中只有 {live} 位（平常約 {exp:g} 位）→ 診斷：{v[1]}；這種情況重建連線沒有用，先不動')
-                    try: self._anom('netlow', 'warn', '開播數比平常少很多', f'直播中 {live} 位，平常這時段約 {exp:g} 位', v[1])
-                    except Exception: pass
-            threading.Thread(target=lambda: self._net_diag_run('開播率太低', after), daemon=True).start()
-        elif N['step'] == 1 and now - N['step_t'] >= 600:
-            v = ((N.get('diag') or {}).get('verdict') or ('?', ''))[0]
-            N['step'] = 2; N['step_t'] = now
-            if v in ('ok', 'tt_down', 'tcp_full'):
-                n = self._net_rebuild_start('low'); self._nf_act(f'清 DNS 後 10 分鐘還是只有 {live} 位 → 慢慢重建 {n} 位沒在直播的主播連線（每分鐘 12 位，直播中的不動）')
-        elif N['step'] == 2 and now - N['step_t'] >= 1200:
-            N['step'] = 3; N['cool_until'] = now + 2 * 3600
-            self._nf_act(f'自動處理後還是只有 {live} 位（平常約 {exp:g} 位）→ 請你決定：「重新啟動主程式」，或重新啟動網路卡／重開機（這兩個會影響 OlivePro，程式不會自己做）')
-            try: self._anom('netlow2', 'bad', '開播數一直比平常少很多', f'自動診斷、清 DNS、重建連線都做了，直播中還是只有 {live} 位（平常約 {exp:g} 位）', '到「設定 → ⚠ 問題紀錄」看診斷結果，選擇要怎麼處理。')
-            except Exception: pass
 
     def _orphan_cleanup(self):
         """V0.6.28 開程式時：結束上一次留下來的 ffmpeg／cloudflared／ngrok（命令列裡有這支程式的資料夾或手機網址埠、而且原本開它的程式已經不在了）。
@@ -27364,93 +27300,6 @@ $r | ConvertTo-Json -Depth 4 -Compress
         n = sum(1 for j in list(_flv_jobs().values()) if j.get('state') in ('ssd_wait', 'convert'))
         return n < 2
 
-    def _lane_fetch(self, folder):
-        """HDD -> SSD (one straight read), then convert there. The original FLVs stay on the HDD until the MP4 is safely back."""
-        folder = Path(folder); key = str(folder)
-        try: _HddLane.get().limit = float(self.cfg('rec.hdd_copy_limit'))
-        except Exception: pass
-        if str(folder) in self._active_rec_dirs(): self._flv_job(key, state='failed', msg='還在錄影中'); return
-        flvs = [f for f in sorted(folder.glob('*.flv')) if f.stat().st_size > 0]
-        if not flvs: self._flv_job(key, state='done', msg='已經沒有 FLV'); return
-        ssd = self._ssd_root()
-        if not ssd or not self._ssd_ok(sum(f.stat().st_size for f in flvs) * 2.2):
-            self._flv_job(key, state='convert', msg='SSD 空間不夠，直接在 HDD 上轉')
-            threading.Thread(target=self._video_finalize, args=(folder,), daemon=True).start(); return
-        dst = ssd / folder.parent.name / folder.name
-        shutil.rmtree(dst, ignore_errors=True); dst.mkdir(parents=True, exist_ok=True)
-        lane = _HddLane.get(); total = sum(f.stat().st_size for f in flvs); done = 0; sizes = {}
-        self._flv_job(key, state='copy_in', pct=0, msg='', bytes=total)
-        try:
-            mp = session_meta_path(folder)
-            if mp.exists(): shutil.copy2(mp, dst / mp.name)
-            for f in flvs:
-                n = lane.copy(f, dst / f.name, f'{folder.name} → SSD'); sizes[f.name] = n; done += n
-                self._flv_job(key, pct=round(done / max(1, total) * 100, 1))
-            (dst / '_fetched.json').write_text(json.dumps({'origin': str(folder), 'files': sizes, 't': time.time()}, ensure_ascii=False), encoding='utf-8')
-        except _HddLane.Cancelled:
-            shutil.rmtree(dst, ignore_errors=True); _flv_jobs().pop(key, None)        # back in the list, nothing touched on the HDD
-            try: self._experiment_status(f'已取消：{folder.name}（FLV 留在原處）')
-            except Exception: pass
-            return
-        except Exception as ex:
-            shutil.rmtree(dst, ignore_errors=True); self._flv_job(key, state='failed', msg=f'複製到 SSD 失敗：{ex}'); return
-        self._flv_job(key, state='ssd_wait', pct=0, ssd=str(dst))
-        threading.Thread(target=self._video_finalize, args=(dst,), daemon=True).start()
-
-    def _lane_publish(self, folder):
-        """SSD folder -> its place in the video library on the HDD (one straight write), then the SSD copy is removed."""
-        folder = Path(folder)
-        try: _HddLane.get().limit = float(self.cfg('rec.hdd_copy_limit'))
-        except Exception: pass
-        try:                                                                    # V1.1.07 搬硬碟最後切換那幾分鐘：先別搬進硬碟，等切好再搬（會搬到 R）
-            if self._mig_load().get('phase') == 'final':
-                threading.Timer(60, lambda f=str(folder): _HddLane.get().put('publish', f)).start(); return
-        except Exception: pass
-        if not folder.exists() or str(folder) in self._active_rec_dirs(): return
-        if (folder / '_merge_work').exists() or any(folder.glob('*.part')): return        # still converting
-        fe = self._fetched_info(folder); key = fe['origin'] if fe else str(folder)
-        if self._is_ovf_path(folder) and (key in (self.__dict__.get('_ovf_busy') or set()) or any(folder.glob('*.copying')) or any(folder.glob('*.flv'))): return    # 還在分流進來，先不要動      # V0.7.42.045 分流：直接搬到分流資料夾（SSD → SSD，不經過 HDD）
-        mp4s = sorted(folder.glob('*.mp4'))
-        if fe and not mp4s:
-            shutil.rmtree(folder, ignore_errors=True)
-            if (_flv_jobs().get(key) or {}).get('cancel'): _flv_jobs().pop(key, None); return        # cancelled: back in the list
-            self._flv_job(key, state='failed', msg='轉檔沒有成功，FLV 照樣留在 HDD 原處'); return
-        if fe: dst = Path(fe['origin'])
-        else:
-            dst = self.video_root() / folder.parent.name / folder.name
-            if dst.exists() and any(dst.iterdir()):                   # an older part of this live already sits there: keep both
-                dst = dst.with_name(dst.name + '_ssd'); k = 2
-                while dst.exists(): dst = dst.with_name(f'{folder.name}_ssd{k}'); k += 1
-        lane = _HddLane.get(); src_meta = session_meta_path(folder)
-        files = [f for f in folder.iterdir() if f.is_file() and f.name != '_fetched.json' and not f.name.endswith(('.part', '.copying'))]
-        total = sum(f.stat().st_size for f in files); done = 0
-        self._flv_job(key, state='copy_out', pct=0, msg='')
-        try:
-            dst.mkdir(parents=True, exist_ok=True)
-            for f in sorted(files, key=lambda f: f.suffix.lower() == '.json'):          # the info file last: it points at the video
-                name = f'{dst.name}.json' if f.resolve() == src_meta.resolve() else f.name
-                t = dst / name
-                if f.suffix.lower() == '.flv' and t.exists() and t.stat().st_size == f.stat().st_size: done += f.stat().st_size; continue
-                done += lane.copy(f, t, f'{folder.name} → HDD')
-                self._flv_job(key, pct=round(done / max(1, total) * 100, 1))
-        except Exception as ex:
-            self._flv_job(key, state='failed', msg=f'搬回 HDD 失敗（SSD 上的檔案保留，稍後重試）：{ex}')
-            threading.Timer(600, lambda: _HddLane.get().put('publish', str(folder))).start(); return
-        if fe and mp4s:                                   # only FLVs that really went into the MP4 (the converter removed their SSD copy)
-            for n in (fe.get('files') or {}):
-                if (folder / n).exists(): continue
-                try: (dst / n).unlink()
-                except Exception: pass
-        shutil.rmtree(folder, ignore_errors=True)
-        try:
-            if folder.parent != self._ssd_dir() and not any(folder.parent.iterdir()): folder.parent.rmdir()
-        except Exception: pass
-        self._lib_invalidate()
-        self._flv_job(key, state='done' if mp4s else 'failed', pct=100, msg='' if mp4s else '轉檔沒有成功，FLV 已搬到 HDD，可在「FLV 待處理」重試', where=str(dst))
-        try: self._experiment_status(f'已搬到影片庫：{dst.name}' + ('' if mp4s else '（FLV，轉檔失敗）'))
-        except Exception: pass
-        if mp4s: self._lib_auto_publish_later(dst, 'video', 3000)
-
     # ================= V0.7.42.045 緊急分流：C 槽堆積（HDD 寫太慢）→ 排隊要搬到 HDD 的場次改搬到分流資料夾（例如 I 槽 SSD），不經過 HDD 限速 =================
     # ================= V0.8.12 借用空間：平常記錄每顆硬碟的空間變化，C 槽真的不夠時才建議借哪一顆、借多少（由你決定，不自動借） =================
     def _lend_dirs(self):
@@ -30827,7 +30676,16 @@ $r | ConvertTo-Json -Depth 4 -Compress
         # V0.5.30 compress text (history chat can be a few MB) - saves mobile / ngrok data
         if len(body)>2048 and ('json' in ctype or 'html' in ctype) and 'gzip' in str((getattr(sock,'_hdr',{}) or {}).get('accept-encoding','')):
             import gzip
-            body=gzip.compress(body,6); extra+='Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n'
+            if len(body)>200000 and 'html' in ctype:                          # V1.1.82 整頁（約 3 MB）壓縮過的留著：同樣內容不再每次在畫面執行緒重壓（約 0.1 秒）
+                import hashlib; k_=hashlib.md5(body).digest(); C_=self.__dict__.setdefault('_gz_page_c',{})
+                z_=C_.get(k_)
+                if z_ is None:
+                    z_=gzip.compress(body,6)
+                    if len(C_)>=6: C_.pop(next(iter(C_)))
+                    C_[k_]=z_
+                body=z_
+            else: body=gzip.compress(body,6)
+            extra+='Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n'
         cc=f'private, max-age={int(cache)}' if cache else 'no-store'
         head=f'HTTP/1.1 {code}\r\nContent-Type: {ctype}\r\nContent-Length: {len(body)}\r\nCache-Control: {cc}\r\n{extra}Connection: close\r\n\r\n'.encode('ascii')
         try: sock.write(head+body); sock.flush(); sock.disconnectFromHost()
@@ -31019,300 +30877,6 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 except Exception: pass
         finally:
             st['run'] = False
-
-    # ---------- TK_V0.8.81 Telegram 公開頻道貼文的影片 → E:\\TGDownloader（不在畫面上說明；大檔分段同時下載再接起來） ----------
-    TGDL_DIR = 'TGDownloader'
-    _TGDL_RE = re.compile(r'https?://(?:www\.)?(?:t|telegram)\.me/(?:s/)?([A-Za-z][A-Za-z0-9_]{3,})/(\d+)(?:\?[^\s]*)?')
-
-    def _tgdl_dir(self):
-        try: anc = Path(self.video_root()).anchor
-        except Exception: anc = ''
-        return Path(anc or str(PACKAGE_ROOT)) / self.TGDL_DIR
-
-    @staticmethod
-    def _seg_download(url, dst, headers, opener=None, parts=8, min_seg=8 * 1024 * 1024, prog=None):
-        """像 IDM：伺服器支援分段（Range）而且檔案大 → 分成幾段同時下載、直接寫進同一個檔案的各自位置（不用另外合併）；
-        不支援就一條連線照順序下載。每段失敗重試 4 次（從斷掉的地方接著下）。回傳 bytes."""
-        import urllib.request
-        op = opener or urllib.request.build_opener()
-        size = 0; ranged = False
-        try:
-            with op.open(urllib.request.Request(url, headers=dict(headers, Range='bytes=0-0')), timeout=30) as r:
-                cr = r.headers.get('Content-Range') or ''
-                m = re.search(r'/(\d+)', cr)
-                if r.status == 206 and m: size = int(m.group(1)); ranged = True
-                else: size = int(r.headers.get('Content-Length') or 0)
-        except Exception: pass
-        dst = Path(dst)
-        if not ranged or size < min_seg * 2:                                    # 小檔或不能分段：一條連線
-            got = 0
-            with op.open(urllib.request.Request(url, headers=headers), timeout=60) as r, open(dst, 'wb') as f:
-                while True:
-                    b = r.read(1 << 20)
-                    if not b: break
-                    f.write(b); got += len(b)
-                    if prog: prog(got, size)
-            return got
-        n = max(2, min(int(parts), size // min_seg)); step = size // n
-        segs = [[i * step, (size - 1) if i == n - 1 else (i + 1) * step - 1] for i in range(n)]
-        with open(dst, 'wb') as f: f.truncate(size)                             # 先佔好空間，每段寫自己的位置
-        done = [0] * n; err = []; lk = threading.Lock()
-        def worker(i):
-            a, b = segs[i]; pos = a
-            for _try in range(5):
-                if pos > b: return
-                try:
-                    with op.open(urllib.request.Request(url, headers=dict(headers, Range=f'bytes={pos}-{b}')), timeout=60) as r, open(dst, 'r+b') as f:
-                        if r.status != 206: raise RuntimeError('伺服器沒有照分段給')
-                        f.seek(pos)
-                        while pos <= b:
-                            blk = r.read(min(1 << 20, b - pos + 1))
-                            if not blk: break
-                            f.write(blk); pos += len(blk)
-                            with lk:
-                                done[i] = pos - a
-                                if prog: prog(sum(done), size)
-                    if pos > b: return
-                except Exception as ex:
-                    if _try == 4: err.append(str(ex)); return
-                    time.sleep(2 + _try * 2)
-            if pos <= b: err.append(f'第 {i + 1} 段沒下載完')
-        th = [threading.Thread(target=worker, args=(i,), daemon=True) for i in range(n)]
-        for t in th: t.start()
-        for t in th: t.join()
-        if err: raise RuntimeError('分段下載失敗：' + err[0])
-        return size
-
-    def _tgdl_one(self, url):
-        """Telegram 公開頻道的一則貼文（可以帶 ?comment=留言編號）→ 讀網頁版預覽拿影片網址 → TGDownloader\\頻道_編號_年月日_時分秒.mp4."""
-        import urllib.request, http.cookiejar, html as _html
-        m = self._TGDL_RE.match(url); ch, post = m.group(1), m.group(2)
-        qs = dict(re.findall(r'[?&]([a-z_]+)=([^&\s]*)', url)); cmt = qs.get('comment', '')
-        UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36'
-        op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())); H = {'User-Agent': UA, 'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8'}
-        tries = []
-        if cmt: tries.append(f'https://t.me/{ch}/{post}?comment={cmt}&embed=1&mode=tme')
-        tries += [f'https://t.me/{ch}/{post}?embed=1&mode=tme' + ('&single' if 'single' in url else ''), f'https://t.me/s/{ch}/{post}']
-        vids = []; why = ''; big = False; hit = ''
-        for pu in tries:
-            try: page = op.open(urllib.request.Request(pu, headers=H), timeout=25).read().decode('utf-8', 'ignore')
-            except Exception as ex: why = f'讀不到 Telegram 網頁：{ex}'; continue
-            if '/s/' in pu:                                                     # 頻道網頁版：只拿這一則
-                i = page.find(f'data-post="{ch}/{post}"')
-                if i < 0: continue
-                j = page.find('data-post="', i + 10); page = page[i:j if j > 0 else len(page)]
-            for v in re.findall(r'<video[^>]+src="([^"]+)"', page):
-                v = _html.unescape(v)
-                if v.startswith('//'): v = 'https:' + v
-                if v not in vids: vids.append(v)
-            if re.search(r'too big|太大|Media is too big|Please open Telegram to view', page, re.I): big = True
-            if vids: hit = pu; break
-        if (not vids or (cmt and 'comment=' not in hit)) and self._tgx_cfg().get('id'):   # TK_V0.8.82 網頁版拿不到（或要的是留言）：用帳號下載
-            d = self._tgdl_dir(); d.mkdir(parents=True, exist_ok=True); st = self._ttdl_state()
-            base = f'{ch}_{post}' + (f'_c{cmt}' if cmt else '') + '_' + datetime.now().strftime('%Y%m%d_%H%M%S')
-            def prog(a, b):
-                try: st['prog'] = {'url': url, 'k': 1, 'n': 1, 'got': a, 'size': b}
-                except Exception: pass
-            try:
-                L = self._tgx_download(ch, post, cmt, d, base, prog); st.pop('prog', None)
-                return {'ok': True, 'url': url, 'message': '✔ 已下載 ' + '、'.join(f'{p.name}（{n / 1e6:.1f} MB）' for p, n in L) + f' → {d}'}
-            except Exception as ex:
-                st.pop('prog', None)
-                if not vids: return {'ok': False, 'url': url, 'message': f'✖ Telegram {ch}/{post}：{ex}'}
-        if not vids:
-            return {'ok': False, 'url': url, 'message': f'✖ Telegram {ch}/{post}：' + ('影片太大或要登入 Telegram 才看得到（網頁版拿不到檔案）' if big else (why or '這則沒有找到影片（私人頻道、已刪除，或不是影片）'))}
-        d = self._tgdl_dir(); d.mkdir(parents=True, exist_ok=True); stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        got_c = bool(cmt) and 'comment=' in hit
-        base = f'{ch}_{post}' + (f'_c{cmt}' if got_c else ''); res = []; errs = []
-        st = self._ttdl_state()
-        for k, v in enumerate(vids):
-            out = d / (f'{base}_{stamp}' + (f'_{k + 1}' if len(vids) > 1 else '') + '.mp4'); tmp = out.with_suffix('.part')
-            def prog(got, size, k=k):
-                try: st['prog'] = {'url': url, 'k': k + 1, 'n': len(vids), 'got': got, 'size': size}
-                except Exception: pass
-            try:
-                _io_background(True)
-                n = self._seg_download(v, tmp, dict(H, Referer='https://t.me/'), op, prog=prog)
-                with open(tmp, 'rb') as fh: head = fh.read(12)
-                if n < 20 * 1024 or head[4:8] != b'ftyp': raise RuntimeError('拿到的不是影片檔')
-                os.replace(tmp, out); res.append(f'{out.name}（{n / 1e6:.1f} MB）')
-            except Exception as ex:
-                errs.append(str(ex))
-                try: tmp.unlink()
-                except Exception: pass
-            finally:
-                try: _io_background(False)
-                except Exception: pass
-        st.pop('prog', None)
-        if res: return {'ok': True, 'url': url, 'message': '✔ 已下載 ' + '、'.join(res) + f' → {d}' + (f'（{len(errs)} 個失敗：{errs[0]}）' if errs else '')
-                        + ('（留言裡的影片網頁版拿不到，下載的是這則貼文本身的影片）' if cmt and not got_c else '')}
-        return {'ok': False, 'url': url, 'message': f'✖ Telegram {ch}/{post} 下載失敗：{errs[0] if errs else "?"}'}
-
-    # ---------- TK_V0.8.82 Telegram 用自己的帳號下載（網頁版拿不到的：留言區、大檔、敏感標記）。隱藏頁 #tgx 設定；不繞過「限制儲存內容」 ----------
-    def _tgx_dir(self): return Path(PACKAGE_ROOT) / '_DB_SSD' / 'tg'
-    def _tgx_lib(self): return Path(PACKAGE_ROOT) / 'tools' / 'pylib'
-
-    def _tgx_state(self):
-        app = QApplication.instance(); st = getattr(app, '_tlm_tgx', None) if app is not None else self.__dict__.get('_tgx_st')
-        if st is None:
-            st = {'lock': threading.Lock(), 'inst': None, 'inst_msg': '', 'loop': None, 'client': None, 'phone': '', 'pch': '', 'me': '', 'msg': ''}
-            try: app._tlm_tgx = st
-            except Exception: self._tgx_st = st
-        return st
-
-    def _tgx_import(self):
-        lib = str(self._tgx_lib())
-        if Path(lib).is_dir() and lib not in sys.path: sys.path.insert(0, lib)
-        import telethon                                                         # noqa
-        return telethon
-
-    def _tgx_installed(self):
-        try: self._tgx_import(); return True
-        except Exception: return False
-
-    def _tgx_install(self):
-        """從 PyPI 下載 Telethon（純 Python）＋相依套件＋cryptg（加速解密，有對應版本才裝）到 tools\\pylib."""
-        st = self._tgx_state()
-        with st['lock']:
-            if st.get('inst') == 'running': return {'ok': False, 'message': '正在安裝'}
-            st['inst'] = 'running'; st['inst_msg'] = '準備下載…'
-        def work():
-            import urllib.request, zipfile as _zf
-            lib = self._tgx_lib(); lib.mkdir(parents=True, exist_ok=True); tag = f'cp{sys.version_info[0]}{sys.version_info[1]}'
-            def wheel(pkg, binary=False):
-                j = json.loads(urllib.request.urlopen(urllib.request.Request(f'https://pypi.org/pypi/{pkg}/json', headers={'User-Agent': 'TikLiveMonitor'}), timeout=30).read())
-                files = j.get('urls') or []
-                if binary: c = [f for f in files if f['filename'].endswith('.whl') and 'win_amd64' in f['filename'] and (f'-{tag}-' in f['filename'] or 'abi3' in f['filename'])]
-                else: c = [f for f in files if f['filename'].endswith('-none-any.whl')]
-                if not c: raise RuntimeError(f'{pkg} 找不到適合的版本')
-                st['inst_msg'] = f'下載 {pkg}…'
-                data = urllib.request.urlopen(urllib.request.Request(c[0]['url'], headers={'User-Agent': 'TikLiveMonitor'}), timeout=120).read()
-                import io as _io
-                with _zf.ZipFile(_io.BytesIO(data)) as z: z.extractall(lib)
-            try:
-                for p_ in ('Telethon', 'pyaes', 'rsa', 'pyasn1'): wheel(p_)
-                try: wheel('cryptg', True)
-                except Exception as ex: st['inst_msg'] = f'（加速元件 cryptg 沒裝：{ex}）'
-                import importlib as _il; _il.invalidate_caches(); self._tgx_import()
-                st['inst'] = 'ok'; st['inst_msg'] = '✔ 安裝好了'
-            except Exception as ex:
-                st['inst'] = 'fail'; st['inst_msg'] = f'✖ 安裝失敗：{ex}'
-        threading.Thread(target=work, name='TikLiveTgxInst', daemon=True).start()
-        return {'ok': True, 'message': '開始安裝'}
-
-    def _tgx_cfg(self, d=None):
-        p = self._tgx_dir() / 'cfg.json'
-        if d is not None:
-            p.parent.mkdir(parents=True, exist_ok=True); p.write_text(json.dumps(d), encoding='utf-8'); return d
-        try: return json.loads(p.read_text(encoding='utf-8'))
-        except Exception: return {}
-
-    def _tgx_call(self, fn, timeout=120):
-        """在 Telegram 專用的背景迴圈跑 async fn(client)；回傳結果（呼叫的執行緒等待，不是畫面執行緒）."""
-        import asyncio
-        st = self._tgx_state()
-        with st['lock']:
-            if st['loop'] is None or not st['loop'].is_running():
-                lp = asyncio.new_event_loop(); st['loop'] = lp
-                threading.Thread(target=lp.run_forever, name='TikLiveTgxLoop', daemon=True).start()
-        lp = st['loop']
-        async def run():
-            if st['client'] is None:
-                tl = self._tgx_import(); c = self._tgx_cfg()
-                if not c.get('id') or not c.get('hash'): raise RuntimeError('還沒填 api_id／api_hash')
-                self._tgx_dir().mkdir(parents=True, exist_ok=True)
-                st['client'] = tl.TelegramClient(str(self._tgx_dir() / 'tlm'), int(c['id']), str(c['hash']))
-            cl = st['client']
-            if not cl.is_connected(): await cl.connect()
-            return await fn(cl)
-        return asyncio.run_coroutine_threadsafe(run(), lp).result(timeout)
-
-    def _tgx_info(self):
-        st = self._tgx_state(); c = self._tgx_cfg(); inst = self._tgx_installed(); auth = False; me = ''
-        if inst and c.get('id'):
-            try:
-                async def f(cl):
-                    if not await cl.is_user_authorized(): return ''
-                    u = await cl.get_me(); return (u.first_name or '') + (f' @{u.username}' if u.username else '')
-                me = self._tgx_call(f, 30); auth = bool(me)
-            except Exception as ex: st['msg'] = str(ex)[:200]
-        return {'ok': True, 'installed': inst, 'inst': st.get('inst'), 'inst_msg': st.get('inst_msg', ''), 'has_cfg': bool(c.get('id')), 'id': str(c.get('id') or ''),
-                'auth': auth, 'me': me, 'wait_code': bool(st.get('pch')), 'msg': st.get('msg', '')}
-
-    def _tgx_code(self, api_id, api_hash, phone):
-        st = self._tgx_state()
-        try: api_id = int(str(api_id).strip())
-        except Exception: return {'ok': False, 'message': 'api_id 要是數字'}
-        api_hash = str(api_hash or '').strip(); phone = re.sub(r'[^\d+]', '', str(phone or ''))
-        if not api_hash or not phone: return {'ok': False, 'message': '三個欄位都要填'}
-        old = self._tgx_cfg()
-        if str(old.get('id')) != str(api_id) or old.get('hash') != api_hash:
-            self._tgx_cfg({'id': api_id, 'hash': api_hash})
-            if st.get('client') is not None:
-                try: self._tgx_call(lambda cl: cl.disconnect(), 20)
-                except Exception: pass
-                st['client'] = None
-        try:
-            async def f(cl): return await cl.send_code_request(phone)
-            r = self._tgx_call(f, 60); st['phone'] = phone; st['pch'] = r.phone_code_hash
-            return {'ok': True, 'message': '驗證碼已送到你的 Telegram'}
-        except Exception as ex: return {'ok': False, 'message': f'送驗證碼失敗：{ex}'}
-
-    def _tgx_login(self, code, pw=''):
-        st = self._tgx_state()
-        async def f(cl):
-            from telethon.errors import SessionPasswordNeededError
-            try:
-                if st.get('pch'): await cl.sign_in(st['phone'], str(code or '').strip(), phone_code_hash=st['pch'])
-                elif pw: await cl.sign_in(password=pw)
-            except SessionPasswordNeededError:
-                if not pw: return 'need_pw'
-                await cl.sign_in(password=pw)
-            return 'ok'
-        try:
-            r = self._tgx_call(f, 60)
-            if r == 'need_pw': st['pch'] = ''; return {'ok': False, 'need_pw': True, 'message': '這個帳號有兩步驟驗證：再填密碼'}
-            st['pch'] = ''; return {'ok': True, 'message': '✔ 登入好了'}
-        except Exception as ex: return {'ok': False, 'message': f'登入失敗：{ex}'}
-
-    def _tgx_logout(self):
-        st = self._tgx_state()
-        try: self._tgx_call(lambda cl: cl.log_out(), 30)
-        except Exception: pass
-        st['client'] = None; st['pch'] = ''
-        try: (self._tgx_dir() / 'tlm.session').unlink()
-        except Exception: pass
-        return {'ok': True, 'message': '已登出'}
-
-    def _tgx_download(self, ch, post, cmt, d, base, prog=None):
-        """用帳號拿這則（或留言）的影片：回傳 [(檔案, bytes)]；頻道開了「限制儲存內容」就不下載."""
-        async def f(cl):
-            from telethon.tl.functions.messages import GetDiscussionMessageRequest
-            ent = await cl.get_entity(ch)
-            if cmt:
-                r = await cl(GetDiscussionMessageRequest(peer=ent, msg_id=int(post)))
-                grp = next((c for c in r.chats if getattr(c, 'id', None) != getattr(ent, 'id', None)), r.chats[0])
-                msg = await cl.get_messages(grp, ids=int(cmt)); src = grp
-            else:
-                msg = await cl.get_messages(ent, ids=int(post)); src = ent
-            if msg is None: raise RuntimeError('找不到這則（可能已刪除，或你的帳號看不到）')
-            if getattr(msg, 'noforwards', False) or getattr(src, 'noforwards', False):
-                raise RuntimeError('這裡開了「限制儲存內容」，不下載')
-            if not (msg.video or msg.document or msg.photo): raise RuntimeError('這則沒有影片')
-            out = []
-            ext = '.mp4' if msg.video or (msg.file and str(msg.file.mime_type or '').startswith('video')) else (msg.file.ext if msg.file else '.bin')
-            path = d / f'{base}{ext}'; tmp = path.with_suffix('.part')
-            await cl.download_media(msg, file=str(tmp), progress_callback=(lambda a, b: prog(a, b)) if prog else None)
-            os.replace(tmp, path); out.append((path, path.stat().st_size))
-            return out
-        return self._tgx_call(f, 6 * 3600)
-
-    # ---------- TK_V1.0.79 IG 貼文／Reels（像 Repost app）：貼網址 → 照片存 JPG、影片存 MP4 → 跟 TKDownloader 同一顆硬碟的 IGDownloader ----------
-    # 只抓「公開」貼文；不登入、不用帳號密碼。私人帳號、限時動態（要登入）抓不到會直接說。
-    IGDL_DIR = 'IGDownloader'
-    _IGDL_RE = re.compile(r'https?://(?:www\.|m\.)?instagram\.com/(?:[A-Za-z0-9._]+/)?(p|reels?|tv)/([A-Za-z0-9_-]{5,})[^\s]*')
-    _IG_BASE = 'https://www.instagram.com'
-    _IG_APP = '936619743392459'
 
     def _igdl_dir(self):
         try: anc = Path(self.video_root()).anchor
@@ -37932,7 +37496,11 @@ $r | ConvertTo-Json -Depth 4 -Compress
 
     def _gav_prefetch(self, sid):
         """V1.1.80 工作區裡每一格的小預覽影片在背景先做好（離開畫面也繼續；一次一個、電腦忙先等），下次打開直接用."""
-        st = self.__dict__.setdefault('_gav_pf', {'run': False, 'want': set()}); st['want'].add(int(sid))
+        st = self.__dict__.setdefault('_gav_pf', {'run': False, 'want': set(), 'last': {}})
+        W0 = self._gav_load(sid) or {}; sig = (tuple(sorted(int(c['rid']) for c in W0.get('cells') or [])), W0.get('D'))
+        lt = st.setdefault('last', {}).get(int(sid))
+        if lt and lt[1] == sig and time.time() - lt[0] < 60: return             # V1.1.82 同樣的格子 1 分鐘內不重跑（調整時前端自己會要）
+        st['last'][int(sid)] = (time.time(), sig); st['want'].add(int(sid))
         if st['run']: return
         st['run'] = True
         def work():
@@ -38006,7 +37574,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             va = lambda e_: self._video_encoder_args(e_) if e_ != 'libx264' else ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-threads', '2']
             n = len(cells)
             fast = not aud and cw <= self.GAV_PXW * 1.1                         # V1.1.81 格子不大於小預覽影片（360 寬）：直接從小預覽影片剪（快很多，畫質一樣），不回原檔
-            J['fast'] = fast
+            J['fast'] = fast; pre = {}                                       # V1.1.82 快速：小預覽影片直接當輸入，在同一個 FFmpeg 裡裁切＋疊（不再每格壓縮一次）
             for i, c in enumerate(cells):
                 if getattr(self, '_handoff', False): raise RuntimeError('程式要關了')
                 wait_idle(); J.update(msg=f'取第 {i + 1}/{n} 格' + ('（從小預覽影片，快）' if fast else '（從原檔）'), done=i)
@@ -38019,6 +37587,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 if p is not None:
                     pad = max(0.0, -st); st = st - px_off
                     vf = f"fps={fps},scale={cw}:{ch}:force_original_aspect_ratio=increase,crop={cw}:{ch}:(iw-{cw})/2:(ih-{ch})*{fyf:.4f},setsar=1" + (f",tpad=start_mode=clone:start_duration={pad:.2f}" if pad > 0 else '') + f",tpad=stop_mode=clone:stop_duration={D:.2f}"
+                    if fast and px_off is not None and str(p).startswith(str(self._gav_dir('gav_px'))):
+                        pre[i] = (p, max(0.0, st), max(0.1, D - pad), vf); continue
                     for e_ in ([enc, 'libx264'] if enc != 'libx264' else ['libx264']):
                         cmd = [ff, '-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-ss', f'{max(0.0, st):.3f}', '-i', str(p), '-t', f'{max(0.1, D - pad):.3f}', '-vf', vf, '-t', f'{D:.3f}'] + va(e_)
                         cmd += (['-af', f'aresample=48000,apad=whole_dur={D:.3f}', '-c:a', 'aac', '-b:a', '128k', '-ac', '2'] if aud else ['-an']) + [str(o)]
@@ -38029,7 +37599,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, **_no_window_kwargs(idle=True))
             wait_idle(); J.update(msg=f'拼成 {W}×{H}…', done=n)
             ins = ['-f', 'lavfi', '-i', f'color=c=black:s={W}x{H}:r={fps}:d={D:.3f}']
-            for i in range(n): ins += ['-i', str(tmpd / f'c{i:03d}.mp4')]
+            for i in range(n):
+                if i in pre: p_, ss_, du_, _vf = pre[i]; ins += ['-ss', f'{ss_:.3f}', '-t', f'{du_:.3f}', '-i', str(p_)]
+                else: ins += ['-i', str(tmpd / f'c{i:03d}.mp4')]
             zof = lambda c_, r_: 1 + ((r_ if lay['zv'] == 'd' else 500 - r_) * 200) + (c_ if lay['zh'] == 'r' else 199 - c_)   # 跟畫面上一樣誰疊誰
             g_ = max(0, -gp) if (lay['fe'] and gp < 0) else 0; masks = {}; mk_in = {}
             def fea(c_, r_): return (g_ if lay['zh'] == 'r' and c_ > 0 else 0, g_ if lay['zh'] == 'l' and c_ < C - 1 else 0, g_ if lay['zv'] == 'd' and r_ > 0 else 0, g_ if lay['zv'] == 'u' and r_ < R - 1 else 0)
@@ -38048,16 +37620,16 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     if v_ in masks: use.setdefault(v_, []).append(i)
                 for v_, L_ in use.items():
                     ins += ['-loop', '1', '-i', str(masks[v_])]; mk_in[v_] = (0, L_)
-            fl = []; last = '0:v'
+            fl = [f'[{i + 1}:v]{pre[i][3]}[pv{i}]' for i in sorted(pre)]; last = '0:v'
             pos_ = 1 + n; mk_pos = {}                                           # 輸入順序：0＝底、1..n＝格子、之後是遮罩
             for v_ in mk_in: mk_pos[v_] = pos_; pos_ += 1
             for v_, (k_, L_) in mk_in.items():
                 fl.append(f'[{mk_pos[v_]}:v]format=gray,split={len(L_)}' + ''.join(f'[mk{i}]' for i in L_))
             order = sorted(range(n), key=lambda i: zof(i % C, i // C))
             for i in order:
-                x = (i % C) * (cw + gp); y = (i // C) * (ch + gp); tag = f'o{i}'; src_ = f'{i + 1}:v'
+                x = (i % C) * (cw + gp); y = (i // C) * (ch + gp); tag = f'o{i}'; src_ = f'pv{i}' if i in pre else f'{i + 1}:v'
                 if any(i in L_ for _k, L_ in mk_in.values()):
-                    fl.append(f'[{i + 1}:v]format=yuva420p[cv{i}];[cv{i}][mk{i}]alphamerge[ca{i}]'); src_ = f'ca{i}'
+                    fl.append(f'[{src_}]format=yuva420p[cv{i}];[cv{i}][mk{i}]alphamerge[ca{i}]'); src_ = f'ca{i}'
                 fl.append(f'[{last}][{src_}]overlay={x}:{y}:eof_action=repeat:format=auto[{tag}]'); last = tag
             fl.append(f'[{last}]format=yuv420p[vo]'); amap = []
             if aud:
@@ -38376,8 +37948,15 @@ $r | ConvertTo-Json -Depth 4 -Compress
     def _pfx_idx_path(self): return Path(PACKAGE_ROOT) / '_DB_SSD' / 'phone_fx_index.json'
 
     def _pfx_idx(self):
-        try: return list(json.loads(self._pfx_idx_path().read_text(encoding='utf-8')) or [])
+        """phone_fx_index.json（V1.1.82 檔案沒變就用記憶體裡的，每次回傳一份新的清單）."""
+        p = self._pfx_idx_path()
+        try: k = (p.stat().st_mtime_ns, p.stat().st_size)
         except Exception: return []
+        c = self.__dict__.get('_pfx_idx_c')
+        if c and c[0] == k: return [dict(x) for x in c[1]]
+        try: L = list(json.loads(p.read_text(encoding='utf-8')) or [])
+        except Exception: return []
+        self.__dict__['_pfx_idx_c'] = (k, L); return [dict(x) for x in L]
 
     def _pfx_finish(self, f, meta):
         """背景：MKV → MP4（不重新壓縮、idle）→ 搬到影片資料夾 → 記到 phone_fx_index.json. 太短（<15 秒）的丟掉."""
@@ -38480,7 +38059,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
         live = sorted([[u, self.streamer_names.get(u, u), float(st.get(u) or 0)] for u, v in es.items() if v == 'LIVE'], key=lambda x: -x[2])
         T = self._pfx_tools()
         PD = self._phr_db()['items']
-        up_sids = sorted({int(x.get('sid')) for x in PD.values() if x.get('st') == 'ok' and not x.get('pfx') and not x.get('psid') and x.get('sid')})   # V1.1.75 有上傳的手機／平板錄屏的場次
+        up_sids = sorted({int(x.get('sid')) for x in PD.values() if x.get('st') == 'ok' and not x.get('pfx') and not x.get('psid') and x.get('sid')})
+        unal = [{'sid': int(x['sid']), 'id': str(x.get('id') or k), 'name': Path(str(x.get('path') or '')).name} for k, x in PD.items() if self._phr_unal(x)][-20:]   # V1.1.82 聲音沒對上、還沒手動對齊的上傳   # V1.1.75 有上傳的手機／平板錄屏的場次
         rec = [dict(x, f=Path(x['f']).name, i=i, al=(lambda it: 'ok' if it.get('st') == 'ok' and 'pfx' in it and '用錄影時間' not in str(it.get('msg') or '') else ('time' if it.get('st') == 'ok' else ('wait' if it.get('st') in ('wait', 'run') else '')))(PD.get(str(x.get('phr') or '')) or {}))
                for i, x in enumerate(self._pfx_idx())][-30:][::-1]
         try: S['rno'] = {u: i for i, u in enumerate(self._roster_ids(), 1)}
@@ -38490,7 +38070,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         sw = dict(S['sw'], left=max(0, round(float(S['sw']['at']) - now))) if S.get('sw') else None
         return {'ok': True, 'now': now, 'tools': bool(T), 'tdir': str(self._pfx_tdir()), 'scrv': (self._pfx_scr_ver(T[1]) if T else ''), 'dl': S.get('dl') or '', 'dl_run': bool(S.get('dl_run')),
                 'dev': dict(S.get('dev') or {}), 'cur': cur, 'man': S.get('man'), 'hot': bool(S.get('hot')), 'wait': S.get('wait') or '', 'run': bool(S.get('gen')),
-                'up_sids': up_sids, 'mj': dict(S.get('mj') or {}), 'acct': self._pfx_uid(), 'rest': {k: v for k, v in (S.get('rest') or {}).items() if float(v) > now}, 'tk_bad': S.get('tk_bad'),
+                'up_sids': up_sids, 'unal': unal, 'mj': dict(S.get('mj') or {}), 'acct': self._pfx_uid(), 'rest': {k: v for k, v in (S.get('rest') or {}).items() if float(v) > now}, 'tk_bad': S.get('tk_bad'),
                 'shot': dict(S.get('shot') or {}), 'alerts': list(S.get('alerts') or []), 'gj': dict(S.get('gj') or {}), 'gl': self._pfx_glist(), 'rb_t': S.get('rb_t'),
                 'cfg': cfg, 'live': live, 'sl': sl, 'sw': sw, 'log': list(S.get('log') or [])[-40:][::-1], 'rec': rec,
                 'gr': {u: self._rv_grade_of(u) for u in [x[0] for x in live] + list(cfg.get('users') or [])}}
@@ -41005,67 +40585,6 @@ exit /b 1
             if st_ is None: st_ = {}; app_._tlm_vbl_st = st_
             st_['s'] = str(t); st_['t'] = time.time()
         except Exception: pass
-
-    def _vb_list_cached(self, q='', cat='', users=None, order='new', hide_nv=False):
-        """TK_V0.9.04 檔案總管清單：有算過就先給上次的（記憶體／SSD 檔，重開、熱更新後也有），背景再重算；第一次才等。
-        算超過 20 秒會記到 watchdog（每一步花多久），之後看得出卡在哪."""
-        if users: return self._vb_list(q, cat, users, order, hide_nv)
-        key = f"{q}|{cat}|{order}|{int(bool(hide_nv))}"
-        app_ = QApplication.instance(); C = getattr(app_, '_tlm_vbl', None)
-        if C is None:
-            C = {'m': {}, 'run': set(), 'lock': threading.Lock()}
-            try:
-                d_ = json.loads((Path(PACKAGE_ROOT) / '_DB_SSD' / 'vb_list_cache.json').read_text(encoding='utf-8'))
-                if isinstance(d_, dict): C['m'] = {k: (float(v[0]), v[1]) for k, v in d_.items() if isinstance(v, list) and len(v) == 2}
-            except Exception: pass
-            try: app_._tlm_vbl = C
-            except Exception: pass
-        def calc():
-            t0 = time.time(); r = self._vb_list(q, cat, None, order, hide_nv); dt = time.time() - t0
-            with C['lock']:
-                C['m'][key] = (time.time(), r)
-                if len(C['m']) > 12: C['m'].pop(next(iter(C['m'])), None)
-            if dt > 20:
-                try: self._wd_log(f'檔案總管清單算了 {dt:.0f} 秒（{len(r.get("rows") or [])} 場）：硬碟很忙時會這樣，畫面先用上次的')
-                except Exception: pass
-            try:
-                with C['lock']: snap = {k: [t, v] for k, (t, v) in C['m'].items() if k.endswith('|1') or True}
-                pth = Path(PACKAGE_ROOT) / '_DB_SSD' / 'vb_list_cache.json'; tmp = pth.with_suffix('.tmp')
-                tmp.write_text(json.dumps(snap, ensure_ascii=False, default=str), encoding='utf-8'); os.replace(tmp, pth)
-            except Exception: pass
-            return r
-        x = C['m'].get(key)
-        if x is not None:
-            if time.time() - x[0] > 45 and key not in C['run']:
-                C['run'].add(key)
-                def bg():
-                    try: calc()
-                    except Exception: pass
-                    finally: C['run'].discard(key)
-                threading.Thread(target=bg, name='TikLiveVbList', daemon=True).start()
-            out = dict(x[1]); out['stale'] = round(time.time() - x[0])
-            try:                                                                # 保存等級一定用最新的（剛標的不會被舊清單蓋掉）
-                sn_ = self._snote_all()
-                for r in out.get('rows') or []:
-                    v_ = (sn_.get(str(int(r['sid']))) or {}).get('lv'); r['lv'] = int(v_) if v_ is not None else None
-            except Exception: pass
-            return out
-        if key not in C['run']:                                                 # TK_V0.9.05 第一次也不讓網頁一直等：背景算，網頁每 2 秒問一次（看得到做到哪）
-            C['run'].add(key); C['t0_' + key] = time.time()
-            def bg1():
-                try: calc()
-                except Exception as ex:
-                    C['err_' + key] = f'{type(ex).__name__}: {ex}'
-                    try: self._wd_log(f'檔案總管清單出錯：{type(ex).__name__}: {ex}')
-                    except Exception: pass
-                finally: C['run'].discard(key)
-            threading.Thread(target=bg1, name='TikLiveVbList1', daemon=True).start(); time.sleep(0.3)
-            x = C['m'].get(key)
-            if x is not None: return dict(x[1])
-        st_ = getattr(QApplication.instance(), '_tlm_vbl_st', None) or {}
-        err = C.pop('err_' + key, None)
-        if err: return {'error': err, 'rows': None}
-        return {'pending': True, 'rows': None, 'stage': st_.get('s', ''), 'stage_s': round(time.time() - float(st_.get('t') or time.time())), 'secs': round(time.time() - float(C.get('t0_' + key) or time.time()))}
 
     def _vb_list(self, q='', cat='', users=None, order='new', hide_nv=False):
         """Worker thread. Sessions that still have MP4 (newest first), not the one being recorded."""
@@ -46881,21 +46400,6 @@ setTimeout(todoBadge,9000);document.addEventListener("visibilitychange",()=>{if(
 function smtGo(k){if(k==="today"){location.hash="tool/dtl";return;}   /* TK_V1.0.50 今天漏開頭 → 時間軸 */
 if(k==="mem"){S.scat="perf";location.hash="set";return;}if(k==="err"){S.scat="logx";location.hash="set";return;}if(k==="dhealth"){location.hash="tool/dhh";return;}if(k==="chv"){location.hash="tool/chv";return;}if(k==="pup"){if(typeof pupOpen==="function")pupOpen();return;}if(k==="nvexp"||k==="orphm"){window.LVS_KIND_NEXT=k==="nvexp"?"nv":"orph";location.hash="fx";return;}   /* TK_V1.0.09 */
   const H={pfx:"tool/pfx",smart:"tool/cg",review:"tool/cg",rescue:"tool/cg",today:"tool/cg",hl:"hl",reel:"hl",yt:"tool/yt",ytauth:"tool/yt",disk:"tool/org",guard:"bg"};if(H[k])location.hash=H[k];}
-async function viewTgx(){$("#clk").textContent="";V().onclick=null;let d=null;try{d=await J("/api/pc/tgx");}catch(e){}
-  if(!d){V().innerHTML='<div class="empty">讀不到</div>';return;}
-  const st=d.auth?`✔ 已登入：${esc(d.me)}`:(d.installed?"還沒登入":"還沒安裝元件");
-  V().innerHTML=`<div class="tlh"><button class="back" onclick="location.hash='tools'">‹</button><b>TG</b></div><div class="panel setp" style="padding:12px;display:flex;flex-direction:column;gap:8px">
-<div>${st}${d.inst_msg?`<br><small>${esc(d.inst_msg)}</small>`:""}${d.msg&&!d.auth?`<br><small style="color:#f0ad4e">${esc(d.msg)}</small>`:""}</div>
-${!d.installed?`<button class="btn" id="gI">安裝元件</button>`:d.auth?`<button class="btn s" id="gO">登出</button>`:`
-<input id="gA" placeholder="api_id" value="${esc(d.id)}" inputmode="numeric"><input id="gH" placeholder="api_hash" autocomplete="off"><input id="gP" placeholder="手機號碼（+886…）" inputmode="tel"><button class="btn" id="gC">送驗證碼</button>
-<input id="gK" placeholder="驗證碼" inputmode="numeric" autocomplete="one-time-code"><input id="gW" type="password" placeholder="兩步驟驗證密碼（有設才填）" autocomplete="off"><button class="btn" id="gL">登入</button>`}
-<div id="gM"></div></div>`;
-  const M=t=>{$("#gM").textContent=t;},P=async(p,o)=>{M("處理中…");const j=await deepPost(p,o||{});M((j&&j.message)||"");if(j&&(j.ok||p.endsWith("install")))setTimeout(viewTgx,p.endsWith("install")?3000:600);};
-  const b=k=>document.getElementById(k);
-  if(b("gI"))b("gI").onclick=()=>P("/api/pc/tgx/install");if(b("gO"))b("gO").onclick=()=>P("/api/pc/tgx/logout");
-  if(b("gC"))b("gC").onclick=()=>P("/api/pc/tgx/code",{id:b("gA").value,hash:b("gH").value,phone:b("gP").value});
-  if(b("gL"))b("gL").onclick=()=>P("/api/pc/tgx/login",{code:b("gK").value,tfa:b("gW").value});
-  if(d.inst==="running")setTimeout(viewTgx,2000);}
 function viewTools(){$("#clk").textContent="";
   V().innerHTML=`<div id="smtT"></div><div class="tbgS" id="tbgS">🖥 後台狀態讀取中…</div>`+TOOLS.filter(([g])=>g!=="緊急事件"||(typeof LEND!=="undefined"&&LEND.d&&LEND.d.emg_show)).map(([g,L])=>`<div class="tgh">${g}</div><div class="wsGrid">${L.map(([k,ic,t,sub])=>`<button class="wsCard" data-tl="${k}"><i>${ic}</i><b>${t}</b><small>${sub}</small></button>`).join("")}</div>`).join("");
   V().onclick=e=>{const b=e.target.closest("[data-tl]");if(b){const k=b.dataset.tl;if(k==="vb")vbOpen();else if(k==="vg")location.hash="fx";else if(k==="sp")spOpen();else if(k==="nv")nvOpen();else if(k==="bg")location.hash="bg";else if(k==="gift")location.hash="gift";else if(k==="hrank")location.hash="hrank";else location.hash="tool/"+k;return;}if(e.target.closest("#tbgS"))location.hash="bg";};
@@ -47000,7 +46504,7 @@ const RULES=[
   {t:"空間不夠時",d:"<ul><li>SSD 剩不到 <b>"+RU_V('rec.ssd_min_free','GB',60)+"</b>：新的錄影改成直接錄在影片庫硬碟。</li><li>影片硬碟剩不到 <b>"+RU_V('rec.video_min_free','GB',30)+"</b>：不開始新的錄影（<b>聲音照錄</b>）。</li><li>🛡 C 槽守門員每分鐘看 C 剩多少、減少多快：第 1 級先停不急的背景工作；第 2 級全速把東西搬走；第 3 級（剩不到 15 GB 或 20 分鐘內會滿）才會一位一位停掉正在錄到 C 的影片（F → E → 未分級先停）。</li></ul>"},
   {t:"同一場直播的判定（斷線、重開）",d:"<ul><li>主播斷線後 <b>"+RU_V('conn.grace_minutes','分鐘',10)+"內</b>連回同一個直播間＝<b>續寫同一場</b>（錄影會分成第 2 段、第 3 段…）。</li><li>直播中卻 <b>"+RU_V('monitor.silent_min','分鐘',30)+"</b>沒有任何留言、禮物、進場、人數也沒變（而且沒在錄影）→ 重新連一次確認：還在播就續寫，結束了就把結束時間改回最後有資料的時間。</li><li>程式重開、斷電、超過 10 分鐘才連回來 → 會變成<b>另一場</b>。這種被切開的，用「⧉ 合併重複場次」合回一場（見「場次合併」）。</li></ul>"},
   {t:"開程式、熱更新時的監控",d:"<ul><li>開程式 3 秒後自動開始監控（設定可以關）。正在錄的場次在熱更新、重開時會<b>接著錄同一場</b>。</li><li>搬硬碟切換後，如果找不到影片硬碟（例如 R 槽代號跑掉），程式<b>先不開始監控</b>，不會錄到別的地方，會提示你去磁碟管理改代號。</li></ul>"},
-  {t:"📲 手機錄特效",d:"<ul><li>一支安卓手機（紅米 10）用 USB 接電腦，裝好 scrcpy（工具頁可自動從官方 GitHub 下載）。</li><li>主播開播 → 手機自己亮起來、打開那個直播間 → 錄下手機畫面＋聲音（有禮物特效）。一支手機一次錄一場。</li><li>錄誰：<b>S 級</b>的主播，照「工具 → 📲 手機錄特效」裡拖好的順序；按「▶ 開始」後，排最前面、正在直播的那位先錄，他下播換下一位還在播的。要加人＝在審核改成 S。</li><li>改順序要按右下角「✔ 套用」才生效；套用後（或排更前面的開播了）正在錄的不是第一順位 → 倒數 10 秒停掉、換錄新的那位。</li><li>主播斷線／下播超過 90 秒才停；TikTok 被關掉或跳走會自己重新打開直播間；拔線再插回、scrcpy 中斷 → 接著錄下一段（_p2、_p3…）。</li><li>手機超過 46°C 先停錄，降到 41°C 再繼續。</li><li>先錄在 SSD（MKV，斷電也播得了），結束後不重新壓縮換成 MP4（idle），搬到影片資料夾 <b>TikLive_手機特效\\帳號\\</b>；不到 15 秒的段丟掉。</li><li>回放：同一場可以切換「原本／手機」版本（用聲音對齊；對不上用錄影時間，可能差幾秒）。剪輯器那場的來源最後多一個手機特效檔。</li><li>S 級：手機特效版也排進 YouTube（標題加「手機特效版」，跟原本的是不同一部）。容量預測也算進去。</li><li>🎁 禮物剪輯：「錄好的」那場按「禮物剪輯」→ 選一位大哥（不算 10 鑽以下），或不分是誰、單次 ≥ 2000 鑽的全部 → 每個禮物一格（一次顯示 10 格，往右滑再載入）；點一格只載那一小段，用 ±1／±5 調送禮前、送禮後幾秒，按 OK 換下一格；沒調的用預設 → 全部接成一支 MP4（連在一起的併成一段，用顯示卡壓縮）。</li><li>學習時間差：每次按 OK 都記下來（禮物、你調的秒數、當時幾個人在播…）。同一種禮物有 2 筆以上就用它們當預設：取中位數、差太多的先不算、其他平均；之後資料夠了可以分析延遲原因。</li><li>回放切到「手機」版本時，程式自己畫的送禮動畫不顯示（手機畫面本來就有真的特效）。</li><li>🧩 手機版合併：同一場有手機特效（自動錄）和上傳的手機／平板錄屏（用「手機錄屏」上傳，聲音自動對上這場）→ 回放的「📱 手機」預設用上傳的把重疊時間蓋掉；「錄好的」按「🧩 合併」可以改成只蓋幾分到幾分，也可以照結果輸出：每段各一支（各自原本的解析度，不混在一起、不補黑邊；被上傳的蓋掉的手機特效不輸出；整支用到直接複製，只用到一部分照原解析度剪），放在「暱稱_開播_#場次_手機合併」資料夾。</li><li>🎯 手動對齊：上傳的位置不對（聲音對不上、被放錯時間）→ 合併畫面每支上傳的按「🎯 手動對齊位置」：上面播上傳的、下面播這場（原本錄的或手機特效，可以點禮物清單跳過去），兩邊停在同一瞬間按「🎯 這兩個是同一刻」→ 程式再用聲音在前後 2 秒內找最準的一點（找不到就照你對的）；之後可以 ±0.1／±0.5 秒微調、「▶ 兩個一起播」檢查；存過的「蓋幾分到幾分」會跟著一起挪。</li><li>🎛 禮物陣列影片（工具／網頁版第 61 頁，或「錄好的」那場按「🎛 禮物陣列」，跟批量剪輯、GIF 陣列分開）：選一場 → 用「送禮的人／禮物／單次 ≥ 幾鑽」篩，每個禮物 5 張預覽圖（從開始秒數起每格長度內平均 5 張）看表情挑 → 排成陣列（畫面照「🧩 手機版合併」的結果：上傳的平板／手機錄屏蓋掉的時間用上傳的，被取代的手機特效不會出現），全部格子一起從頭循環播（每格是送禮前 10 秒～後 20 秒的小預覽影片，顯示卡壓縮、存 SSD）→ 點一格用 −0.1／+0.1（按住一直調）、−1／+1 調它從哪裡開始，其他格照播；「☑ 多選」「同一種禮物」可以一起調；◀ ▶ 換位置、✕ 拿掉 → 選每格秒數、排法（幾欄×幾列）、長邊、要不要聲音 → 輸出一支 MP4（存在 TikLive_手機特效\_禮物陣列\，背景一次一件、電腦忙先等）。「⏱ 前後」開始／結束各有 −1／−0.1／+0.1／+1（按住一直調），一起改全部格子，每格一樣長，時間條看黃線＝送禮、藍框＝要的那段；「🧩 疊法」跟截圖全覽一樣：間距（負＝疊在一起）、左右疊、上下疊、臉位置 ▲▼，另外可以勾「疊的地方柔化過渡」（輸出也一樣）；每格的小預覽影片前面多留 15 秒、後面多留 20 秒，調前後大多不用重做，超出才只重做那一格；做好的存在電腦 SSD（最多 2 萬支），換排版、換秒數、下次打開都直接用，離開頁面電腦也會在背景繼續做；上面有進度條和大概還要多久，輸出也有；某格讀不到 → 點那格看原因、按「🔄 重新讀取」。每次調整都記下來（_DB_SSD\pfx_gav_log.jsonl：哪種禮物、誰送、調前調後、當時幾個人在播），同一種禮物 2 格以上就自動當下次的預設開始秒數；工作區自動存，下次打開同一場接著做。</li><li>✂ 剪輯：那場有手機特效版會先問要剪「原本錄的」還是「手機特效版」；沒有就直接開。</li><li>看畫面：錄影中每 30 秒截一張手機畫面（頁面看得到），也讀畫面上的字、看現在是不是直播間。黑畫面（螢幕關了、直播間沒畫面）、TikTok 顯示「發生錯誤／請稍後再試」、跑到首頁不在直播間、一模一樣 2 分鐘（卡住）、錄影檔沒在長 → 看到就馬上動手，30 秒後還不對換下一招：①完全關掉 TikTok 重開直播間（每次開直播間都先這樣，避免叫回上一場已結束的）②先進另一位正在播的直播間 6 秒再回來 ③再關掉 TikTok 重開 ④檢查手機網路，不通就關掉 Wi-Fi 再打開 ⑤重開錄影 ⑥重開手機（6 小時最多一次）。小米「充電速度慢」這類跳出來的視窗按返回關掉。只是畫面沒動（主播可能停在同一畫面）救 3 招後改 3 分鐘再看。螢幕設成永遠不自己關。</li><li>自己處理：通知欄被拉下來、USB 用途選單、系統對話框 → 20 秒內自己收掉；離開 TikTok 會重新打開直播間；連不上 3 分鐘重新啟動 adb；處理不了的（找不到手機、電量低沒充電、在播卻沒在錄）會出現在狀態卡和這頁最上面。</li><li>聲音：開直播間前先把手機媒體音量調到 0（錄影還沒開始那幾秒不出聲），錄影接手聲音後（手機本來就不出聲）調回原本的音量，確保錄得到聲音。</li><li>螢幕：下播停錄 → 回桌面、把 TikTok 完全關掉（主帳號＋小米分身，不在背景一直播、耗電、出聲）；沒在錄、1 分鐘沒人操作 → 回桌面、亮度最低、關螢幕待機；開播時亮起來（亮度照設定，預設 50%）→ 回桌面 → 進直播間，開錄前先看一眼畫面，黑的就回桌面再開一次。頁面有手動按鈕：亮屏、熄屏、回桌面、開 TikTok、截一張、亮度拉桿（任何裝置都能按）。</li><li>SIM 卡：錄影手機不要插中國的 SIM 卡（TikTok 會把手機當成在中國，整頁「發生錯誤」、不能登入）；偵測到會在頁面最上面提醒。只用 Wi-Fi 就好。</li><li>帳號：有小米分身（雙開，系統使用者 999）登入另一個 TikTok 帳號時，每一場輪流用；一個帳號一直「發生錯誤」（可能被 TikTok 擋）就換另一個，被擋的休息 30 分鐘。兩個都不行就不再一直重開，改成等 5、10、20 分鐘再試，並提醒你（重開手機對這種沒用，只用在黑畫面）。</li><li>手機畫面每 30 秒截一張顯示在頁面（螢幕關著不截）；錄影中的截圖另外存成那支影片的「預覽」（檔名＝影片第幾秒），在「錄好的」按 🖼 預覽看，點一張從那裡播。要先開小米「USB 偵錯（安全設定）」程式才能按電源鍵。</li><li>每週二、週五凌晨 3～7 點（沒在錄、S 級都沒在播時）自動重開手機一次；</li><li>全部在背景執行緒：手機只把壓好的畫面傳過來，電腦不解碼、不開視窗。</li></ul>"},
+  {t:"📲 手機錄特效",d:"<ul><li>一支安卓手機（紅米 10）用 USB 接電腦，裝好 scrcpy（工具頁可自動從官方 GitHub 下載）。</li><li>主播開播 → 手機自己亮起來、打開那個直播間 → 錄下手機畫面＋聲音（有禮物特效）。一支手機一次錄一場。</li><li>錄誰：<b>S 級</b>的主播，照「工具 → 📲 手機錄特效」裡拖好的順序；按「▶ 開始」後，排最前面、正在直播的那位先錄，他下播換下一位還在播的。要加人＝在審核改成 S。</li><li>改順序要按右下角「✔ 套用」才生效；套用後（或排更前面的開播了）正在錄的不是第一順位 → 倒數 10 秒停掉、換錄新的那位。</li><li>主播斷線／下播超過 90 秒才停；TikTok 被關掉或跳走會自己重新打開直播間；拔線再插回、scrcpy 中斷 → 接著錄下一段（_p2、_p3…）。</li><li>手機超過 46°C 先停錄，降到 41°C 再繼續。</li><li>先錄在 SSD（MKV，斷電也播得了），結束後不重新壓縮換成 MP4（idle），搬到影片資料夾 <b>TikLive_手機特效\\帳號\\</b>；不到 15 秒的段丟掉。</li><li>回放：同一場可以切換「原本／手機」版本（用聲音對齊；對不上用錄影時間，可能差幾秒）。剪輯器那場的來源最後多一個手機特效檔。</li><li>S 級：手機特效版也排進 YouTube（標題加「手機特效版」，跟原本的是不同一部）。容量預測也算進去。</li><li>🎁 禮物剪輯：「錄好的」那場按「禮物剪輯」→ 選一位大哥（不算 10 鑽以下），或不分是誰、單次 ≥ 2000 鑽的全部 → 每個禮物一格（一次顯示 10 格，往右滑再載入）；點一格只載那一小段，用 ±1／±5 調送禮前、送禮後幾秒，按 OK 換下一格；沒調的用預設 → 全部接成一支 MP4（連在一起的併成一段，用顯示卡壓縮）。</li><li>學習時間差：每次按 OK 都記下來（禮物、你調的秒數、當時幾個人在播…）。同一種禮物有 2 筆以上就用它們當預設：取中位數、差太多的先不算、其他平均；之後資料夠了可以分析延遲原因。</li><li>回放切到「手機」版本時，程式自己畫的送禮動畫不顯示（手機畫面本來就有真的特效）。</li><li>🧩 手機版合併：同一場有手機特效（自動錄）和上傳的手機／平板錄屏（用「手機錄屏」上傳，聲音自動對上這場）→ 回放的「📱 手機」預設用上傳的把重疊時間蓋掉；「錄好的」按「🧩 合併」可以改成只蓋幾分到幾分，也可以照結果輸出：每段各一支（各自原本的解析度，不混在一起、不補黑邊；被上傳的蓋掉的手機特效不輸出；整支用到直接複製，只用到一部分照原解析度剪），放在「暱稱_開播_#場次_手機合併」資料夾。</li><li>🎯 手動對齊：上傳的位置不對（聲音對不上、被放錯時間）→ 合併畫面每支上傳的按「🎯 手動對齊位置」：上面播上傳的、下面播這場（原本錄的或手機特效，可以點禮物清單跳過去），兩邊停在同一瞬間按「🎯 這兩個是同一刻」→ 程式再用聲音在前後 2 秒內找最準的一點（找不到就照你對的）；聲音沒對上（用錄影時間推的）的上傳，在「手機錄屏」上傳頁那支、和手機錄特效頁最上面都會出現「🎯」按鈕，一按直接進對齊畫面；之後可以 ±0.1／±0.5 秒微調、「▶ 兩個一起播」檢查；存過的「蓋幾分到幾分」會跟著一起挪。</li><li>🎛 禮物陣列影片（工具／網頁版第 61 頁，或「錄好的」那場按「🎛 禮物陣列」，跟批量剪輯、GIF 陣列分開）：選一場 → 用「送禮的人／禮物／單次 ≥ 幾鑽」篩，每個禮物 5 張預覽圖（從開始秒數起每格長度內平均 5 張）看表情挑 → 排成陣列（畫面照「🧩 手機版合併」的結果：上傳的平板／手機錄屏蓋掉的時間用上傳的，被取代的手機特效不會出現），全部格子一起從頭循環播（每格是送禮前 10 秒～後 20 秒的小預覽影片，顯示卡壓縮、存 SSD）→ 點一格用 −0.1／+0.1（按住一直調）、−1／+1 調它從哪裡開始，其他格照播；「☑ 多選」「同一種禮物」可以一起調；◀ ▶ 換位置、✕ 拿掉 → 選每格秒數、排法（幾欄×幾列）、長邊、要不要聲音 → 輸出一支 MP4（存在 TikLive_手機特效\_禮物陣列\，背景一次一件、電腦忙先等）。「⏱ 前後」開始／結束各有 −1／−0.1／+0.1／+1（按住一直調），一起改全部格子，每格一樣長，時間條看黃線＝送禮、藍框＝要的那段；「🧩 疊法」跟截圖全覽一樣：間距（負＝疊在一起）、左右疊、上下疊、臉位置 ▲▼，另外可以勾「疊的地方柔化過渡」（輸出也一樣）；每格的小預覽影片前面多留 15 秒、後面多留 20 秒，調前後大多不用重做，超出才只重做那一格；做好的存在電腦 SSD（最多 2 萬支），換排版、換秒數、下次打開都直接用，離開頁面電腦也會在背景繼續做；上面有進度條和大概還要多久，輸出也有；某格讀不到 → 點那格看原因、按「🔄 重新讀取」。選一格可以「🔍 放大跟上一格比」（兩格並排放大一起播，在那裡 ±0.1，◀ ▶ 換下一組）；電腦鍵盤 ←→ ±0.1（Shift ±1）、↑↓ 換格、空白鍵 播放／暫停、Esc 取消；「排序」可以照送禮時間／禮物種類／送禮的人／鑽石排；輸出時每格不大於 360 寬直接用小預覽影片一次拼完（快），要聲音或每格更大才回原檔。每次調整都記下來（_DB_SSD\pfx_gav_log.jsonl：哪種禮物、誰送、調前調後、當時幾個人在播），同一種禮物 2 格以上就自動當下次的預設開始秒數；工作區自動存，下次打開同一場接著做。</li><li>✂ 剪輯：那場有手機特效版會先問要剪「原本錄的」還是「手機特效版」；沒有就直接開。</li><li>看畫面：錄影中每 30 秒截一張手機畫面（頁面看得到），也讀畫面上的字、看現在是不是直播間。黑畫面（螢幕關了、直播間沒畫面）、TikTok 顯示「發生錯誤／請稍後再試」、跑到首頁不在直播間、一模一樣 2 分鐘（卡住）、錄影檔沒在長 → 看到就馬上動手，30 秒後還不對換下一招：①完全關掉 TikTok 重開直播間（每次開直播間都先這樣，避免叫回上一場已結束的）②先進另一位正在播的直播間 6 秒再回來 ③再關掉 TikTok 重開 ④檢查手機網路，不通就關掉 Wi-Fi 再打開 ⑤重開錄影 ⑥重開手機（6 小時最多一次）。小米「充電速度慢」這類跳出來的視窗按返回關掉。只是畫面沒動（主播可能停在同一畫面）救 3 招後改 3 分鐘再看。螢幕設成永遠不自己關。</li><li>自己處理：通知欄被拉下來、USB 用途選單、系統對話框 → 20 秒內自己收掉；離開 TikTok 會重新打開直播間；連不上 3 分鐘重新啟動 adb；處理不了的（找不到手機、電量低沒充電、在播卻沒在錄）會出現在狀態卡和這頁最上面。</li><li>聲音：開直播間前先把手機媒體音量調到 0（錄影還沒開始那幾秒不出聲），錄影接手聲音後（手機本來就不出聲）調回原本的音量，確保錄得到聲音。</li><li>螢幕：下播停錄 → 回桌面、把 TikTok 完全關掉（主帳號＋小米分身，不在背景一直播、耗電、出聲）；沒在錄、1 分鐘沒人操作 → 回桌面、亮度最低、關螢幕待機；開播時亮起來（亮度照設定，預設 50%）→ 回桌面 → 進直播間，開錄前先看一眼畫面，黑的就回桌面再開一次。頁面有手動按鈕：亮屏、熄屏、回桌面、開 TikTok、截一張、亮度拉桿（任何裝置都能按）。</li><li>SIM 卡：錄影手機不要插中國的 SIM 卡（TikTok 會把手機當成在中國，整頁「發生錯誤」、不能登入）；偵測到會在頁面最上面提醒。只用 Wi-Fi 就好。</li><li>帳號：有小米分身（雙開，系統使用者 999）登入另一個 TikTok 帳號時，每一場輪流用；一個帳號一直「發生錯誤」（可能被 TikTok 擋）就換另一個，被擋的休息 30 分鐘。兩個都不行就不再一直重開，改成等 5、10、20 分鐘再試，並提醒你（重開手機對這種沒用，只用在黑畫面）。</li><li>手機畫面每 30 秒截一張顯示在頁面（螢幕關著不截）；錄影中的截圖另外存成那支影片的「預覽」（檔名＝影片第幾秒），在「錄好的」按 🖼 預覽看，點一張從那裡播。要先開小米「USB 偵錯（安全設定）」程式才能按電源鍵。</li><li>每週二、週五凌晨 3～7 點（沒在錄、S 級都沒在播時）自動重開手機一次；</li><li>全部在背景執行緒：手機只把壓好的畫面傳過來，電腦不解碼、不開視窗。</li></ul>"},
   {t:"⏸ 暫停監控並封存",d:"<ul><li>主播分類（或審核、檔案總管）<b>長按主播</b> → 主播選單 →「⏸ 暫停監控並封存」。</li><li>從那一刻起<b>不再連線、不錄新的</b>（直播中的話那一場停在那裡、照常收尾）；主播清單、等級、分類、<b>以前的場次全部留著</b>，照常轉檔、整理、照等級排隊上傳 YouTube、照保留天數刪原檔。</li><li>在主播分類移到最下面「⏸ 暫停監控（封存）」那區；<b>審核頁</b>也收到最下面同一欄「⏸ 封存」（保留原本的等級、照等級排、灰階，點進去一樣看以前的紀錄）。同一個選單按「▶ 恢復監控」就接回來。</li><li>封存中的主播又被<b>新增</b>（貼 TikTok 連結、@帳號、匯入）：會先問「目前封存中，要解封嗎？」— 解封＝移回來繼續監控；取消＝取消新增、維持封存。</li><li>每一次封存／解封都會記下來（時間、從哪裡按的），長按主播的小視窗最上面「🗄 封存紀錄」看得到。</li><li>跟「🗑 刪除主播」不一樣：刪除＝整位全部刪掉（等於標 F 再處置）。</li></ul>"},
   {t:"只錄聲音的主播（照審核等級 G）",d:"<ul><li><b>在「主播審核」標 G＝只錄聲音</b>；改成別的等級就恢復錄影片。以前另外的「只錄聲音的主播」清單已經拿掉，程式每分鐘照等級對一次，以審核等級為準。</li><li>G 的主播直播中照樣錄畫面（FLV 先放 C 槽），下播後截 60 張圖＋字幕，自動傳 YouTube，傳好才移走原檔。</li><li>直播中每 <b>"+RU_V('rec.snap_min','分鐘',2)+"</b>另外拍一張快照，回放時在影片的位置左右翻看。</li></ul>"}]},
  {k:"play",i:"📺",c:"#4dc9ff",t:"回放與直播中觀看：延遲、預載入",s:[
@@ -51553,7 +51057,7 @@ async function rvGet(p){const r=await fetch(rvB()+p,{cache:"no-store"});return r
 async function rvPost(p,d){try{if(typeof kPost==="function")return await kPost(p,d);if(typeof post==="function")return await post(p,d);if(typeof deepPost==="function")return await deepPost(p,d);}catch(e){}return null;}
 /* V1.1.63 📱 手機錄特效（實體安卓手機＋scrcpy）：狀態、手動挑一位錄（測試）、自動名單、引導 */
 const PFX={t:0,j:null};
-function pfxCss(){if(document.getElementById("pfxCss"))return;const s=document.createElement("style");s.id="pfxCss";s.textContent=`.pfx{display:flex;flex-direction:column;gap:12px;max-width:820px}.pfx .pfC{border:1px solid rgba(140,150,165,.35);border-radius:12px;padding:12px 14px}.pfx h4{margin:0 0 8px;font-size:15px}.pfx .pfR{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:13.5px;line-height:1.6}.pfx .pfOk{color:#3ecf8e;font-weight:700}.pfx .pfBad{color:#ff6b6b;font-weight:700}.pfx .pfW{color:#f0ad4e;font-weight:700}.pfx button.pfB{border:1px solid rgba(140,150,165,.5);background:rgba(120,140,170,.12);color:inherit;border-radius:9px;padding:7px 12px;font-size:13.5px;cursor:pointer;white-space:nowrap}.pfx button.pfB.go{background:#2e7df6;border-color:#2e7df6;color:#fff}.pfx button.pfB.st{background:#d9534f;border-color:#d9534f;color:#fff}.pfx .pfL{display:flex;flex-direction:column;gap:6px}.pfx .pfI{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:9px;background:rgba(120,140,170,.08);font-size:13.5px}.pfx .pfI b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pfx .pfG{font-size:11px;font-weight:800;border-radius:6px;padding:1px 6px;background:rgba(140,150,165,.25)}.pfx .pfRec{border-color:#ff4d6d;box-shadow:0 0 0 1px #ff4d6d55 inset}.pfx .pfDot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff4d6d;animation:pfBl 1s infinite;margin-right:6px}@keyframes pfBl{50%{opacity:.25}}.pfx .pfLog{font-size:12px;opacity:.85;max-height:240px;overflow:auto;line-height:1.55}.pfx .pfLog div{border-bottom:1px dashed rgba(140,150,165,.2);padding:2px 0}.pfx details summary{cursor:pointer;font-weight:700}.pfx ol{margin:6px 0 0 0;padding-left:22px;font-size:13.5px;line-height:1.7}.pfx input.pfN{width:70px;padding:4px 6px;border-radius:7px;border:1px solid rgba(140,150,165,.5);background:transparent;color:inherit}.pfx input.pfU{flex:1;min-width:120px;padding:6px 8px;border-radius:8px;border:1px solid rgba(140,150,165,.5);background:transparent;color:inherit}.pfx .pfSub{font-size:12px;opacity:.75}.pfx .pfSG{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}.pfx .pfSc{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 4px 6px;border-radius:12px;background:rgba(120,140,170,.08);border:1px solid rgba(140,150,165,.25);cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:pan-y}.pfx .pfSc em{position:absolute;left:6px;top:4px;font-style:normal;font-weight:800;font-size:12px;opacity:.8}.pfx .pfSc:first-child em{color:#f5c542;opacity:1}.pfx .pfSa{position:relative;width:52px;height:52px;border-radius:50%;overflow:hidden;background:rgba(140,150,165,.3);display:flex;align-items:center;justify-content:center;font-weight:800}.pfx .pfSa img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none}.pfx .pfSc b{font-size:12.5px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pfx .pfSc small{font-size:11px;opacity:.85;white-space:nowrap}.pfx .pfSc.lv{border-color:#ff4d6d88}.pfx .pfSc.rc{border-color:#ff4d6d;box-shadow:0 0 0 2px #ff4d6d55}.pfx .pfSc.pz{filter:grayscale(1);opacity:.55}.pfx .pfSc.dg{opacity:.55;outline:2px dashed #2e7df6;cursor:grabbing;touch-action:none}.pfxAp{position:fixed;right:16px;bottom:84px;z-index:10050;display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:14px;background:#1d2533;color:#fff;box-shadow:0 6px 24px rgba(0,0,0,.35);font-size:14px}.pfxAp .pfB{border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.1);color:#fff;border-radius:9px;padding:8px 14px;font-size:14px;cursor:pointer}.pfxAp .pfB.go{background:#2e7df6;border-color:#2e7df6}`;document.head.appendChild(s);}
+function pfxCss(){if(document.getElementById("pfxCss"))return;const s=document.createElement("style");s.id="pfxCss";s.textContent=`.pfx{display:flex;flex-direction:column;gap:12px;max-width:820px}.pfx .pfC{border:1px solid rgba(140,150,165,.35);border-radius:12px;padding:12px 14px}.pfC>h4:first-child{cursor:pointer;user-select:none}.pfC>h4:first-child:after{content:" ▾";opacity:.5;font-size:.85em}.pfC.pfCol>h4:first-child:after{content:" ▸ 已收起"}.pfC.pfCol>:not(h4:first-child){display:none!important}.pfx h4{margin:0 0 8px;font-size:15px}.pfx .pfR{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:13.5px;line-height:1.6}.pfx .pfOk{color:#3ecf8e;font-weight:700}.pfx .pfBad{color:#ff6b6b;font-weight:700}.pfx .pfW{color:#f0ad4e;font-weight:700}.pfx button.pfB{border:1px solid rgba(140,150,165,.5);background:rgba(120,140,170,.12);color:inherit;border-radius:9px;padding:7px 12px;font-size:13.5px;cursor:pointer;white-space:nowrap}.pfx button.pfB.go{background:#2e7df6;border-color:#2e7df6;color:#fff}.pfx button.pfB.st{background:#d9534f;border-color:#d9534f;color:#fff}.pfx .pfL{display:flex;flex-direction:column;gap:6px}.pfx .pfI{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:9px;background:rgba(120,140,170,.08);font-size:13.5px}.pfx .pfI b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pfx .pfG{font-size:11px;font-weight:800;border-radius:6px;padding:1px 6px;background:rgba(140,150,165,.25)}.pfx .pfRec{border-color:#ff4d6d;box-shadow:0 0 0 1px #ff4d6d55 inset}.pfx .pfDot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#ff4d6d;animation:pfBl 1s infinite;margin-right:6px}@keyframes pfBl{50%{opacity:.25}}.pfx .pfLog{font-size:12px;opacity:.85;max-height:240px;overflow:auto;line-height:1.55}.pfx .pfLog div{border-bottom:1px dashed rgba(140,150,165,.2);padding:2px 0}.pfx details summary{cursor:pointer;font-weight:700}.pfx ol{margin:6px 0 0 0;padding-left:22px;font-size:13.5px;line-height:1.7}.pfx input.pfN{width:70px;padding:4px 6px;border-radius:7px;border:1px solid rgba(140,150,165,.5);background:transparent;color:inherit}.pfx input.pfU{flex:1;min-width:120px;padding:6px 8px;border-radius:8px;border:1px solid rgba(140,150,165,.5);background:transparent;color:inherit}.pfx .pfSub{font-size:12px;opacity:.75}.pfx .pfSG{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}.pfx .pfSc{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 4px 6px;border-radius:12px;background:rgba(120,140,170,.08);border:1px solid rgba(140,150,165,.25);cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:pan-y}.pfx .pfSc em{position:absolute;left:6px;top:4px;font-style:normal;font-weight:800;font-size:12px;opacity:.8}.pfx .pfSc:first-child em{color:#f5c542;opacity:1}.pfx .pfSa{position:relative;width:52px;height:52px;border-radius:50%;overflow:hidden;background:rgba(140,150,165,.3);display:flex;align-items:center;justify-content:center;font-weight:800}.pfx .pfSa img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none}.pfx .pfSc b{font-size:12.5px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pfx .pfSc small{font-size:11px;opacity:.85;white-space:nowrap}.pfx .pfSc.lv{border-color:#ff4d6d88}.pfx .pfSc.rc{border-color:#ff4d6d;box-shadow:0 0 0 2px #ff4d6d55}.pfx .pfSc.pz{filter:grayscale(1);opacity:.55}.pfx .pfSc.dg{opacity:.55;outline:2px dashed #2e7df6;cursor:grabbing;touch-action:none}.pfxAp{position:fixed;right:16px;bottom:84px;z-index:10050;display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:14px;background:#1d2533;color:#fff;box-shadow:0 6px 24px rgba(0,0,0,.35);font-size:14px}.pfxAp .pfB{border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.1);color:#fff;border-radius:9px;padding:8px 14px;font-size:14px;cursor:pointer}.pfxAp .pfB.go{background:#2e7df6;border-color:#2e7df6}`;document.head.appendChild(s);}
 function pfxT(t){const d=new Date(t*1000);return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;}
 function pfxDur(s){s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return (h?h+":":"")+String(m).padStart(h?2:1,"0")+":"+String(x).padStart(2,"0");}
 function pfxOrd(){const j=PFX.j||{};const sl=(j.sl||[]);if(!PFX.dirty)PFX.ord=sl.map(x=>x.u);return PFX.ord||[];}
@@ -51708,7 +51212,9 @@ function gavCss(){if(document.getElementById("gavCss"))return;const s=document.c
 .gvW .gvCell video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% var(--fy,50%)}.gvW .gvCell.sel::after{content:"";position:absolute;inset:0;border:3px solid #f0ad4e;border-radius:4px;pointer-events:none;z-index:2}.gvW.nolb .gvCell .lb{display:none}.gvW .gvCell .lb{position:absolute;left:0;right:0;bottom:0;z-index:3;font-size:10px;line-height:1.25;padding:2px 3px;background:rgba(0,0,0,.55);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gvW .gvCell .ld{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:4px;font-size:11px;color:#aaa}.gvW .gvCell .ld.err{color:#ff8a8a}.gvW .gvLay .on{background:#f0ad4e;border-color:#f0ad4e;color:#111}.gvW .gvCell.empty{background:#000;cursor:default}
 .gavBar{position:fixed;left:0;right:0;bottom:0;z-index:9000;display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:center;padding:8px 96px 10px 10px;background:rgba(18,24,34,.96);color:#e8edf5;border-top:1px solid rgba(140,150,165,.35)}
-.gavBar .n{font-size:13px;opacity:.85}.gvW .gvOut{display:flex;flex-direction:column;gap:6px;align-items:center;margin-top:8px}.gvW .gvOut video{max-width:100%;max-height:60vh;background:#000;border-radius:8px}.gvW a.gb{text-decoration:none;display:inline-block}.gvW .gvPb{height:10px;border-radius:6px;background:rgba(120,140,170,.2);overflow:hidden;margin:4px 0}.gvW .gvPb i{display:block;height:100%;background:linear-gradient(90deg,#2e7df6,#45d483);transition:width .4s}.gvW .gvTr{gap:4px}.gvW .gvTr .gb{padding:7px 10px;min-width:46px}.gvW #gavDl{margin-left:auto;color:#f0ad4e}
+.gavBar .n{font-size:13px;opacity:.85}.gvW .gvHelp summary{cursor:pointer;font-size:12px;opacity:.75}#gavCmp{position:fixed;inset:0;z-index:100000;background:rgba(8,10,14,.96);color:#e8edf5;display:flex;flex-direction:column;gap:8px;padding:10px}#gavCmp .gcH,#gavCmp .gcF{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center}#gavCmp .gcH .gvS{flex:1;font-size:12px;opacity:.75}
+#gavCmp .gcB{flex:1;min-height:0;display:flex;gap:10px;justify-content:center}#gavCmp .gcV{position:relative;height:100%;aspect-ratio:9/16;max-width:48vw;background:#000;border-radius:8px;overflow:hidden}#gavCmp .gcV video{width:100%;height:100%;object-fit:cover}#gavCmp .gcE{display:flex;align-items:center;justify-content:center;font-size:13px;opacity:.7}
+#gavCmp .lb{position:absolute;left:0;right:0;bottom:0;padding:4px 6px;background:rgba(0,0,0,.6);font-size:12px}#gavCmp .gb{border:1px solid rgba(140,150,165,.5);background:rgba(120,140,170,.15);color:inherit;border-radius:9px;padding:9px 14px;font-size:14px}#gavCmp .gvBig{font-size:18px;min-width:70px}.gvW .gvOut{display:flex;flex-direction:column;gap:6px;align-items:center;margin-top:8px}.gvW .gvOut video{max-width:100%;max-height:60vh;background:#000;border-radius:8px}.gvW a.gb{text-decoration:none;display:inline-block}.gvW .gvPb{height:10px;border-radius:6px;background:rgba(120,140,170,.2);overflow:hidden;margin:4px 0}.gvW .gvPb i{display:block;height:100%;background:linear-gradient(90deg,#2e7df6,#45d483);transition:width .4s}.gvW .gvTr{gap:4px}.gvW .gvTr .gb{padding:7px 10px;min-width:46px}.gvW #gavDl{margin-left:auto;color:#f0ad4e}
 .gvW .gvTl .tb{position:relative;height:30px;background:rgba(120,140,170,.14);border-radius:6px;margin:14px 0 4px;overflow:visible}.gvW .gvTl i{position:absolute;top:0;bottom:0}.gvW .gvTl .win{background:rgba(46,125,246,.45);border:2px solid #2e7df6;border-radius:4px;box-sizing:border-box}
 .gvW .gvTl .gf{width:3px;margin-left:-1px;background:#f0ad4e}.gvW .gvTl .hd{width:2px;margin-left:-1px;background:#fff}.gvW .gvTl .tk{width:1px;background:rgba(200,210,225,.35)}.gvW .gvTl .tk span{position:absolute;top:-14px;left:-10px;width:20px;text-align:center;font-size:10px;opacity:.7}
 .gvW .gvCell .pw{position:absolute;top:2px;left:2px;font-size:10px;background:rgba(0,0,0,.6);color:#fff;padding:1px 4px;border-radius:4px;z-index:3}.gavBar button.gvBig{font-size:18px;padding:10px 18px;min-width:76px}`;document.head.appendChild(s);}
@@ -51758,8 +51264,9 @@ function gavGrid(){GAV.st="grid";const B=gavBox();if(!B)return;const n=GAV.cells
 <label class="gvS"><input type="checkbox" data-g="fe" ${GAV.L.fe?"checked":""}> 疊的地方柔化過渡</label><label class="gvS"><input type="checkbox" data-g="nolb" ${GAV.L.nolb?"checked":""}> 藏起格子下面的字</label></div>
 <div class="gvR"><button class="gb" data-g="play">${GAV.paused?"▶ 播放":"⏸ 暫停"}</button>
 <span class="gvS">排法</span><select data-g="C">${L.map(([c,r])=>`<option value="${c}" ${c===C?"selected":""}>${c} 欄 × ${r} 列${c*r>n?`（空 ${c*r-n} 格）`:""}</option>`).join("")}</select>
+<span class="gvS">排序</span><select data-g="sort"><option value="">（不動）</option><option value="t">送禮時間</option><option value="g">禮物種類</option><option value="u">送禮的人</option><option value="d">鑽石多→少</option></select>
 <button class="gb ${GAV.multi?"on":""}" data-g="multi">☑ 多選${GAV.multi?"中":""}</button><button class="gb" data-g="selall">全選</button><button class="gb ${GAV.big?"on":""}" data-g="zoom">${GAV.big?"🔍 縮回一頁":"🔍 放大格子"}</button></div>
-<div class="gvS">「⏱ 前後」：開始／結束一起改全部格子（按住一直調）——開始往後＝每格頭剪掉、結束往前＝尾剪掉，每格一樣長；時間條＝選的那格（沒選看第 1 格）：黃線＝送禮、藍框＝要的那段、白線＝現在播到哪。全部格子一起從頭循環播。點一格＝選它，下面用 −0.1／+0.1 調它從哪裡開始（按住會一直調），其他格繼續播；先把第 1 格定好，再拿第 2 格去對第 1 格…。開「多選」可以一次調好幾格；「同一種禮物」一鍵選好同種的。每次調整都會記下來（之後當預設、做分析）。</div></div>
+<details class="gvHelp"><summary>ⓘ 怎麼用（鍵盤：←→ ±0.1、Shift ±1、↑↓ 換格、空白鍵 播放／暫停、Esc 取消）</summary><div class="gvS">「⏱ 前後」：開始／結束一起改全部格子（按住一直調）——開始往後＝每格頭剪掉、結束往前＝尾剪掉，每格一樣長；時間條＝選的那格（沒選看第 1 格）：黃線＝送禮、藍框＝要的那段、白線＝現在播到哪。全部格子一起從頭循環播。點一格＝選它，下面用 −0.1／+0.1 調它從哪裡開始（按住會一直調），其他格繼續播；先把第 1 格定好，再拿第 2 格去對第 1 格…。開「多選」可以一次調好幾格；「同一種禮物」一鍵選好同種的。每次調整都會記下來（之後當預設、做分析）。</div></details></div>
 <div class="gvG" id="gavG" style="margin:0 auto;width:100%">${GAV.cells.map((c,i)=>{const r=GAV.R[c.rid]||{};return `<div class="gvCell${GAV.sel.has(c.rid)?" sel":""}" data-g="cell" data-rid="${c.rid}"><video muted playsinline preload="auto" data-rid="${c.rid}"></video><div class="ld${c.err?" err":""}">${c.err?"✖ 讀不到（點這格看原因）":"⏳"}</div><div class="lb">${i+1}・${rvE(r.g||"")}・<span data-o="${c.rid}">${gavOs(c.o)}</span></div></div>`;}).join("")}</div>
 <div class="gvC"><b>🎬 輸出</b><div class="gvR"><span class="gvS">長邊</span><select data-g="long">${[1080,1920,2560,3840].map(v=>`<option ${v===GAV.long?"selected":""}>${v}</option>`).join("")}</select><label class="gvS"><input type="checkbox" data-g="aud" ${GAV.aud?"checked":""}> 聲音（全部格子疊在一起）</label><button class="gb go" data-g="out" id="gavOut">🎬 輸出 MP4（${C}×${R}、每格 ${GAV.D.toFixed(1)} 秒）</button></div><div class="gvS" id="gavOh"></div><div id="gavJob" class="gvS"></div></div>`;
   gavLayout();gavOutHint();gavSelBar();GAV.t0=performance.now()-GAV.c*1000;GAV.lc=GAV.c;GAV.cells.forEach(c=>{c.pxk=null;if(!c.err)gavPxNeed(c);});gavPxRun();gavTl();
@@ -51792,6 +51299,19 @@ function gavPgDraw(){const P=document.getElementById("gavPg");if(!P)return;const
 function gavOutHint(){const h=document.getElementById("gavOh");if(!h)return;const n=GAV.cells.length,C=GAV.C||1,R=Math.ceil(n/C),g=GAV.L.gap,k=GAV.long/Math.max(C+(C-1)*g,R*16/9+(R-1)*g),cw=Math.round(k),W=Math.round(k*(C+(C-1)*g)),H=Math.round(k*(R*16/9+(R-1)*g));
   const fast=!GAV.aud&&cw<=396;h.innerHTML=`輸出 ${W}×${H}、每格約 ${cw}×${Math.round(cw*16/9)}：${fast?`<b style="color:#45d483">⚡ 快速</b>：直接用上面已經做好的小預覽影片拼（每格 360 寬、30 張／秒，畫質跟上面看到的一樣），通常幾十秒`:`<b style="color:#f0ad4e">🐢 從原檔重抓</b>（${GAV.aud?"要聲音":"每格比 360 寬還大"}），畫質最好但比較久（每格要回原檔解一次）`}。每格越大越清楚：同樣排法選長邊 3840 會清楚很多。`;}
 function gavTlCell(){return GAV.cells.find(c=>GAV.sel.has(c.rid))||GAV.cells[0];}
+/* V1.1.82 🔍 放大比對：選的那格跟上一格並排放大，一起循環播；在這裡 ±0.1 對齊，◀ ▶ 換下一組 */
+function gavCmp(){const c=gavTlCell();if(!c)return;const i=GAV.cells.indexOf(c),p=GAV.cells[i-1];let o=document.getElementById("gavCmp");if(!o){o=document.createElement("div");o.id="gavCmp";document.body.appendChild(o);o.addEventListener("click",gavClick);gavHoldWire(o);}
+  const vd=x=>{const j=x&&GAV.pxc[x.pxk];return x?`<div class="gcV"><video muted playsinline preload="auto" data-rid="${x.rid}" data-cmp="1" ${j?`src="${rvB()}/api/pc/pfx/gav/pf?n=${j.n}"`:""}></video><div class="lb">${GAV.cells.indexOf(x)+1}・${rvE(GAV.R[x.rid].g)}・${rvE(GAV.R[x.rid].nick)}・<b data-co="${x.rid}">${gavOs(x.o)}</b></div></div>`:`<div class="gcV gcE">（第 1 格沒有上一格，先定好它）</div>`;};
+  o.innerHTML=`<div class="gcH"><b>🔍 第 ${i+1} 格 對 第 ${i} 格</b><span class="gvS">右邊（選的）對齊左邊（上一格）：看同一個動作出現的時間，用下面 ±0.1 調右邊</span><button class="gb" data-g="cmpx">✕ 關閉</button></div>
+<div class="gcB">${vd(p)}${vd(c)}</div><div class="gcF"><button class="gb" data-g="cmpm" data-v="-1">◀ 上一組</button><button class="gb gvBig" data-g="nd" data-v="-1">−1</button><button class="gb gvBig" data-g="nd" data-v="-0.1">−0.1</button><button class="gb gvBig" data-g="nd" data-v="0.1">+0.1</button><button class="gb gvBig" data-g="nd" data-v="1">+1</button><button class="gb" data-g="cmpm" data-v="1">下一組 ▶</button></div>`;
+  o.querySelectorAll("video").forEach(v=>v.addEventListener("loadeddata",()=>{v.dataset.ok="1";const x=GAV.cells.find(z=>z.rid===+v.dataset.rid);if(x)x.force=1;},{once:true}));}
+function gavCmpClose(){const o=document.getElementById("gavCmp");if(o)o.remove();}
+document.addEventListener("keydown",e=>{if(GAV.st!=="grid"||!document.getElementById("gavG"))return;const t=e.target;if(t&&/^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName))return;   /* V1.1.82 鍵盤：←→ ±0.1（Shift ±1）、↑↓ 換格、空白鍵 播放／暫停、Esc 取消 */
+  const k=e.key;if(k==="ArrowLeft"||k==="ArrowRight"){if(!GAV.sel.size)return;gavNudge((k==="ArrowLeft"?-1:1)*(e.shiftKey?1:0.1));e.preventDefault();}
+  else if(k==="ArrowUp"||k==="ArrowDown"){const c=gavTlCell(),i=Math.max(0,Math.min(GAV.cells.length-1,GAV.cells.indexOf(c)+(k==="ArrowUp"?-1:1)));GAV.sel=new Set([GAV.cells[i].rid]);GAV.multi=false;
+    document.querySelectorAll("#gavG .gvCell[data-rid]").forEach(x=>x.classList.toggle("sel",GAV.sel.has(+x.dataset.rid)));gavSelBar();gavTl();if(document.getElementById("gavCmp"))gavCmp();e.preventDefault();}
+  else if(k===" "){const b=document.querySelector('.gvW [data-g="play"]');if(b)b.click();e.preventDefault();}
+  else if(k==="Escape"){if(document.getElementById("gavCmp"))gavCmpClose();else{GAV.sel.clear();document.querySelectorAll("#gavG .gvCell.sel").forEach(x=>x.classList.remove("sel"));gavSelBar();gavTl();}}});
 function gavTl(){const T=document.getElementById("gavTl"),c=gavTlCell();if(!T||!c)return;const lo=Math.min(-10,Math.floor(c.o)-2),hi=Math.max(20,Math.ceil(c.o+GAV.D)+2),P=v=>((v-lo)/(hi-lo)*100).toFixed(2)+"%";GAV.tlr=[lo,hi];
   let tk="";for(let t=Math.ceil(lo/5)*5;t<=hi;t+=5)tk+=`<i class="tk" style="left:${P(t)}"><span>${t>0?"+":""}${t}</span></i>`;
   T.innerHTML=`<div class="tb">${tk}<i class="win" style="left:${P(c.o)};width:${(GAV.D/(hi-lo)*100).toFixed(2)}%"></i><i class="gf" style="left:${P(0)}"></i><i class="hd" id="gavHd"></i></div><div class="gvS">第 ${GAV.cells.indexOf(c)+1} 格：送禮${gavSg(c.o)} → 送禮${gavSg(Math.round((c.o+GAV.D)*10)/10)}（${GAV.D.toFixed(1)} 秒）</div>`;gavTlHead();}
@@ -51821,22 +51341,23 @@ async function gavPxRun(){while(GAV.pxn<3&&GAV.pxq.length){const rid=GAV.pxq.shi
 function gavCellEl(rid){return document.querySelector(`#gavG .gvCell[data-rid="${rid}"]`);}
 function gavPxSet(c){const j=GAV.pxc[c.pxk],el=gavCellEl(c.rid);if(!j||!el)return;const v=el.querySelector("video");if(v.dataset.n===j.n){c.px0=j.t0;return;}
   const nv=document.createElement("video");nv.muted=true;nv.playsInline=true;nv.preload="auto";nv.dataset.rid=c.rid;nv.src=`${rvB()}/api/pc/pfx/gav/pf?n=${j.n}`;nv.dataset.n=j.n;
-  nv.addEventListener("loadeddata",()=>{const old=el.querySelector("video");if(old&&old!==nv){old.replaceWith(nv);try{old.removeAttribute("src");old.load();}catch(e){}}c.px0=j.t0;nv.dataset.ok="1";["ld","pw"].forEach(q=>{const x=el.querySelector("."+q);if(x)x.remove();});c.force=1;},{once:true});
+  nv.addEventListener("loadeddata",()=>{const old=el.querySelector("video");if(old&&old!==nv){old.replaceWith(nv);try{old.removeAttribute("src");old.load();}catch(e){}}c.px0=j.t0;nv.dataset.ok="1";["ld","pw"].forEach(q=>{const x=el.querySelector("."+q);if(x)x.remove();});c.force=1;if(document.querySelector(`#gavCmp video[data-rid="${c.rid}"]`))gavCmp();},{once:true});
   if(!el.querySelector("video").dataset.n){el.querySelector("video").replaceWith(nv);} else nv.load();}
 function gavTick(now){if(GAV.st!=="grid"||!document.getElementById("gavG")){GAV.raf=0;return;}
   if(!GAV.paused)GAV.c=((now-GAV.t0)/1000)%GAV.D;
   if(now-GAV.lt>120){GAV.lt=now;const wrap=GAV.c<GAV.lc-0.05;GAV.lc=GAV.c;gavTlHead();if(now-(GAV.pgt||0)>1000){GAV.pgt=now;gavPgDraw();}
-    for(const c of GAV.cells){const el=gavCellEl(c.rid);if(!el)continue;const v=el.querySelector("video");if(!v||v.dataset.ok!=="1"||c.px0==null)continue;const r=GAV.R[c.rid];const want=Math.max(0,r.pos+c.o-c.px0+GAV.c);
+    const cmpV=[...document.querySelectorAll("#gavCmp video[data-rid]")];
+    for(const c of GAV.cells){const el=gavCellEl(c.rid);if(!el)continue;const vs=[el.querySelector("video"),...cmpV.filter(x=>+x.dataset.rid===c.rid)];for(const v of vs){if(!v||v.dataset.ok!=="1"||c.px0==null)continue;const r=GAV.R[c.rid];const want=Math.max(0,r.pos+c.o-c.px0+GAV.c);
       if(GAV.paused){if(!v.paused)v.pause();if(Math.abs(v.currentTime-want)>0.04||c.force){v.currentTime=want;c.force=0;}continue;}
-      const dd=want-v.currentTime;if(wrap||c.force||Math.abs(dd)>0.5){v.currentTime=want;v.playbackRate=1;c.force=0;}else{const pr=Math.abs(dd)<0.03?1:Math.max(0.75,Math.min(1.25,1+dd*2));if(Math.abs(v.playbackRate-pr)>0.02)v.playbackRate=pr;}if(v.paused)v.play().catch(()=>{});}}
+      const dd=want-v.currentTime;if(wrap||c.force||Math.abs(dd)>0.5){v.currentTime=want;v.playbackRate=1;if(v===vs[vs.length-1])c.force=0;}else{const pr=Math.abs(dd)<0.03?1:Math.max(0.75,Math.min(1.25,1+dd*2));if(Math.abs(v.playbackRate-pr)>0.02)v.playbackRate=pr;}if(v.paused)v.play().catch(()=>{});}}}
   GAV.raf=requestAnimationFrame(gavTick);}
 function gavSelBar(){const n=GAV.sel.size;if(GAV.st!=="grid"){return;}if(!n){gavBar(`<span class="n">點一格選它來調；${GAV.multi?"多選中：點幾格一起選":"開「☑ 多選」可以一次選好幾格"}</span>`);return;}
   const one=n===1?GAV.cells.find(c=>GAV.sel.has(c.rid)):null,r=one?GAV.R[one.rid]:null;
   gavBar(`<span class="n">${n===1?`第 ${GAV.cells.indexOf(one)+1} 格 ${rvE(r.g)} ${rvE(r.nick)}・從送禮${gavSg(one.o)}`:`已選 ${n} 格`}</span><button class="gvBig" data-g="nd" data-v="-1">−1</button><button class="gvBig" data-g="nd" data-v="-0.1">−0.1</button><button class="gvBig" data-g="nd" data-v="0.1">+0.1</button><button class="gvBig" data-g="nd" data-v="1">+1</button>
-<button data-g="same">同一種禮物</button>${one?`<button data-g="mv" data-v="-1">◀</button><button data-g="mv" data-v="1">▶</button>`:""}${one?`<button data-g="rt">🔄 重新讀取</button>`:""}${one&&one.err?`<span class="n" style="flex-basis:100%;color:#ff9a9a;text-align:center">✖ 讀不到的原因：${rvE(one.err)}</span>`:""}<button data-g="rm">✕ 拿掉</button><button data-g="clr">取消選取</button>`);}
+${one?`<button data-g="cmp">🔍 放大跟上一格比</button>`:""}<button data-g="same">同一種禮物</button>${one?`<button data-g="mv" data-v="-1">◀</button><button data-g="mv" data-v="1">▶</button>`:""}${one?`<button data-g="rt">🔄 重新讀取</button>`:""}${one&&one.err?`<span class="n" style="flex-basis:100%;color:#ff9a9a;text-align:center">✖ 讀不到的原因：${rvE(one.err)}</span>`:""}<button data-g="rm">✕ 拿掉</button><button data-g="clr">取消選取</button>`);}
 function gavHoldWire(b){let tm=0,iv=0;const stop=()=>{clearTimeout(tm);clearInterval(iv);tm=iv=0;};b.addEventListener("pointerdown",e=>{const x=e.target.closest('[data-g="nd"],[data-g="tr"]');if(!x)return;const v=+x.dataset.v,w=x.dataset.w;tm=setTimeout(()=>{iv=setInterval(()=>w?gavTrim(w,v):gavNudge(v),110);},420);});["pointerup","pointercancel","pointerleave"].forEach(t=>b.addEventListener(t,stop));}
 function gavNudge(dv){for(const c of GAV.cells){if(!GAV.sel.has(c.rid))continue;const r=GAV.R[c.rid];const L=GAV.log[c.rid]||(GAV.log[c.rid]={rid:c.rid,g:r.g,dia:r.dia,u:r.u,al:r.al,from:c.o});c.o=Math.round((c.o+dv)*10)/10;gavClampC(c);L.to=c.o;c.force=1;gavPxNeed(c);
-  const s=document.querySelector(`#gavG [data-o="${c.rid}"]`);if(s)s.textContent=gavOs(c.o);}gavPxRun();gavTl();gavSelBar();gavSave();}
+  const s=document.querySelector(`#gavG [data-o="${c.rid}"]`);if(s)s.textContent=gavOs(c.o);const s2=document.querySelector(`#gavCmp [data-co="${c.rid}"]`);if(s2)s2.textContent=gavOs(c.o);}gavPxRun();gavTl();gavSelBar();gavSave();}
 function gavSave(){clearTimeout(GAV.svt);GAV.svt=setTimeout(async()=>{const log=Object.values(GAV.log);GAV.log={};
   const r=await rvPost("/api/pc/pfx/set",{op:"gav_save",sid:GAV.sid,D:GAV.D,C:GAV.C,R:Math.ceil(GAV.cells.length/(GAV.C||1)),cells:GAV.cells.map(c=>({rid:c.rid,o:c.o})),lay:GAV.L,log});if(!r||!r.ok)log.forEach(x=>{if(!GAV.log[x.rid])GAV.log[x.rid]=x;});},1500);}
 async function gavJob(){clearTimeout(GAV.jt);const el=document.getElementById("gavJob");if(!el)return;let j=null;try{j=await rvGet("/api/pc/pfx/gav/job?sid="+GAV.sid);}catch(e){}const el2=document.getElementById("gavJob");if(!el2)return;
@@ -51861,6 +51382,8 @@ async function gavClick(e){const b=e.target.closest("[data-g]");if(!b)return;con
   if(g==="same"){const gs=new Set([...GAV.sel].map(rid=>(GAV.R[rid]||{}).g));GAV.multi=true;GAV.cells.forEach(c=>{if(gs.has((GAV.R[c.rid]||{}).g))GAV.sel.add(c.rid);});gavGrid();return;}
   if(g==="gp"){GAV.L.gap=b.dataset.v==="0r"?0:Math.max(-0.5,Math.min(0.5,Math.round(GAV.L.gap*100+(+b.dataset.v))/100));gavLayout();gavOutHint();gavLaySave();return;}
   if(g==="zh"||g==="zv"){GAV.L[g]=b.dataset.v;gavLayout();gavLaySave();return;}if(g==="fy"){GAV.L.fy=Math.max(-50,Math.min(50,GAV.L.fy+(+b.dataset.v)));gavLayout();gavLaySave();return;}
+  if(g==="cmp"){gavCmp();return;}if(g==="cmpx"){gavCmpClose();return;}
+  if(g==="cmpm"){const c=gavTlCell(),i=Math.max(0,Math.min(GAV.cells.length-1,GAV.cells.indexOf(c)+(+b.dataset.v)));GAV.sel=new Set([GAV.cells[i].rid]);GAV.multi=false;document.querySelectorAll("#gavG .gvCell[data-rid]").forEach(x=>x.classList.toggle("sel",GAV.sel.has(+x.dataset.rid)));gavSelBar();gavTl();gavCmp();return;}
   if(g==="rt"){const c=GAV.cells.find(x=>GAV.sel.has(x.rid));if(!c)return;c.err=null;c.retry=1;c.pxk=null;const el=gavCellEl(c.rid);if(el){const ld=el.querySelector(".ld")||el.appendChild(Object.assign(document.createElement("div"),{className:"ld"}));ld.className="ld";ld.textContent="⏳ 重新讀取…";}gavPxNeed(c);gavPxRun();gavSelBar();return;}
   if(g==="nd"){gavNudge(+b.dataset.v);return;}if(g==="tr"){gavTrim(b.dataset.w,+b.dataset.v);return;}
   if(g==="mv"){const i=GAV.cells.findIndex(c=>GAV.sel.has(c.rid)),j=i+(+b.dataset.v);if(i<0||j<0||j>=GAV.cells.length)return;[GAV.cells[i],GAV.cells[j]]=[GAV.cells[j],GAV.cells[i]];gavGrid();gavSave();return;}
@@ -51871,9 +51394,12 @@ async function gavClick(e){const b=e.target.closest("[data-g]");if(!b)return;con
     GAV.jw=1;if(r&&r.message&&typeof toast==="function")toast(r.message);else if(r&&!r.ok)alert(r.message);gavSave();gavJob();return;}}
 function gavChange(e){const b=e.target.closest("[data-g]");if(!b)return;const g=b.dataset.g,v=b.type==="checkbox"?b.checked:b.value;
   if(g==="fu"){GAV.fu=v;GAV.fg="";gavPick();}else if(g==="fg"){GAV.fg=v;gavPick();}else if(g==="mn"){GAV.mn=+v;gavPick();}
-  else if(g==="D"){GAV.D=+v;GAV.cells.forEach(gavClampC);GAV.c=0;gavGrid();gavSave();}else if(g==="C"){GAV.C=+v;gavGrid();gavSave();}else if(g==="long"){GAV.long=+v;gavOutHint();}else if(g==="aud"){GAV.aud=!!v;gavOutHint();}else if(g==="fe"||g==="nolb"){GAV.L[g]=!!v;gavLayout();gavLaySave();}}
+  else if(g==="D"){GAV.D=+v;GAV.cells.forEach(gavClampC);GAV.c=0;gavGrid();gavSave();}else if(g==="C"){GAV.C=+v;gavGrid();gavSave();}else if(g==="sort"&&v){const R_=GAV.R,k={t:c=>R_[c.rid].ts,g:c=>R_[c.rid].g+"\u0000"+String(R_[c.rid].ts).padStart(14,"0"),u:c=>R_[c.rid].u+"\u0000"+String(R_[c.rid].ts).padStart(14,"0"),d:c=>-R_[c.rid].dia*1e10+R_[c.rid].ts}[v];
+    GAV.cells.sort((a,b)=>{const x=k(a),y=k(b);return x<y?-1:x>y?1:0;});gavGrid();gavSave();}
+  else if(g==="long"){GAV.long=+v;gavOutHint();}else if(g==="aud"){GAV.aud=!!v;gavOutHint();}else if(g==="fe"||g==="nolb"){GAV.L[g]=!!v;gavLayout();gavLaySave();}}
 /* V1.1.76 🎯 手動對齊：上下兩個播放器對同一瞬間，再用聲音前後 2 秒自動微調 */
 function mxT1(t){const g=t<0?"-":"";t=Math.abs(t||0);const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=t%60;return g+(h?h+":"+String(m).padStart(2,"0"):m)+":"+s.toFixed(1).padStart(4,"0");}
+async function mxAlign(sid,id){await mxOpen(sid);for(let k=0;k<40&&!(MX.d&&(MX.d.items||[]).some(y=>y.id===id));k++)await new Promise(z=>setTimeout(z,150));mxAlOpen(id);}   /* V1.1.82 上傳頁／手機錄特效頁直接跳進手動對齊 */
 async function mxAlOpen(id){const d=MX.d||{},x=(d.items||[]).find(y=>y.id===id);if(!x)return;MX.al={id,x,mode:"rec",gm:100,link:false};
   const B=document.getElementById("mxB"),F=document.getElementById("mxF");B.innerHTML='<div class="geS">讀取這場的影片…</div>';F.innerHTML="";
   let R=null;try{R=await rvGet("/api/replay?id="+MX.sid);}catch(e){}if(!MX.al||MX.al.id!==id)return;MX.al.R=R||{};
@@ -51947,6 +51473,7 @@ function pfxGuide(){return `<details class="pfC"><summary>📋 第一次設定�
 function pfxHtml(j){const D=j.dev||{},c=j.cur,cf=j.cfg||{},gr=j.gr||{};const gC=u=>gr[u]?`<span class="pfG">${rvE(gr[u])}</span>`:"";
   const devS={ok:`<span class="pfOk">✔ 連上</span> ${rvE(D.model||D.serial||"")} · Android ${rvE(D.andv||"?")}${D.miui?" · "+rvE(D.miui):""}`,notools:`<span class="pfW">還沒裝 scrcpy</span>`,none:`<span class="pfBad">找不到手機</span>（USB 插好了嗎？開發者選項的 USB 偵錯有開嗎？）`,unauth:`<span class="pfW">手機上要按「允許 USB 偵錯」</span>（勾一律允許）`,offline:`<span class="pfBad">手機離線</span>（拔掉重插）`}[D.st]||`<span class="pfBad">${rvE(D.st||"?")}</span> ${rvE(D.msg||"")}`;
   let h=(j.alerts||[]).filter(a=>a[0]!=="info").length?`<div class="pfC" style="border-color:#ff6b6b;background:rgba(255,107,107,.08)">${j.alerts.map(a=>`<div class="${a[0]==="bad"?"pfBad":a[0]==="warn"?"pfW":"pfSub"}">${a[0]==="bad"?"⚠ ":""}${rvE(a[1])}</div>`).join("")}</div>`:"";
+  if((j.unal||[]).length)h+=`<div class="pfC" style="border-color:#f0ad4e;background:rgba(240,173,78,.08)"><div class="pfW">📤 ${j.unal.length} 支上傳的錄屏聲音沒對上，位置是用錄影時間推的（可能不對）：</div><div class="pfR">${j.unal.map(x=>`<button class="pfB" onclick="mxAlign(${x.sid},'${x.id}')">🎯 #${String(x.sid).padStart(5,"0")} ${rvE(x.name).slice(0,40)}</button>`).join("")}</div></div>`;   /* V1.1.82 一鍵進手動對齊 */
   h+=`<div class="pfC"><h4>🔌 狀態</h4><div class="pfR">${j.tools?`<span>scrcpy <span class="pfOk">✔ v${rvE(j.scrv||"?")}</span></span>`:`<span>scrcpy <span class="pfBad">✖ 沒裝</span></span> <button class="pfB go" data-pa="tools" ${j.dl_run?"disabled":""}>⬇ 自動下載（官方 GitHub）</button>`}${j.dl?`<span class="pfSub">${rvE(j.dl)}</span>`:""}</div>
   <div class="pfR" style="margin-top:4px">📱 ${devS}</div>`;
   if(D.st==="ok")h+=`<div class="pfR">${D.bat!=null?`🔋 ${D.bat}%`:""} ${D.temp!=null?`<span class="${D.temp>=(cf.temp_stop||46)?"pfBad":D.temp>=40?"pfW":""}">🌡 ${D.temp.toFixed(1)}°C</span>`:""} <span>TikTok ${D.tiktok?`<span class="pfOk">✔</span>${D.pkg&&D.pkg.indexOf("trill")>=0?' <span class="pfSub">(trill)</span>':""}`:(D.tiktok===false?'<span class="pfBad">✖ 沒裝（要國際版）</span>':'<span class="pfSub">⏳ 查詢中</span>')}</span> <span>安全設定 ${D.inject===false?'<span class="pfW">沒開（也能錄：螢幕要設「充電時螢幕不休眠」、鎖定「無」）</span>':'<span class="pfOk">✔</span>'}</span> ${D.fg?`<span class="pfSub">前景：${rvE(D.fg)}${D.act?" / "+rvE(String(D.act).split(".").pop()):""}</span>`:""} <button class="pfB" data-pa="test">🔔 測試手機</button><button class="pfB" data-pa="reboot">🔄 重開手機</button></div><div class="pfR"><label class="pfSub"><input type="checkbox" data-pa="rb_on" ${cf.rb_on!==false?"checked":""}> 每週二、週五凌晨 3～7 點自動重開（沒在錄、S 級都沒在播時）</label>${cf.rb_last?`<span class="pfSub">上次：${rvE(cf.rb_last)}</span>`:""}</div><div class="pfR"><label class="pfSub"><input type="checkbox" data-pa="idle_off" ${cf.idle_off!==false?"checked":""}> 沒在錄時待機（回桌面、亮度最低，1 分鐘沒人操作就關螢幕），開播自己亮起來、亮度 ${cf.bright??50}%</label>${D.awake===true?'<span class="pfSub">☀ 螢幕亮著</span>':D.awake===false?'<span class="pfSub">🌙 待機中</span>':""}</div>`;
@@ -51979,7 +51506,11 @@ function pfxHtml(j){const D=j.dev||{},c=j.cur,cf=j.cfg||{},gr=j.gr||{};const gC=
 async function pfxLoad(root){let j=null;try{j=await rvGet("/api/pc/pfx");}catch(e){}if(!root.isConnected)return;
   if(!j||!j.ok){root.querySelector(".pfx").innerHTML='<div class="pfC pfBad">讀不到（電腦端沒回應）</div>';return;}
   if(PFX.drag)return;PFX.j=j;const box=root.querySelector(".pfx");const op=[...box.querySelectorAll("details")].map(d=>d.open);const ae=document.activeElement;if(ae&&box.contains(ae)&&(ae.tagName==="INPUT"||ae.tagName==="SELECT"))return;if(document.getElementById("pfxGE"))return;
-  box.innerHTML=pfxHtml(j);try{const D=PFX.draft||{};box.querySelectorAll("input[data-o],input[id]").forEach(x=>{const k=x.dataset.o||x.id;if(k in D&&x.type!=="checkbox")x.value=D[k];});}catch(e){}[...box.querySelectorAll("details")].forEach((d,i)=>{if(op[i]!=null)d.open=op[i];});}
+  box.innerHTML=pfxHtml(j);try{const D=PFX.draft||{};box.querySelectorAll("input[data-o],input[id]").forEach(x=>{const k=x.dataset.o||x.id;if(k in D&&x.type!=="checkbox")x.value=D[k];});}catch(e){}[...box.querySelectorAll("details")].forEach((d,i)=>{if(op[i]!=null)d.open=op[i];});pfxColApply(box);}
+/* V1.1.82 每一塊點標題可以收起來（記在這台），頁面不會一長串 */
+function pfxColGet(){try{return JSON.parse(localStorage.getItem("tlm_pfx_col")||"{}")||{};}catch(e){return {};}}
+function pfxColApply(box){const C=pfxColGet();box.querySelectorAll(".pfC>h4:first-child").forEach(h=>{const k=h.textContent.replace(/[（(].*$/,"").trim();h.dataset.ck=k;h.parentElement.classList.toggle("pfCol",!!C[k]);
+  if(!h._ck){h._ck=1;h.addEventListener("click",()=>{const C2=pfxColGet();C2[k]=!C2[k];try{localStorage.setItem("tlm_pfx_col",JSON.stringify(C2));}catch(e){}h.parentElement.classList.toggle("pfCol",!!C2[k]);});}});}
 async function pfxAct(root,el){const a=el.dataset.pa,j=PFX.j||{},cf=j.cfg||{};let r=null;const U=[...(cf.users||[])];
   if(a==="rec"){if(j.cur&&j.cur.u!==el.dataset.u&&!confirm(`現在正在錄 @${j.cur.u}，要停掉改錄 @${el.dataset.u} 嗎？`))return;r=await rvPost("/api/pc/pfx/set",{op:"rec",u:el.dataset.u});}
   else if(a==="stop"){if(!confirm("停止手機錄影？（正在錄的會停、檔案在背景收尾）"))return;r=await rvPost("/api/pc/pfx/set",{op:"stop"});}
@@ -53671,7 +53202,7 @@ function pupGuessHtml(j){const g=j.guess;if(!g||j.st==="done")return "";const h=
 /* TK_V1.0.14 傳好的歸到哪裡 */
 function pupWhere(x){const L=i=>typeof sidS==="function"?sidS(i):"#"+i;const st=x.st;
   if(x.psid)return `📼 ${L(x.psid)}${x.msg?` <span style="opacity:.75">${pupE(String(x.msg).slice(0,60))}</span>`:""}`;
-  if(st==="ok"&&x.sid)return `✔ 歸到 ${L(x.sid)} 那場`;if(st==="wait"||st==="run"||!st)return "🔍 等聲音比對（電腦閒著才做）";
+  if(st==="ok"&&x.sid)return `✔ 歸到 ${L(x.sid)} 那場`+(x.unal&&x.iid?` <button class="pill" style="background:#f0ad4e;color:#111" onclick="event.stopPropagation();mxAlign(${+x.sid},'${x.iid}')">🎯 聲音沒對上，手動對齊位置</button>`:"");if(st==="wait"||st==="run"||!st)return "🔍 等聲音比對（電腦閒著才做）";
   if(st==="ask")return "❓ 不太確定是哪場，到「手機錄屏」頁確認";if(st==="fail"||st==="none")return "❓ 還沒對上，等一下會自己建成手機場次";return pupE(x.msg||"處理中");}
 function pupDrawSoft(){clearTimeout(PUP.dt);PUP.dt=setTimeout(()=>{pupDraw();pupPill();},250);}
 
