@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.100"
+APP_VERSION = "1.2.01"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -43869,8 +43869,8 @@ header{position:sticky;top:0;z-index:20;background:var(--nav);border-bottom:1px 
 .bar{display:flex;align-items:center;justify-content:space-between;padding:8px 12px 6px}
 .logo{font-weight:800;font-size:15px;color:var(--strong);display:flex;align-items:center;gap:7px;letter-spacing:.2px;white-space:nowrap;flex:none}
 .logo i{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
-.clk{font-size:11px;color:var(--sub);font-variant-numeric:tabular-nums}.rt{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;flex:1;margin-left:8px}.rt .clk{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}@media(max-width:560px){.ck2{display:none}}.ver{font-size:11px;color:var(--sub);border:1px solid var(--line);border-radius:8px;padding:1px 6px;white-space:nowrap;font-variant-numeric:tabular-nums}.topc{font-size:11px;color:var(--strong);text-decoration:none;font-weight:700;border:1px solid var(--line);border-radius:8px;padding:1px 6px;white-space:nowrap}
-.pc{margin-left:6px;font-size:11px;font-weight:800;border-radius:6px;padding:1px 7px}
+.clk{font-size:11px;color:var(--sub);font-variant-numeric:tabular-nums}.rt{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;flex:1;margin-left:8px}.rt .clk{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}@media(max-width:560px){.ck2{display:none}}.ver{font-size:11px;color:var(--sub);border:1px solid var(--line);border-radius:8px;padding:1px 6px;white-space:nowrap;font-variant-numeric:tabular-nums}@media(max-width:430px){.ver{font-size:9.5px;padding:0 4px;letter-spacing:-.2px}#sysFab{left:26px!important;transform:none!important;gap:4px!important}}   /* V1.2.01 窄手機：上面一排按鈕靠左一點，不蓋到版本 */.topc{font-size:11px;color:var(--strong);text-decoration:none;font-weight:700;border:1px solid var(--line);border-radius:8px;padding:1px 6px;white-space:nowrap}
+.pc{margin-left:6px;font-size:11px;font-weight:800;border-radius:6px;padding:1px 7px}.pc-main{background:color-mix(in srgb,var(--green) 22%,transparent);color:var(--green)}.pc-test{background:color-mix(in srgb,var(--pink) 22%,transparent);color:var(--pink)}
 html[data-role=test] .logo i{background:var(--green);box-shadow:0 0 8px var(--green)}
 .inst{background:var(--accent);color:#fff;border:0;border-radius:14px;padding:4px 11px;font-weight:800;font-size:12.5px}
 nav{display:flex;gap:6px;padding:0 10px 8px}
@@ -45716,7 +45716,7 @@ body.oldLock{overflow:hidden}
 .orpStrip{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;scrollbar-width:thin}.orpSI{flex:none;width:72px;height:96px;border-radius:8px;border:2px solid transparent;position:relative;overflow:hidden;background:#222;cursor:pointer}
 .orpSI i{position:absolute;inset:0;background-size:1000% 1000%;background-position:0 0}.orpSI em{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-style:normal;font-size:20px;opacity:.5}
 .orpSI span{position:absolute;left:0;right:0;bottom:0;font-size:10.5px;padding:1px 3px;background:rgba(0,0,0,.6);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.orpSI.on{border-color:#4dc9ff}.orpSI.m2{box-shadow:inset 0 -4px 0 #2ecc71}
+.orpSI.on{border-color:#4dc9ff}.orpSI.m2{box-shadow:inset 0 -4px 0 #2ecc71}.orpSI.m-2{box-shadow:inset 0 -4px 0 #ff4d6d}
 .orpLv{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.orpLv button{border-radius:10px;border:2px solid var(--c,rgba(140,150,165,.45));background:transparent;color:inherit;padding:5px 4px;display:flex;flex-direction:column;align-items:center;cursor:pointer;width:auto!important;margin:0}
 .orpLv button span{font-size:13.5px;color:var(--c,inherit)}.orpLv button small{font-size:11px;opacity:.75}.orpLv button.on{background:var(--c);}.orpLv button.on span,.orpLv button.on small{color:#111;opacity:1}
 .orpLv .orpMv{--c:#9aa3b2;border-style:dashed}.orpLv .orpMv[disabled]{opacity:.4}
