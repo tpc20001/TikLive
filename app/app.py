@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.83"
+APP_VERSION = "1.1.84"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -30651,9 +30651,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     for k in sorted(c, key=lambda k: c[k][0])[:len(c) - 24]: c.pop(k, None)
         return raw, gzb
 
-    def _img_bg_send(self, sock, getter, cache=86400, ctype='image/jpeg'):
-        """V1.1.49 圖片：背景找檔＋讀檔（最多同時 8 個），有 ETag（瀏覽器問有沒有變 → 304），畫面執行緒只寫出去."""
-        hdr = getattr(sock, '_hdr', {}) or {}; sem = self.__dict__.setdefault('_imgbg_sem', threading.BoundedSemaphore(8))
+    def _img_bg_send(self, sock, getter, cache=86400, ctype='image/jpeg', lane='_imgbg_sem'):
+        """V1.1.49 圖片：背景找檔＋讀檔（最多同時 8 個），有 ETag（瀏覽器問有沒有變 → 304），畫面執行緒只寫出去.
+        V1.1.84 lane：要現做的圖（禮物陣列預覽圖）走自己的排隊，不會卡住截圖、頭像."""
+        hdr = getattr(sock, '_hdr', {}) or {}; sem = self.__dict__.setdefault(lane, threading.BoundedSemaphore(8))
         def work():
             data = None
             with sem:
@@ -30673,6 +30674,13 @@ $r | ConvertTo-Json -Depth 4 -Compress
 
     def _phone_send(self, sock, code, body, ctype='text/html; charset=utf-8', extra='', cache=0):
         if isinstance(body,str): body=body.encode('utf-8')
+        if code.startswith('200') and len(body)>200000 and 'html' in ctype and not cache:   # V1.1.84 整頁加 ETag：內容沒變 → 304（手機不用再下載 3 MB）
+            import hashlib; et_='"p'+hashlib.md5(body).hexdigest()[:20]+'"'
+            if str((getattr(sock,'_hdr',{}) or {}).get('if-none-match',''))==et_:
+                try: sock.write(f'HTTP/1.1 304 Not Modified\r\nETag: {et_}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n'.encode('ascii')); sock.flush(); sock.disconnectFromHost()
+                except Exception: pass
+                return
+            extra+=f'ETag: {et_}\r\n'; cache=-1
         # V0.5.30 compress text (history chat can be a few MB) - saves mobile / ngrok data
         if len(body)>2048 and ('json' in ctype or 'html' in ctype) and 'gzip' in str((getattr(sock,'_hdr',{}) or {}).get('accept-encoding','')):
             import gzip
@@ -30686,7 +30694,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 body=z_
             else: body=gzip.compress(body,6)
             extra+='Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n'
-        cc=f'private, max-age={int(cache)}' if cache else 'no-store'
+        cc='no-cache' if cache==-1 else (f'private, max-age={int(cache)}' if cache else 'no-store')
         head=f'HTTP/1.1 {code}\r\nContent-Type: {ctype}\r\nContent-Length: {len(body)}\r\nCache-Control: {cc}\r\n{extra}Connection: close\r\n\r\n'.encode('ascii')
         try: sock.write(head+body); sock.flush(); sock.disconnectFromHost()
         except Exception: pass

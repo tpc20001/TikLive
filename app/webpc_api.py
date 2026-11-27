@@ -948,7 +948,7 @@ def route(win, sock, method, rest, q, body):
         win._web_send_file(sock, p_, 'video/mp4'); return True
     if name == 'pfx/gav/th' and method == 'GET':
         f_, t_, d_ = q.get('f', '-1'), q.get('t', '0'), q.get('d', '8')
-        win._img_bg_send(sock, lambda: win._gav_sheet(f_, t_, d_)); return True
+        win._img_bg_send(sock, lambda: win._gav_sheet(f_, t_, d_), lane='_gavth_lane'); return True
     if name == 'pfx/gav/file' and method == 'GET':
         p_ = win._gav_file(q.get('f', ''))
         if p_ is None: win._phone_send(sock, '404 Not Found', 'not found'); return True
