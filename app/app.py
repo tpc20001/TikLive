@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.11"
+APP_VERSION = "1.2.12"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -23785,6 +23785,8 @@ try { NLConnect | Out-Null; Unset
                 'restart_min': self.cfg('health.restart_min'), 'cg': self._cg_info()}
 
     def _anom_tick(self):
+        try: self._logup_tick()                                                 # V1.2.12 每天凌晨自動上傳 LOG
+        except Exception: pass
         try: self._health_tick()
         except Exception: self._ui_error('health tick')
         try: self._netfix_queue()                                               # V0.7.42.025 只處理你按的「重建連線」排隊（之前這裡誤呼叫每 2 秒的流量 tick）
@@ -25313,6 +25315,94 @@ $r | ConvertTo-Json -Depth 4 -Compress
             except Exception: pass
         self._wd_log(f'匯出 LOG：{fmt(t0)} ～ {fmt(t1)}，{n:,} 行 → {name}')
         return {'name': name, 'bytes': out.stat().st_size, 'lines': n, 'summary': summ[:4000], 'from': fmt(t0), 'to': fmt(t1)}
+
+    # ── V1.2.12 ☁ LOG 自動上傳到你自己的 GitHub 私人倉庫（Claude 之後可以直接去讀、幫你找問題）──
+    def _logup_path(self): return Path(PACKAGE_ROOT) / '_DB_SSD' / 'log_upload.json'
+
+    def _logup_cfg(self):
+        try: d = json.loads(self._logup_path().read_text(encoding='utf-8'))
+        except Exception: d = {}
+        d.setdefault('repo', 'tpc20001/TikLiveLogs'); d.setdefault('auto', True); return d
+
+    def _logup_save(self, d):
+        p = self._logup_path(); p.parent.mkdir(parents=True, exist_ok=True); tp = p.with_suffix('.tmp')
+        tp.write_text(json.dumps(d, ensure_ascii=False), encoding='utf-8'); os.replace(tp, p)
+
+    def _logup_info(self):
+        """給網頁看（權杖只顯示有沒有設、最後 4 碼）."""
+        d = self._logup_cfg(); tk = str(d.get('token') or '')
+        return {'ok': True, 'repo': d.get('repo'), 'auto': bool(d.get('auto')), 'has_token': bool(tk), 'tail': tk[-4:] if tk else '', 'last': d.get('last'), 'last_ok': d.get('last_ok'), 'msg': d.get('msg') or '',
+                'run': bool(self.__dict__.get('_logup_run_f')), 'pc': self.pc_role_name()}
+
+    def _logup_set(self, d):
+        c = self._logup_cfg()
+        if 'repo' in d:
+            r = str(d.get('repo') or '').strip().strip('/')
+            r = re.sub(r'^https?://github\.com/', '', r)
+            if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', r): return {'ok': False, 'message': '倉庫要寫成「帳號/名稱」，例如 tpc20001/TikLiveLogs'}
+            c['repo'] = r
+        if d.get('token') is not None:
+            t = str(d.get('token') or '').strip()
+            if t and not re.fullmatch(r'(github_pat_|ghp_)[A-Za-z0-9_]{20,}', t): return {'ok': False, 'message': '權杖格式不對（應該是 github_pat_ 開頭的一長串）'}
+            c['token'] = t
+        if 'auto' in d: c['auto'] = bool(d.get('auto'))
+        self._logup_save(c); return {'ok': True, 'message': '存好了'}
+
+    def _logup_api(self, method, path, body=None, token=''):
+        import urllib.request, urllib.error
+        rq = urllib.request.Request('https://api.github.com' + path, data=(json.dumps(body).encode() if body is not None else None), method=method,
+                                    headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'TikLiveMonitor', 'Content-Type': 'application/json'})
+        try:
+            with urllib.request.urlopen(rq, timeout=60) as r: return r.status, json.loads(r.read() or b'{}')
+        except urllib.error.HTTPError as e:
+            try: return e.code, json.loads(e.read() or b'{}')
+            except Exception: return e.code, {}
+
+    def _logup_put(self, repo, path, raw, msg, token):
+        import base64, urllib.parse
+        q = '/repos/' + repo + '/contents/' + urllib.parse.quote(path)
+        st, j = self._logup_api('GET', q, token=token); sha = j.get('sha') if st == 200 and isinstance(j, dict) else None   # 已經有 → 要帶 sha 才能蓋
+        b = {'message': msg, 'content': base64.b64encode(raw).decode()}
+        if sha: b['sha'] = sha
+        return self._logup_api('PUT', q, b, token)
+
+    def _logup_run(self, hours=24.0, why='手動'):
+        """背景執行緒：打包最近 hours 小時的 LOG（跟「匯出 LOG」同一包）→ 傳到 logs/電腦名/日期_時間.zip，另外更新 logs/電腦名/00_最新摘要.txt."""
+        if self.__dict__.get('_logup_run_f'): return {'ok': False, 'message': '上一次還在傳'}
+        c = self._logup_cfg(); tk = str(c.get('token') or ''); repo = c.get('repo')
+        if not tk: return {'ok': False, 'message': '還沒貼 GitHub 權杖'}
+        self._logup_run_f = True
+        try:
+            now = time.time(); r = self._logx_build(now - float(hours) * 3600, now)
+            f = self._logx_dir() / r['name']; raw = f.read_bytes()
+            if len(raw) > 45 * 1024 * 1024: raise RuntimeError(f'LOG 太大（{len(raw) / 1e6:.0f} MB），先不傳')
+            pc = re.sub(r'[^0-9A-Za-z_\-]+', '_', {'24/7': 'main', '測試機': 'test'}.get(self.pc_role_name(), self.pc_role_name())) or 'pc'
+            stamp = datetime.fromtimestamp(now).strftime('%Y%m%d_%H%M')
+            st, j = self._logup_put(repo, f'logs/{pc}/{stamp}.zip', raw, f'LOG {pc} {stamp}（{why}，V{APP_VERSION}）', tk)
+            if st not in (200, 201):
+                m = str((j or {}).get('message') or st)
+                hint = {401: '權杖不對或過期了', 403: '權杖沒有這個倉庫的「內容：讀寫」權限', 404: '找不到這個倉庫（名字對嗎？權杖有選到它嗎？）'}.get(st, '')
+                raise RuntimeError(f'GitHub 回 {st}：{m}' + (f'（{hint}）' if hint else ''))
+            summ = (f'電腦：{self.pc_role_name()}　版本：V{APP_VERSION}　上傳：{datetime.fromtimestamp(now).strftime("%Y-%m-%d %H:%M")}（{why}）\n'
+                    f'這次的完整 LOG：logs/{pc}/{stamp}.zip（{len(raw) / 1024:.0f} KB，{r.get("lines", 0):,} 行，{r.get("from")} ～ {r.get("to")}）\n\n' + str(r.get('summary') or ''))
+            self._logup_put(repo, f'logs/{pc}/00_最新摘要.txt', summ.encode('utf-8'), f'摘要 {pc} {stamp}', tk)
+            c = self._logup_cfg(); c.update(last=now, last_ok=True, msg=f'✔ 傳好了：logs/{pc}/{stamp}.zip（{len(raw) / 1024:.0f} KB）'); self._logup_save(c)
+            self._wd_log(f'☁ LOG 上傳 GitHub：{repo} logs/{pc}/{stamp}.zip（{why}）'); return {'ok': True, 'message': c['msg']}
+        except Exception as ex:
+            c = self._logup_cfg(); c.update(last=time.time(), last_ok=False, msg=f'✖ {ex}'); self._logup_save(c)
+            try: self._wd_log(f'☁ LOG 上傳失敗：{ex}')
+            except Exception: pass
+            return {'ok': False, 'message': f'上傳失敗：{ex}'}
+        finally: self._logup_run_f = False
+
+    def _logup_tick(self):
+        """每分鐘看一次（畫面執行緒，只讀一個小檔）：開了自動、有權杖、凌晨 4～6 點、20 小時內沒傳過 → 背景傳最近 24 小時."""
+        if time.time() - float(self.__dict__.get('_logup_chk_t') or 0) < 600: return
+        self._logup_chk_t = time.time()
+        c = self._logup_cfg()
+        if not c.get('auto') or not c.get('token') or self.__dict__.get('_logup_run_f'): return
+        if not (4 <= datetime.now().hour < 6) or time.time() - float(c.get('last') or 0) < 20 * 3600: return
+        threading.Thread(target=self._logup_run, args=(24.0, '每天自動'), daemon=True, name='TikLiveLogUp').start()
 
     def _logx_summary(self, t0, t1, ev, mem, ci):
         """Human-readable first page: what happened minute by minute, who dropped, which addresses were asked how often."""
@@ -46829,7 +46919,7 @@ const RULES=[
   {t:"多久查一次有沒有開播",d:'<table class="ruT"><tr><th>主播</th><th>檢查間隔</th></tr><tr><td>重點（紅色）</td><td>3 秒起，慢慢拉長到 '+RU_V('retry.priority','秒',10)+'</td></tr><tr><td>一般</td><td>'+RU_V('retry.normal','秒',60)+'（他平常開播的時段加快）</td></tr><tr><td>'+RU_V('conn.stale_days','天',7)+'以上沒開播</td><td>× '+RU_V('conn.stale_mult','倍',3)+'</td></tr><tr><td>帳號不存在（連續 3 次）</td><td>× 10</td></tr></table>'+"<ul><li>全部檢查排隊進行：續寫中的直播 → 重點 → 一般，<b>每分鐘最多 "+RU_V('conn.rate','次',80)+"</b>。TikTok 開始拒絕就自動放慢一級（45%）、最多兩級（22%），恢復正常 10 分鐘才加回來。</li><li>開播時間很固定的主播，快到平常時間前 3 分鐘就排到最前面。</li></ul>"},
   {t:"重開程式不是萬靈丹",d:"<ul><li>TikTok 正在拒絕、或簽章額度用完時，重開程式不會換網址，反而會斷掉直播中的場次（程式會先提醒你）。</li></ul>"}]},
  {k:"upd",i:"☁",c:"#3a7bd5",t:"更新、搬硬碟、場次合併",s:[
-  {t:"雲端更新（GitHub）",d:RU_F([["開程式 1 分鐘後、每 6 小時檢查","#3a7bd5"],["有新版只提示","#f0ad4e"],["你按「更新」","#45d483"],["熱更新（不中斷錄影）","#2ec4b6"]])+"<ul><li><b>一定要你按才更新，不會自己重開</b>。下載限速、比對檔案完整才裝。</li><li>以後<b>只熱更新、絕對不換 EXE 外殼</b>（不會再要你關程式重裝）。</li><li>更新後有問題，可以在更新頁「退回前面的版本」（一樣不中斷錄影）。</li></ul>"},
+  {t:"雲端更新（GitHub）",d:RU_F([["開程式 1 分鐘後、每 6 小時檢查","#3a7bd5"],["有新版只提示","#f0ad4e"],["你按「更新」","#45d483"],["熱更新（不中斷錄影）","#2ec4b6"]])+"<ul><li><b>一定要你按才更新，不會自己重開</b>。下載限速、比對檔案完整才裝。</li><li>以後<b>只熱更新、絕對不換 EXE 外殼</b>（不會再要你關程式重裝）。</li><li>更新後有問題，可以在更新頁「退回前面的版本」（一樣不中斷錄影）。</li><li>☁ LOG 上傳（反方向）：「設定 → 📋 LOG 與問題」貼上你自己 GitHub「私人」倉庫的權杖後，每天凌晨 4～6 點自動把最近 24 小時的 LOG（跟「匯出 LOG」同一包）傳到 logs/電腦名/日期_時間.zip，並更新 00_最新摘要.txt；也可以按「現在上傳」。之後跟 Claude 說「看 LOG」，它就能直接讀。權杖只存在這台電腦（_DB_SSD/log_upload.json），頁面只顯示最後 4 碼；不會傳到公開的更新倉庫。</li></ul>"},
   {t:"場次合併（⧉ 合併重複場次）",d:RU_F([["第 1 段","#4dc9ff"],["第 2 段","#4dc9ff"],["第 3 段","#4dc9ff"],["⧉ 合併 → 1 場","#45d483"]])+"<ul><li>同一位主播、<b>TikTok 開播時間一樣（相差 "+RU_V('history.merge_tol','秒',60)+"內）</b>＝同一場直播，只是程式重開、斷電、斷線被切開。</li><li>合併後留言、禮物、送禮者、觀看人數都歸到同一場；<b>影片不重新輸出</b>，回放照時間一段接一段播，中間沒錄到的自動跳過。留下編號最大的那一場。</li><li>合併前自動備份資料庫；直播中的場次不會動（等它下播）。</li></ul>"},
   {t:"搬硬碟（E → R，已完成）",d:"<ul><li>先複製、每個檔讀回來比對一樣才算數 → 第一輪搬完自動切換（錄影不停）→ 舊硬碟上的逐一確認後刪 → 「搬硬碟完成」。</li><li>舊硬碟上剩的十幾 GB 是 Windows 自己的（回收筒、系統還原、檔案系統本身），格式化就清掉。</li></ul>"}]},
  {k:"dev",i:"📱",c:"#9aa5b3",t:"手機、平板、網頁版",s:[
@@ -47253,9 +47343,19 @@ document.addEventListener("click",async e=>{const b=e.target.closest("[data-rest
 function cgLine(I){if(!I)return "";const col=["#45d483","#f0ad4e","#ff6577"][I.level]||"#45d483",S=I.sign||{};
   return `🚦 連線管控：<b style="color:${col}">${I.on?esc(I.level_name):"關閉"}</b> · 每分鐘 ${I.att_min}/${I.rate_now} 次檢查 · TikTok 拒絕 ${I.block_pct}% · 排隊 ${(I.q||[]).reduce((a,b)=>a+b,0)}`+
     (S.limited?` · <b style="color:#ff6577">簽章額度用完</b>`:` · 今天簽章 ${S.n||0} 次`)+` <a href="javascript:void(0)" onclick="cgOpen()" style="color:var(--vline,#4dc9ff)">詳細 →</a>`;}
+/* V1.2.12 ☁ LOG 上傳到你自己的 GitHub 私人倉庫：Claude 之後可以直接去讀、幫你找問題（權杖只存在電腦，頁面只看得到最後 4 碼） */
+async function luDraw(){const e=$("#lu");if(!e)return;let j=null;try{j=await J("/api/pc/logup");}catch(x){}if(!e.isConnected)return;if(!j){e.innerHTML=`<h3>☁ 上傳 LOG 到你的 GitHub</h3><div class="snote">讀取失敗</div>`;return;}
+  const q=x=>e.querySelector(x);e.innerHTML=`<h3>☁ 上傳 LOG 到你的 GitHub（給 Claude 看）</h3><div class="snote" style="margin:0 0 8px">傳到你自己的<b>私人</b>倉庫（LOG 裡有主播帳號、觀眾名字，不要用公開倉庫）。開著「每天自動」會在凌晨 4～6 點傳最近 24 小時；有問題時按「現在上傳」，再跟 Claude 說「看 LOG」。</div>
+<div class="strow"><span>倉庫</span><input id="luR" value="${esc(j.repo||"")}" placeholder="帳號/名稱" style="flex:1;min-width:0"></div>
+<div class="strow"><span>權杖</span><input id="luT" type="password" autocomplete="off" placeholder="${j.has_token?"已設定（…"+esc(j.tail)+"），要換才貼":"貼上 github_pat_ 開頭的權杖"}" style="flex:1;min-width:0"></div>
+<label style="display:flex;align-items:center;gap:8px;margin-top:6px"><input type="checkbox" id="luA" ${j.auto?"checked":""} style="width:20px;height:20px;flex:none;margin:0"> 每天凌晨自動上傳</label>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="btn s" id="luS">💾 存設定</button><button class="btn s" id="luG" ${j.has_token&&!j.run?"":"disabled"}>📤 現在上傳（最近 24 小時）</button></div>
+<div id="luM" class="snote" style="margin-top:6px">${j.run?"⏳ 正在上傳…":esc(j.msg||(j.has_token?"":"還沒設定權杖"))}${j.last?" · "+fmtClk(j.last):""}</div>`;
+  q("#luS").onclick=async()=>{const t=q("#luT").value.trim();const r=await rvPost("/api/pc/logup/set",Object.assign({repo:q("#luR").value.trim(),auto:q("#luA").checked},t?{token:t}:{}));toast((r&&r.message)||"存不了");luDraw();};
+  q("#luG").onclick=async()=>{q("#luG").disabled=true;q("#luM").textContent="⏳ 打包、上傳中…（幾秒到一分鐘）";const r=await rvPost("/api/pc/logup/set",{op:"run",hours:24});q("#luM").textContent=(r&&r.message)||"上傳失敗";q("#luG").disabled=false;};}
 /* V0.6.23 匯出 LOG：選一段時間，電腦把所有紀錄打包成 zip，手機直接下載，再傳給別人分析 */
 function drawLogx(){const sb=$("#sbody");if(!sb)return;const pad=n=>String(n).padStart(2,"0"),loc=t=>{const d=new Date(t);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;};
-  sb.innerHTML=`<h2 class="stt">📋 LOG 與問題</h2><div id="isu">${issuesHtml(S.isu)}</div><section class="ssec"><h3>📤 匯出 LOG：要哪一段時間？</h3><div class="snote" style="margin:0 0 8px">把這段時間的連線事件、每分鐘網路請求數、斷線／重試、錯誤、異常和設定打包成一個 zip。產生後按「下載」存到手機，就能用任何 App 傳出去。</div>
+  sb.innerHTML=`<h2 class="stt">📋 LOG 與問題</h2><div id="isu">${issuesHtml(S.isu)}</div><section class="ssec" id="lu"><h3>☁ 上傳 LOG 到你的 GitHub</h3><div class="snote">讀取中…</div></section><section class="ssec"><h3>📤 匯出 LOG：要哪一段時間？</h3><div class="snote" style="margin:0 0 8px">把這段時間的連線事件、每分鐘網路請求數、斷線／重試、錯誤、異常和設定打包成一個 zip。產生後按「下載」存到手機，就能用任何 App 傳出去。</div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${[[30,"最近 30 分鐘"],[60,"最近 1 小時"],[180,"最近 3 小時"],[720,"最近 12 小時"]].map(([m,t])=>`<button class="btn s" data-m="${m}" style="width:100%;white-space:nowrap">${t}</button>`).join("")}</div>
 <div class="strow"><span>從</span><input type="datetime-local" id="lxF" value="${loc(Date.now()-1800e3)}"><span>到</span><input type="datetime-local" id="lxT" value="${loc(Date.now())}"></div>
 <button class="btn" id="lxGo" style="margin-top:10px;width:100%">📦 匯出自訂這段時間</button><div id="lxR" style="margin-top:10px"></div></section>
@@ -47269,7 +47369,7 @@ function drawLogx(){const sb=$("#sbody");if(!sb)return;const pad=n=>String(n).pa
     catch(e){R.innerHTML=`<div class="ubad">✖ 匯出失敗：${esc(e.message||e)}</div>`;}};
   sb.querySelectorAll("[data-m]").forEach(b=>b.onclick=()=>make("min="+b.dataset.m));
   $("#lxGo").onclick=()=>{const f=new Date($("#lxF").value).getTime()/1000,t=new Date($("#lxT").value).getTime()/1000;if(!f||!t||t<=f){toast("時間不對");return;}make(`from=${f}&to=${t}`);};
-  list()
+  list();luDraw();
   issuesRefresh();clearInterval(S.isuIv);S.isuIv=setInterval(()=>{if(S.scat!=="logx"||!$("#isu")||!onSetPane()){clearInterval(S.isuIv);S.isuIv=null;return;}if(!document.hidden)issuesRefresh();},10000);}
 async function issuesRefresh(){try{const j=await J("/api/pc/issues");S.isu=j;const el=$("#isu");if(el){const h=issuesHtml(j);if(el._h!==h){el._h=h;el.innerHTML=h;}}}catch(e){}}
 /* V0.6.21 刪除主播（全部）：三次確認，每次視窗位置和「確定刪除」按鈕的位置都不一樣 */

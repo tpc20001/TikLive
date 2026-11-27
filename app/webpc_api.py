@@ -406,6 +406,7 @@ def route(win, sock, method, rest, q, body):
     if name == 'issues': J(win._issues_info()); return True
     if name == 'cg': J(win._cg_info()); return True                         # V0.6.47 連線管控
     if name == 'cg/roster': J(win._roster_review()); return True            # V0.6.47 主播縮編建議               # V0.6.28 LOG 與問題：自我檢查、網路狀態、自動處理紀錄、異常
+    if name == 'logup': J(win._logup_info()); return True                    # V1.2.12 LOG 上傳 GitHub 設定（只讀；權杖只給最後 4 碼）
     if name == 'logx/list': J({'items': win._logx_list(), 'now': time.time()}); return True           # V0.6.23 匯出 LOG
     if name == 'logx/make':
         now = time.time(); t1 = float(q.get('to') or now); t0 = float(q.get('from') or (t1 - float(q.get('min') or 30) * 60))
@@ -1175,6 +1176,9 @@ def route(win, sock, method, rest, q, body):
     if name == 'cloud/set': J(win._cu_set(d)); return True
     if name == 'merge/run': J(win._web_merge_run(d)); return True
     if name == 'capsim/apply': J(win._capsim_apply(d)); return True
+    if name == 'logup/set':                                                       # V1.2.12 LOG 上傳 GitHub：存設定／現在上傳（要密碼）
+        if d.get('op') == 'run': _bg(win, sock, lambda: win._logup_run(float(d.get('hours') or 24), '手動')); return True
+        J(win._logup_set(d)); return True
     if name == 'pfx/set':
         if str(d.get('op') or '') in ('gav_save', 'mix', 'glearn', 'gav_onset'): _bg(win, sock, lambda: win._pfx_set(d)); return True   # V1.1.82 寫檔／查資料庫的放背景
         J(win._pfx_set(d)); return True                      # V1.1.63 手機錄特效（要密碼）
