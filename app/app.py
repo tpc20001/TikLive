@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.1.97"
+APP_VERSION = "1.1.98"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -49092,7 +49092,7 @@ async function snNvt(sid){let j=null;try{j=await fetch(`${snB()}/api/pc/nvtmp?si
   b.textContent=j.keep?"📌 已留下":`🕔 暫存 剩 ${j.left<1?Math.max(0,Math.round(j.left*24))+" 小時":Math.ceil(j.left)+" 天"} · 📌 留下`;b.title=j.keep?"這場只錄聲音的 MP4 已經留下，不會自動刪（點一下取消留下）":`只錄聲音的場次：MP4 暫存 ${j.days} 天，到期沒留下就自動刪（截圖照留）。點一下留下這場的 MP4`;}
 async function snNvtKeep(b){const keep=!b.classList.contains("on");const P_=typeof kPost==="function"?kPost:(typeof post==="function"?post:null);let j=null;try{j=P_?await P_("/api/pc/nvtmp",{sid:SN.sid,keep:keep?1:0}):null;}catch(e){}
   if(j&&j.message)(typeof toast==="function"?toast:alert)(j.message);snNvt(SN.sid);}
-async function snInfo(sid){let j=null;try{j=await fetch(`${snB()}/api/pc/snap/info?sid=${sid}`,{cache:"no-store"}).then(r=>r.json());}catch(e){}if(!j||!j.ok||SN.sid!==sid)return;
+async function snInfo(sid){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>snInfo.apply(null,a_),{once:true});return;}let j=null;try{j=await fetch(`${snB()}/api/pc/snap/info?sid=${sid}`,{cache:"no-store"}).then(r=>r.json());}catch(e){}if(!j||!j.ok||SN.sid!==sid)return;
   const ch=JSON.stringify(j.layout)!==JSON.stringify(SN.lay);SN.lay=j.layout||SN.lay;SN.mp4=!!j.mp4;SN.mp4why=j.mp4why||"";const R=j.regen||{};
   {const em=SN.box&&SN.box.querySelector(".snEmpty");if(em){if((j.snaps||[]).length&&!R.running&&!(R.pickL&&R.pickL.length)){SN.L=j.snaps.slice();em.remove();snMount(SN.box,sid,SN.L,SN.seek,SN.clk,j.layout);return;}
     const t=em.querySelector(".snEmT"),bt=em.querySelector("[data-st=regen]");if(R.running){t.textContent=`截圖中 ${R.done||0}/${R.total||0}…`;clearTimeout(SN.rt);SN.rt=setTimeout(()=>snInfo(sid),1500);SN.regenOn=true;}
@@ -49194,7 +49194,7 @@ function snMosPv(f){const d=document.createElement("div");d.className="snMosPv";
   d.innerHTML=`<div class="snMosPvB">${gif?`<img alt="" src="${snMosUrl(f)}&pv=1">`:`<video src="${snMosUrl(f)}&pv=1" autoplay loop muted playsinline controls></video>`}<div class="snMosPvT"><span>${f}</span><button class="pill">✕ 關閉</button></div></div>`;
   document.body.appendChild(d);const cl=()=>{const v=d.querySelector("video");if(v){try{v.pause();v.removeAttribute("src");v.load();}catch(e){}}d.remove();};d.querySelector("button").onclick=cl;d.onclick=e=>{if(e.target===d)cl();};}
 function snMosFile(x){return `<div class="snMosF"><span>${String(x.fmt||"").toUpperCase()} · ${x.w}×${x.h} · ${(x.size/1e6).toFixed(1)} MB</span><button class="pill" data-mpv="${x.file}">▶ 預覽</button><a class="pill" href="${snMosUrl(x.file)}" download="${x.file}">⬇ 下載</a></div>`;}
-async function snMosPoll(ov){clearTimeout(ov._pt);if(!ov.isConnected)return;let j=null;try{j=await fetch((typeof B==="string"?B:"")+"/api/pc/mosaic?sid="+SN.sid,{cache:"no-store"}).then(r=>r.json());}catch(e){}
+async function snMosPoll(ov){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>snMosPoll.apply(null,a_),{once:true});return;}clearTimeout(ov._pt);if(!ov.isConnected)return;let j=null;try{j=await fetch((typeof B==="string"?B:"")+"/api/pc/mosaic?sid="+SN.sid,{cache:"no-store"}).then(r=>r.json());}catch(e){}
   const el=ov.querySelector(".snMosL");if(!el)return;const L=(j&&j.jobs)||[],O=(j&&j.old)||[];
   el.innerHTML=(L.length?L.map(x=>`<div class="snMosJ ${x.state}"><b>${x.state==="done"?"✔":x.state==="fail"?"✖":"⏳"} ${x.C}×${x.R} · ${x.dur} 秒${x.spd>1?` ×${x.spd}`:""} · ${(x.fmts||[]).map(f=>f.toUpperCase()).join("＋")} · ${x.w}×${x.h}</b><small>${x.msg||""}${x.state==="run"&&x.total>1?`（${x.done}/${x.total}）`:""}</small>${(x.files||[]).map(snMosFile).join("")}</div>`).join(""):"")
     +(O.length?`<div class="snMosN">這場以前做的：</div>`+O.map(x=>`<div class="snMosJ done"><b>${x.C}×${x.R} · ${x.dur} 秒${x.spd>1?` ×${x.spd}`:""}</b>${snMosFile(x)}</div>`).join(""):"")||'<div class="snMosN">這場還沒做過動圖</div>';
@@ -49449,7 +49449,7 @@ function spDock(){const d=SP.root&&SP.root.querySelector("#spDock");if(!d||SP.bu
 async function spMake(){if(!SP.sel.size){spToast("先選主播");return;}if(!SP.names.size&&!SP.min){spToast("先選禮物（或設單筆價格）");return;}
   const j=await spPost("/api/pc/split/make",{users:[...SP.sel],from:SP.from,to:SP.to,names:[...SP.names],min:SP.min,pre:SP.pre,post:SP.post,gwin:SP.gwin,name:(SP.nm||"").trim()});
   if(!j||j.ok===false){spToast("✖ "+((j&&j.message)||"沒有成功"));return;}spToast("開始輸出");SP.nm="";spPoll();}
-async function spPoll(){clearTimeout(SP.iv);if(!SP.root||!SP.root.isConnected)return;let s=null;try{s=await spGet("/api/pc/split/status");}catch(e){}
+async function spPoll(){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>spPoll.apply(null,a_),{once:true});return;}clearTimeout(SP.iv);if(!SP.root||!SP.root.isConnected)return;let s=null;try{s=await spGet("/api/pc/split/status");}catch(e){}
   const d=SP.root.querySelector("#spDock");if(!d)return;
   if(s&&s.running){SP.busy=true;const pc=s.total?Math.round(s.done/s.total*100):3;d.innerHTML=`<div class="sum"><b>正在輸出 ${s.done||0} / ${s.total||"…"} 段</b><br><span class="tkNote">${spE(s.msg||"")}</span><div class="tkBar" style="margin-top:6px"><i style="width:${pc}%"></i></div></div><button class="tkBtn bad" data-sp="cancel">停止</button>`;
     SP.was=true;SP.iv=setTimeout(spPoll,1200);return;}
@@ -49791,7 +49791,7 @@ function edSubSheet(){if(!ED.d)return;const s=edSheet(`<div class="e2SH"><b>改�
     ED.subs.sort((p,q)=>p[0]-q[0]);ED.subDirty=true;draw();edOverlay(edS());});
   draw();}
 async function edSubSave(){const j=await kPost("/api/pc/edit/sub",{sid:ED.sid,segs:ED.subs});if(j&&j.ok){ED.subDirty=false;kToast("✔ "+j.message);try{if(typeof SX!=="undefined"&&SX.subs)delete SX.subs[ED.sid];}catch(e){}}else kToast("✖ "+((j&&j.message)||"沒有成功"));}
-async function edPoll(){clearTimeout(ED.iv);if(!ED.ov)return;let s=null;try{s=await kGet("/api/pc/edit/status");}catch(e){}if(!ED.ov)return;
+async function edPoll(){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>edPoll.apply(null,a_),{once:true});return;}clearTimeout(ED.iv);if(!ED.ov)return;let s=null;try{s=await kGet("/api/pc/edit/status");}catch(e){}if(!ED.ov)return;
   const box=document.querySelector("#edJob"),jb=ED.ov.querySelector("#edJobBar"),go=document.querySelector("#edGoX");const mine=s&&s.cur&&s.cur.sid===ED.sid,q=s?(s.q||[]).filter(x=>x.sid===ED.sid).length:0;
   if(mine||q){const c=s.cur||{},pc=mine&&c.total?Math.round(c.done/c.total*100):2;const h=`<div class="edJobC"><b>${mine?"⏳ 正在輸出 · "+kE(c.msg||""):"⏳ 排隊中"}</b>${q?`<span class="tkNote"> · 這場還有 ${q} 個在排</span>`:""}<div class="tkBar" style="margin-top:6px"><i style="width:${pc}%"></i></div></div>`;
     if(box)box.innerHTML=h;if(jb){jb.hidden=false;jb.innerHTML=h;}if(go){go.disabled=true;go.textContent="✔ 已送出，輸出中…";}ED.wasJob=true;ED.iv=setTimeout(edPoll,1500);return;}
@@ -50032,7 +50032,7 @@ async function lwExport(){if(LW.lv<=0)return;let R=LW.R.filter(x=>LW.sel.has(x.s
 function lwQ(st){const P=(st&&st.pend)||[];if(!P.length)return "";const n=P.reduce((a,j)=>a+((j.sids||[]).length),0),K={del:"刪 MP4",out:"轉出",ytdel:"刪已上傳"};   /* TK_V1.0.72 排隊中的批次 */
   return `<div class="lwQ">⏭ 後面還排了 <b>${P.length}</b> 批、${n} 場（${[...new Set(P.map(j=>K[j.k]||j.k))].join("、")}），前面做完自動接著做 <button type="button" onclick="lwQClr(this)">取消排隊</button></div>`;}
 async function lwQClr(b){if(!confirm("清掉排隊中、還沒開始的批次？（正在做的那批不受影響）"))return;b.disabled=true;const j=await lwPost("/api/pc/bg/cancel",{key:"del",id:"lvq"});lwToast((j&&j.message)||"已取消");lwJob();}
-async function lwJob(){clearTimeout(LW.poll);if(!LW.root||!LW.root.isConnected)return;let st=null;try{st=await fetch((typeof B==="string"?B:"")+"/api/pc/lv/status",{cache:"no-store"}).then(r=>r.json());}catch(e){}
+async function lwJob(){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>lwJob.apply(null,a_),{once:true});return;}clearTimeout(LW.poll);if(!LW.root||!LW.root.isConnected)return;let st=null;try{st=await fetch((typeof B==="string"?B:"")+"/api/pc/lv/status",{cache:"no-store"}).then(r=>r.json());}catch(e){}
   const box=LW.root.querySelector("#lwJob");if(!box)return;
   if(st&&st.running){box.hidden=false;box.innerHTML=`⏳ 正在${st.mode==="out"?"轉出":"處理"} ${st.done}/${st.total} 場${st.cur?"："+lwE(st.cur):""}（先截 ${st.mode==="out"?20:60} 張圖，再${st.mode==="out"?"把 MP4 移到 TIKTOK LIVE OUTPUT":"刪 MP4"}）<i><u style="width:${st.total?Math.round(st.done/st.total*100):0}%"></u></i>${lwQ(st)}`;LW.was=true;LW.poll=setTimeout(lwJob,2000);return;}
   if(st&&st.pend&&st.pend.length){box.hidden=false;box.innerHTML=`⏳ 上一批剛做完，馬上接著做排隊的…${lwQ(st)}`;LW.was=true;LW.poll=setTimeout(lwJob,2000);return;}
@@ -50280,7 +50280,7 @@ function sysfD(t){if(!t)return"";const d=new Date(t*1000);return `${d.getFullYea
 async function sysfOpen(d){SYSF.d=d||"";SYSF.path="";SYSF.k="";let ov=document.getElementById("sysfOv");if(ov)ov.remove();ov=document.createElement("div");ov.id="sysfOv";ov.className="sysfOv";
   ov.innerHTML=`<div class="sysfB"><div class="sysfH"><b>📋 系統檔案清單 · ${sysfE(SYSF.d||"影片庫")}</b><span style="flex:1"></span><button class="pill" data-sx="1">✕</button></div><div class="sysfC">讀取中…</div></div>`;document.body.appendChild(ov);
   ov.onclick=sysfClick;if(typeof vgBackPush==="function"){const cl=()=>ov.remove();vgBackPush(cl);}sysfLoad();}
-async function sysfLoad(){const ov=document.getElementById("sysfOv");if(!ov)return;let j=null;try{j=await fetch(`${typeof B==="string"?B:""}/api/pc/sysfiles?d=${encodeURIComponent(SYSF.d)}`,{cache:"no-store"}).then(r=>r.json());}catch(e){}
+async function sysfLoad(){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>sysfLoad.apply(null,a_),{once:true});return;}const ov=document.getElementById("sysfOv");if(!ov)return;let j=null;try{j=await fetch(`${typeof B==="string"?B:""}/api/pc/sysfiles?d=${encodeURIComponent(SYSF.d)}`,{cache:"no-store"}).then(r=>r.json());}catch(e){}
   if(!document.getElementById("sysfOv"))return;if(!j){ov.querySelector(".sysfC").textContent="讀取失敗";return;}SYSF.cat=j.cat||{};SYSF.r=j.res;SYSF.run=j.running;SYSF.msg=j.msg;sysfDraw();
   if(j.running){clearTimeout(SYSF.t);SYSF.t=setTimeout(sysfLoad,2000);}}
 function sysfFile(f){const c=SYSF.cat[f.k]||[f.k,""],nm=String(f.p).split(/[\\/]/).pop(),dir=String(f.p).slice(0,String(f.p).length-nm.length);
@@ -50452,7 +50452,7 @@ function vgStopLoads(){const sl=document.getElementById("vgSL");if(sl&&!(VG.root
 function vgS2Bar(){let b=VG.root.querySelector("#vgS2");if(!b){b=document.createElement("div");b.id="vgS2";b.className="vgS2";b.hidden=true;const i=VG.root.querySelector("#vgInfo");(i&&i.parentNode?i.parentNode:VG.root).insertBefore(b,i?i.nextSibling:null);
   b.onclick=async e=>{const x=e.target.closest("[data-s2]");if(!x||!VG.info)return;if(x.dataset.s2==="go"){const r=await vgPost("/api/pc/hl/now",{sid:VG.info.sid});vgToast(r&&r.ok!==false?"✔ "+(r.message||"已排到最前面"):"✖ "+((r&&r.message)||"沒有成功"),4000);vgS2(VG.info.sid);}
     else if(x.dataset.s2==="auto"){const on=!vgLS.get("s2auto",true);vgLS.set("s2auto",on);vgToast(on?"打開場次時自動先做每 2 秒圖":"不自動做（要的話按「⚡ 先做這場」）");vgS2(VG.info.sid);}};}return b;}
-async function vgS2(sid,first){clearTimeout(VG.s2T);if(!VG.root||!VG.root.isConnected||!VG.info||VG.info.sid!==sid)return;let j=null;try{j=await vgGet("/api/pc/vg/s2?sid="+sid);}catch(e){}
+async function vgS2(sid,first){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>vgS2.apply(null,a_),{once:true});return;}clearTimeout(VG.s2T);if(!VG.root||!VG.root.isConnected||!VG.info||VG.info.sid!==sid)return;let j=null;try{j=await vgGet("/api/pc/vg/s2?sid="+sid);}catch(e){}
   if(!VG.root||!VG.info||VG.info.sid!==sid)return;
   if(!j||j.ok===false){if(VG.s2Run===sid){VG.s2Run=0;try{vgPump();}catch(e){}}VG.s2T=setTimeout(()=>vgS2(sid),8000);return;}   /* 問不到：先恢復逐張載入，8 秒後再問 */
   const b=vgS2Bar(),auto=vgLS.get("s2auto",true);
@@ -50627,7 +50627,7 @@ function vgCutSheet(){const I=VG.info,S=vgSegs();if(!I||!S.length){vgToast("先�
     let j=null;try{j=await vgPost("/api/pc/edit/make",{sid:I.sid,segs,split,merge,precise:s.querySelector("#vgPrecX button.on").dataset.p==="1",name:s.querySelector("#vgNameX").value.trim(),from:"grid"});}catch(e){}
     if(!j||j.ok===false){go.disabled=!!(j&&j.dup);go.textContent=j&&j.dup?"✔ 已經在輸出了":`輸出 ${S.length} 段`;vgToast((j&&j.dup?"ℹ ":"✖ ")+((j&&j.message)||"沒有成功"));return;}
     vgToast(j.ahead?`✔ 已送出：前面還有 ${j.ahead} 個在排（進度看上面，或「後台狀態」）`:"✔ 已送出，開始輸出（進度看上面）");s.remove();VG.sel.clear();vgPaintSel();VG.job=I.sid;vgJobPoll();};}
-async function vgJobPoll(){clearTimeout(VG.jt);const R=VG.root;if(!R||!R.isConnected||!VG.info)return;let s=null;try{s=await vgGet("/api/pc/edit/status");}catch(e){}if(!VG.info)return;
+async function vgJobPoll(){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>vgJobPoll.apply(null,a_),{once:true});return;}clearTimeout(VG.jt);const R=VG.root;if(!R||!R.isConnected||!VG.info)return;let s=null;try{s=await vgGet("/api/pc/edit/status");}catch(e){}if(!VG.info)return;
   const sid=VG.info.sid,mine=s&&s.cur&&s.cur.sid===sid,q=s?(s.q||[]).filter(x=>x.sid===sid).length:0,el=R.querySelector("#vgJob");
   if(mine||q){const c=s.cur||{};el.textContent=mine?`⏳ 輸出中 ${c.done||0}/${c.total||0}${q?` · 還有 ${q} 個`:""}`:`⏳ 排隊中 ${q} 個`;VG.job=sid;VG.jt=setTimeout(vgJobPoll,1500);return;}
   el.textContent="";if(VG.job===sid){VG.job=0;const last=Object.values((s&&s.done)||{}).filter(x=>x.sid===sid).sort((a,b)=>b.t-a.t)[0];if(last)vgToast((last.ok?"✔ ":"✖ ")+(last.message||""));
@@ -50851,7 +50851,7 @@ function hlBlockMenu(btn,i){const x=(HL.d&&HL.d.segs||[])[i];if(!x)return;let m=
     const j=b.dataset.k==="u"?await hlBlockPost("u",x.u,true):await hlBlockPost("t",b.dataset.t,true);if(typeof toast==="function")toast((j&&j.ok?"✔ ":"✖ ")+((j&&j.message)||"")+"（精選上面可以取消）");hlLoad();};}
 function hlPlay(x){hlSeen(x);if(x.yt&&!x.mp4){window.open(x.yt,"_blank","noopener");return;}if(typeof openHist==="function"&&typeof PAGES!=="undefined"){openHist(x.sid,x.name,"",x.at,"hl");return;}location.hash=`#rp/${x.sid}/${Math.round(x.at)}/hl`;}
 /* V0.7.42.007 每日精選影片：一天的精彩片段剪成一支，內建播放器＋段落清單 */
-async function hlReelLoad(){const R=HL.root;if(!R)return;if(hlMulti()&&HL.day!=="fav"){const e_=R.querySelector(".hlReel");if(e_)e_.innerHTML="";return;}   /* V0.7.42.023 本週最佳沒有精選影片 */
+async function hlReelLoad(){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>hlReelLoad.apply(null,a_),{once:true});return;}const R=HL.root;if(!R)return;if(hlMulti()&&HL.day!=="fav"){const e_=R.querySelector(".hlReel");if(e_)e_.innerHTML="";return;}   /* V0.7.42.023 本週最佳沒有精選影片 */
   const day0_=HL.day;let I=null;try{I=await hlGet("/api/pc/reel/info?d="+encodeURIComponent(HL.day));}catch(e){}if(HL.day!==day0_)return;   /* V0.7.42.025 等回來時已經換天／換成本週最佳就不畫 */HL.reel=I;const el=R.querySelector(".hlReel");if(!el||!I)return;
   const mm=s=>Math.floor(s/60)+" 分"+(Math.round(s%60)?" "+Math.round(s%60)+" 秒":"");
   const FV=HL.day==="fav",dl=FV?"⭐ 收藏":HL.day.slice(5).replace("-","/")+" 的";   /* V0.7.42.034 我的最愛也可以做成一支（不會自動刪） */
@@ -51165,7 +51165,7 @@ function emgMount(root){EMG.root=root;root.classList.add("emg");root.innerHTML='
     if(k==="takeover"&&!confirm("把排隊中、舊版程式排的那些改由這一版重新排隊？\n\n正在轉的那部不動，轉完後後面的就照新設定（C／I 各自用顯示卡或 CPU）。"))return (EMG.busy=false);const j=k==="gpu"?await emgPost("/api/pc/emg/gpu",{}):await emgPost("/api/pc/emg/set",{k,v:v==="1"?true:v==="0"?false:v});EMG.busy=false;
     if(j&&typeof toast==="function")toast((j.ok===false?"✖ ":"✔ ")+(j.message||""));emgLoad();};
   emgLoad();}
-async function emgLoad(){const R=EMG.root;if(!R||!R.isConnected)return;clearTimeout(EMG.tm);let d=null;
+async function emgLoad(){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>emgLoad.apply(null,a_),{once:true});return;}const R=EMG.root;if(!R||!R.isConnected)return;clearTimeout(EMG.tm);let d=null;
   try{d=await fetch((typeof B==="string"?B:"")+"/api/pc/emg",{cache:"no-store"}).then(r=>r.json());}catch(e){}
   if(!R.isConnected)return;EMG.tm=setTimeout(emgLoad,3000);if(d&&d.ok){EMG.d=d;emgDraw();}}
 function emgSpark(v,col,label,now){const W=300,H=46,N=150,pts=[];(v||[]).forEach((y,i)=>{if(y==null)return;const x=W-(v.length-1-i)/(N-1)*W;pts.push(x.toFixed(1)+","+(H-Math.max(0,Math.min(100,y))/100*(H-2)-1).toFixed(1));});
@@ -51590,7 +51590,7 @@ function gavNudge(dv){for(const c of GAV.cells){if(!GAV.sel.has(c.rid))continue;
   const s=document.querySelector(`#gavG [data-o="${c.rid}"]`);if(s)s.textContent=gavOs(c.o);const s2=document.querySelector(`#gavCmp [data-co="${c.rid}"]`);if(s2)s2.textContent=gavOs(c.o);}gavPxRun();gavTl();gavSelBar();gavSave();}
 function gavSave(){clearTimeout(GAV.svt);GAV.svt=setTimeout(async()=>{const log=Object.values(GAV.log);GAV.log={};
   const r=await rvPost("/api/pc/pfx/set",{op:"gav_save",sid:GAV.sid,D:GAV.D,C:GAV.C,R:Math.ceil(GAV.cells.length/(GAV.C||1)),cells:GAV.cells.map(c=>({rid:c.rid,o:c.o})),lay:GAV.L,log});if(!r||!r.ok)log.forEach(x=>{if(!GAV.log[x.rid])GAV.log[x.rid]=x;});},1500);}
-async function gavJob(){clearTimeout(GAV.jt);const el=document.getElementById("gavJob");if(!el)return;let j=null;try{j=await rvGet("/api/pc/pfx/gav/job?sid="+GAV.sid);}catch(e){}const el2=document.getElementById("gavJob");if(!el2)return;
+async function gavJob(){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>gavJob.apply(null,a_),{once:true});return;}clearTimeout(GAV.jt);const el=document.getElementById("gavJob");if(!el)return;let j=null;try{j=await rvGet("/api/pc/pfx/gav/job?sid="+GAV.sid);}catch(e){}const el2=document.getElementById("gavJob");if(!el2)return;
   if(!j||!j.ok){GAV.jt=setTimeout(gavJob,3000);return;}   /* 一時讀不到：畫面不清掉，3 秒後再問 */
   const jb=j.job||{},mine=jb.sid===GAV.sid&&jb.msg,el_=jb.t0?(Date.now()/1000-jb.t0):0,fr=jb.total?(jb.done||0)/jb.total:0,eta=jb.run&&fr>0.02?el_/fr*(1-fr):null;
   const fu=(f,dl)=>`${rvB()}/api/pc/pfx/gav/file?f=${encodeURIComponent(f)}${dl?"&dl=1":""}`,outs=j.outs||[],last=!jb.run&&mine&&jb.out?outs.find(o=>o.f===jb.out):null;
@@ -52123,7 +52123,7 @@ function culMount(root){CUL.root=root;root.classList.add("cul");root.innerHTML='
 function culCollect(){const R=CUL.root,d={},u=culU();R.querySelectorAll("[data-cf]").forEach(i=>{let v=i.value;if(CUL_SPD.includes(i.dataset.cf))v=Math.max(1,Math.round(u.from(+v||0)));d[i.dataset.cf]=v;});return d;}
 async function culSave(quiet){clearTimeout(CUL.at);const j=await culPost("/api/pc/cul/set",culCollect());if(!quiet||!(j&&j.ok))culToast((j&&j.ok?"✔ ":"✖ ")+((j&&j.message)||""));CUL.edit=false;culLoad();}
 function culAuto(now){clearTimeout(CUL.at);CUL.at=setTimeout(()=>culSave(true),now?50:900);}   /* V0.8.29 按▲▼或改數字：停手約 1 秒自動儲存 */
-async function culLoad(){const R=CUL.root;if(!R||!R.isConnected)return;clearTimeout(CUL.tm);let d=null;
+async function culLoad(){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>culLoad.apply(null,a_),{once:true});return;}const R=CUL.root;if(!R||!R.isConnected)return;clearTimeout(CUL.tm);let d=null;
   try{d=await fetch((typeof B==="string"?B:"")+"/api/pc/cul/info",{cache:"no-store"}).then(r=>r.json());}catch(e){}
   if(!R.isConnected)return;CUL.tm=setTimeout(culLoad,2000);if(!d||!d.ok){R.innerHTML='<div class="culE">讀取失敗</div>';return;}CUL.d=d;culDraw();}
 function culDraw(){const R=CUL.root,d=CUL.d;if(!R||!d)return;const c=d.cfg||{},h=d.helper||{},b=d.busy;
@@ -52170,7 +52170,7 @@ async function htbPost(p,d){try{if(typeof kPost==="function")return await kPost(
 function htbGrid(n){n=Math.max(1,n|0);let best=null;for(let r=1;r<=n;r++){for(let c=r;c<=n;c++){if(r*c<n)continue;if(c/r>1.6)break;const k=[r*c-n,c-r];if(!best||k[0]<best[0][0]||(k[0]===best[0][0]&&k[1]<best[0][1]))best=[k,c,r];break;}}return [best[1],best[2]];}
 const htbIm=(sid,L,h)=>`${imgB(htbB())}/api/pc/vg/thumb?sid=${sid}&t=${L}&h=${h||360}&near=20&p=1`;
 function htbMount(root,u){HTB.root=root;HTB.u=String(u||"").replace(/^@/,"");HTB.d=null;root.classList.add("htbPage");root.innerHTML='<div class="htbEmpty">讀取中…</div>';htbLoad();}
-async function htbLoad(){if(!HTB.root||!HTB.root.isConnected)return;let d=null;try{d=await htbGet("/api/pc/htb?u="+encodeURIComponent(HTB.u));}catch(e){}
+async function htbLoad(){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>htbLoad.apply(null,a_),{once:true});return;}if(!HTB.root||!HTB.root.isConnected)return;let d=null;try{d=await htbGet("/api/pc/htb?u="+encodeURIComponent(HTB.u));}catch(e){}
   if(!d||!d.ok){HTB.root.innerHTML=`<div class="htbEmpty">${htbE((d&&d.message)||"讀取失敗")}</div>`;return;}HTB.d=d;htbDraw();
   clearTimeout(HTB.tm);if(d.job&&d.job.run)HTB.tm=setTimeout(htbLoad,1500);}
 function htbBack(){if(typeof rvPhone==="function"&&!rvPhone()){if(typeof go==="function")go(0);return;}history.length>1?history.back():(location.hash="live");}
@@ -52746,7 +52746,7 @@ function g20Sheet(src,title,tot){document.getElementById("g20Ov")&&document.getE
       g20Toast("✔ "+j.message);G20.want=j.id;go.textContent="做好會出現在下面…";g20Poll();}};
   try{if(typeof KIT!=="undefined")KIT.swallow=false;}catch(x){}document.body.appendChild(o);g20Poll();}
 function g20Toast(m){if(typeof lvsToast==="function")lvsToast(m);else if(typeof toast==="function")toast(m);}
-async function g20Poll(){clearTimeout(G20.t);const box=document.getElementById("g20L");if(!box)return;let j=null;try{j=await (await fetch(g20B()+"/api/pc/g20",{cache:"no-store"})).json();}catch(e){}if(!j||!document.getElementById("g20L"))return;
+async function g20Poll(){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>g20Poll.apply(null,a_),{once:true});return;}clearTimeout(G20.t);const box=document.getElementById("g20L");if(!box)return;let j=null;try{j=await (await fetch(g20B()+"/api/pc/g20",{cache:"no-store"})).json();}catch(e){}if(!j||!document.getElementById("g20L"))return;
   const busy=j.cur||(j.q||[]).length;const fu=f=>`${g20B()}/api/pc/g20/file?f=${encodeURIComponent(f)}`;const mine=(j.done||[]).find(x=>x.id===G20.want);
   box.innerHTML=(j.cur?`<div class="g20St">⏳ ${g20E(j.cur.label)}：${g20E(j.cur.msg)}${(j.q||[]).length?`（後面還有 ${j.q.length} 個）`:""}</div>`:"")
    +(mine&&mine.err?`<div class="g20St bad">✖ ${g20E(mine.err)}</div>`:"")
@@ -52804,7 +52804,7 @@ function gfsBind(){const root=GFS.root,g=root.querySelector(".gfsG");let D=null;
       const body={sid:GFS.sid,C:GFS.C,R:GFS.R,ts:GFS.ts.map(x=>+x.toFixed(1)),dur:o.dur,spd:o.spd,fmts:[o.gif?"gif":null,o.mp4?"mp4":null].filter(Boolean),long:o.long,ratio:1.78,gap:0,fy:0,ord:GFS.ts.map((_,i)=>i),cap:gifCap()?1:0};
       let j=null;try{j=P_?await P_("/api/pc/mosaic",body):null;}catch(x){}const T=typeof toast==="function"?toast:(typeof lvsToast==="function"?lvsToast:alert);T((j&&j.ok?"✔ ":"✖ ")+((j&&j.message)||"沒有送出"));b.disabled=false;b.textContent=`▶ 開始輸出 ${GFS.C}×${GFS.R} 動圖`;gfsPoll();return;}
     const pv=t.closest("[data-pv]");if(pv){window.open(`${gfsB()}/api/pc/mosaic/file?f=${encodeURIComponent(pv.dataset.pv)}&pv=1`,"_blank","noopener");}};}
-async function gfsPoll(){clearTimeout(GFS.pt);const box=GFS.root&&GFS.root.querySelector("#gfsL");if(!box||!box.isConnected)return;let j=null;try{j=await (await fetch(`${gfsB()}/api/pc/mosaic?sid=${GFS.sid}`,{cache:"no-store"})).json();}catch(e){}if(!j||!box.isConnected)return;
+async function gfsPoll(){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>gfsPoll.apply(null,a_),{once:true});return;}clearTimeout(GFS.pt);const box=GFS.root&&GFS.root.querySelector("#gfsL");if(!box||!box.isConnected)return;let j=null;try{j=await (await fetch(`${gfsB()}/api/pc/mosaic?sid=${GFS.sid}`,{cache:"no-store"})).json();}catch(e){}if(!j||!box.isConnected)return;
   const fu=f=>`${gfsB()}/api/pc/mosaic/file?f=${encodeURIComponent(f)}`;const run=(j.jobs||[]).some(x=>x.state==="wait"||x.state==="run");
   const F=x=>(x.files||[]).map(f=>`<div class="gfsF">${f.fmt==="gif"?`<img loading="lazy" src="${fu(f.file)}&pv=1" alt="">`:""}<div><b>${f.fmt.toUpperCase()} · ${f.w}×${f.h}</b><small>${(f.size/1048576).toFixed(1)} MB${f.size>20*1024*1024?" ⚠ 超過 LINE 20 MB":""}</small><a class="pill" href="${fu(f.file)}" download="${gfsE(f.file)}">⬇ 下載</a></div></div>`).join("");
   box.innerHTML=(j.jobs||[]).slice(0,6).map(x=>`<div class="gfsJ ${x.state}"><b>${x.state==="done"?"✔":x.state==="fail"?"✖":"⏳"} ${x.C}×${x.R} · ${x.dur} 秒${x.spd>1?" ×"+x.spd:""}</b><small>${gfsE(x.msg||"")}</small>${F(x)}</div>`).join("")
@@ -52989,7 +52989,7 @@ async function oldPvOpen(id){if(OLD.pv[id]&&OLD.pv[id].shown){delete OLD.pv[id];
   let I=null;try{I=await oldGet("/api/pc/store/oldpv?id="+id);}catch(e){}
   if(!I||I.state!=="done"){const r=await oldPost("/api/pc/store/oldpv",{id});if(r&&r.ok===false){OLD.pv[id].err=r.message||"沒辦法開始";}}
   oldPvPoll(id);}
-async function oldPvPoll(id){clearTimeout(OLD.pt[id]);if(!OLD.pv[id]||!document.getElementById("oldOv"))return;let I=null;try{I=await oldGet("/api/pc/store/oldpv?id="+id);}catch(e){}
+async function oldPvPoll(id){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>oldPvPoll.apply(null,a_),{once:true});return;}clearTimeout(OLD.pt[id]);if(!OLD.pv[id]||!document.getElementById("oldOv"))return;let I=null;try{I=await oldGet("/api/pc/store/oldpv?id="+id);}catch(e){}
   if(!OLD.pv[id])return;OLD.pv[id].info=I;oldPvPaint(id);if(I&&(I.state==="run"||I.state==="wait"))OLD.pt[id]=setTimeout(()=>oldPvPoll(id),2500);}
 function oldPvPaint(id){const box=document.querySelector(`#oldOv [data-pvb="${id}"]`),P=OLD.pv[id];if(!box||!P)return;const I=P.info||{};
   const dur=+I.dur||0,done=+I.done||0,n=+I.n||0,pct=dur?Math.min(100,done/dur*100):0;
@@ -53026,7 +53026,7 @@ async function oldClick(e){const t=e.target;
     if(!confirm(`照「影片庫重整」的規則整理 ${g.name} 的 ${F.length} 個檔案？\n\n只會搬移／改名，不會刪除；每一步都有紀錄，可以在電腦版「影片庫重整」按「還原上次重整」放回去。`))return;
     const r=await oldPost("/api/pc/store/oldtidy",{ids:F.map(f=>f.id)});oldToast((r&&r.ok?"✔ ":"✖ ")+((r&&r.message)||""));if(r&&r.ok)oldTidyPoll();return;}
   const tg=t.closest("[data-tg]");if(tg){const k=tg.dataset.tg;OLD.open[k]=!OLD.open[k];oldDrawList();return;}}
-async function oldTidyPoll(){const el=document.getElementById("oldTd");if(!el)return;let s=null;try{s=await oldGet("/api/pc/store/oldtidy");}catch(e){}
+async function oldTidyPoll(){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>oldTidyPoll.apply(null,a_),{once:true});return;}const el=document.getElementById("oldTd");if(!el)return;let s=null;try{s=await oldGet("/api/pc/store/oldtidy");}catch(e){}
   el.hidden=false;el.textContent="🧹 "+((s&&s.msg)||"…");if(s&&s.running)setTimeout(oldTidyPoll,1500);else setTimeout(()=>oldLoad(true),1200);}
 document.addEventListener("click",e=>{const b=e.target.closest&&e.target.closest("[data-oldopen]");if(!b)return;e.preventDefault();e.stopPropagation();oldOpen();},true);
 
@@ -53172,7 +53172,7 @@ async function orpClick(e){const t=e.target;const o=t.closest("[data-o]");if(o){
   const sl=t.closest("#orpSel [data-sl]");if(sl){const k=sl.dataset.sl;if(k==="clr")orpSelClear();else if(k==="cut")orpCut();else if(k==="play"){const G=orpSegs(),r=ORP.L[ORP.cur];if(G.length&&r)orpPlay(r,G[0].s);}return;}
   const ti=t.closest(".orpTi");if(ti){if(orpLpT){orpLpT=false;return;}if(ORP.skip){ORP.skip=false;return;}orpPick(+ti.dataset.q);return;}}
 /* TK_V1.0.20 暫放區：永久刪除（3 次確認、只刪你看到的那批） */
-async function orpHoldPaint(){const el=ORP.root&&ORP.root.querySelector("#orpHold");if(!el)return;let j=null;try{j=await oldGet("/api/pc/store/orphhold");}catch(e){}
+async function orpHoldPaint(){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>orpHoldPaint.apply(null,a_),{once:true});return;}const el=ORP.root&&ORP.root.querySelector("#orpHold");if(!el)return;let j=null;try{j=await oldGet("/api/pc/store/orphhold");}catch(e){}
   if(!j||!j.ok){el.innerHTML="";return;}const pg=j.pg||{};ORP.hold=j;
   el.innerHTML=pg.running?`<span>🗑 ${oldE(pg.msg||"刪除中…")}</span>`:j.n?`<span>📦 暫放區 <b>${j.n}</b> 個 · ${oldGB(j.bytes)}</span><button data-hpurge="1">🗑 永久刪除</button>`:(pg.msg?`<span>${oldE(pg.msg)}</span>`:"");
   if(pg.running){clearTimeout(ORP.ht);ORP.ht=setTimeout(orpHoldPaint,1500);}}
@@ -53181,7 +53181,7 @@ async function orpHoldPurge(){const h=ORP.hold;if(!h||!h.n)return;const gb=oldGB
   if(!confirm(`再確認一次：真的不要這 ${h.n} 個、${gb}？`))return;
   if(prompt(`最後一次：請輸入「刪除」兩個字`)!=="刪除"){oldToast("沒有刪");return;}
   const j=await oldPost("/api/pc/store/orphpurge",{sig:h.sig});oldToast((j&&j.ok?"✔ ":"✖ ")+((j&&j.message)||""));orpHoldPaint();}
-async function orpMvPoll(){let s=null;try{s=await oldGet("/api/pc/store/orphmove");}catch(e){}const T=ORP.root&&ORP.root.querySelector("#orpCnt");if(T&&s)T.textContent=s.msg||"";if(s&&s.running){setTimeout(orpMvPoll,1500);return;}if(s&&s.msg)oldToast(s.msg);orpLoad();orpHoldPaint();}
+async function orpMvPoll(){if(document.hidden){const a_=arguments;document.addEventListener('visibilitychange',()=>orpMvPoll.apply(null,a_),{once:true});return;}let s=null;try{s=await oldGet("/api/pc/store/orphmove");}catch(e){}const T=ORP.root&&ORP.root.querySelector("#orpCnt");if(T&&s)T.textContent=s.msg||"";if(s&&s.running){setTimeout(orpMvPoll,1500);return;}if(s&&s.msg)oldToast(s.msg);orpLoad();orpHoldPaint();}
 document.addEventListener("click",e=>{const b=e.target.closest&&e.target.closest("[data-orph]");if(!b)return;e.preventDefault();e.stopPropagation();const root=b.closest(".lvsPage")||(typeof LVS!=="undefined"&&LVS.root);if(root)orpOpen(root);},true);
 /* OLD-END */
 /* PHR-BEGIN */
