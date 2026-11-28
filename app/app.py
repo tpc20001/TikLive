@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.50"
+APP_VERSION = "1.2.51"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -37873,7 +37873,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         if sh is not None:
             try:                                                                # V1.2.28 畫面突然暗到不到一半、但不是黑的：可能是小米防誤觸那層（字讀不到時的備案）→ 按一次音量+（10 分鐘最多一次）
                 pm_ = float(cur.get('w_m') or 0)
-                if pm_ > 40 and 10 <= sh[0] < pm_ * 0.45 and fg_ in self.PFX_PKGS and now - float(cur.get('pk_t') or 0) > 600 and now - float(self._pfx_S().get('pocket_t') or 0) > 30:
+                if pm_ > 40 and 10 <= sh[0] < pm_ * 0.45 and (fg_ in self.PFX_PKGS or re.search(r'systemui|miui|android$', fg_ or '', re.I)) and now - float(cur.get('pk_t') or 0) > 600 and now - float(self._pfx_S().get('pocket_t') or 0) > 30:
                     cur['pk_t'] = now; v0_ = self._pfx_vol(adb, ser); self._pfx_sh(adb, ser, 'input keyevent KEYCODE_VOLUME_UP', 8); time.sleep(0.8)
                     if v0_ is not None: self._pfx_vol(adb, ser, v0_)
                     if not self._pfx_S().get('dim_win'): self._pfx_S()['dim_win'] = 1; self._pfx_winlog(adb, ser, '變暗')
