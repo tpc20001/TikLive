@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.24"
+APP_VERSION = "1.2.25"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -22732,6 +22732,10 @@ try { NLConnect | Out-Null; Unset
     def _cg_tick(self):
         """Every minute on the window thread: settings → engines, which streamers are quiet, how much TikTok is refusing → level."""
         self._cg_cfg_push(); G = _cg(); c = G['cfg']; now = time.time()
+        if G.get('patch_code') is not _cg_patch.__code__:                        # V1.2.25 輕量更新換了 _cg_patch 的內容 → 重新裝一次（可以重複裝），新的連線規則馬上生效
+            G['patch_code'] = _cg_patch.__code__
+            try: _cg_patch()
+            except Exception: pass
         try: self._smart_tick()                                                 # V0.7.42.001 智慧排程
         except Exception: pass
         try: self._uptime_mark()                                                # V0.7.42.012 記程式在跑的時間（錄製檢討用）
@@ -22770,9 +22774,14 @@ try { NLConnect | Out-Null; Unset
         if c.get('on', True):
             if n5 >= 30 and r5 >= 0.6 and lv < 2 and since >= 300: new = lv + 1
             elif lv == 2 and n10 >= 15 and r10 <= 0.25 and since >= 600: new = 1
-            elif lv == 1 and n10 >= 15 and r10 <= 0.10 and since >= 1800: new = 0    # TK_V1.0.98 回全速要更保守：放慢 30 分鐘、拒絕 ≤10%（11/12 回全速後 3～5 分鐘又被擋 50%）
+            elif lv == 1 and n10 >= 15 and r10 <= 0.10 and since >= 1800 * 2 ** min(3, int(G.get('l0_fail') or 0)): new = 0    # TK_V1.0.98 回全速要更保守；V1.2.25 回全速沒多久又被擋，下次就等更久（30→60→120→240 分）
+            if lv == 0 and since >= 7200: G['l0_fail'] = 0                          # V1.2.25 全速撐過 2 小時 → 重新算
         elif lv: new = 0
         if new != lv:
+            if lv == 1 and new == 0: G['l0_try'] = now
+            elif lv == 0 and new > 0 and now - float(G.get('l0_try') or 0) < 1800:   # V1.2.25 LOG：回全速 5 分鐘就又被擋 75%，一天來回好幾次
+                G['l0_fail'] = int(G.get('l0_fail') or 0) + 1
+                self._wd_log(f'連線管控：回全速 {(now - float(G["l0_try"])) / 60:.0f} 分鐘就又被擋（第 {G["l0_fail"]} 次）→ 下次要先放慢 {30 * 2 ** min(3, G["l0_fail"])} 分鐘才試著回全速')
             G['level'] = new; G['level_t'] = now; G['changes'].append((now, lv, new, round(r5 * 100)))
             try: self.ui_settings.setValue('cg_level_saved', json.dumps({'lv': new, 't': now}))
             except Exception: pass
@@ -23648,7 +23657,7 @@ try { NLConnect | Out-Null; Unset
         return {'on': bool(c.get('on', True)), 'level': lv, 'level_name': _CG_LEVEL_NAME[lv], 'level_min': round((now - float(G['level_t'] or now)) / 60),
                 'rate': int(c.get('rate', 80)), 'rate_now': int(c.get('rate', 80) * _CG_LEVEL_RATE[lv]), 'att_min': att1, 'http_min': http_n,
                 'block_pct': round(r5 * 100), 'n5': n5, 'res10': dict(res), 'q': [len(x) for x in G['q']], 'wait_avg': round(sum(waits) / len(waits)) if waits else 0,
-                'stale': len(G['stale']), 'stale_mult': int(c.get('stale_mult', 3)), 'stale_days': int(c.get('stale_days', 7)), 'dead': sum(1 for v in list(G['dead'].values()) if v >= 3),
+                'stale': len(G['stale']), 'stale_mult': int(c.get('stale_mult', 3)), 'stale_days': int(c.get('stale_days', 7)), 'dead': sum(1 for v in list(G['dead'].values()) if v >= 3), 'probe_n': int(G.get('probe_n') or 0), 'l0_fail': int(G.get('l0_fail') or 0), 'l0_wait': 30 * 2 ** min(3, int(G.get('l0_fail') or 0)),
                 'api_first': bool(c.get('api_first', True)), 'route': {'api': rt('api'), 'html': rt('html')},
                 'sign': {'day': S.get('day'), 'n': int(S.get('n') or 0), 'ok': int(S.get('ok') or 0), 'lim': int(S.get('lim') or 0),
                          'limited': bool(S.get('lim_t') and now - float(S['lim_t']) < 900), 'waiting': sum(1 for t in list(G['sign_err'].values()) if now - t < 3600)},
@@ -25374,7 +25383,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
         try: ci = self._conn_info(list(getattr(self, '_roster_snapshot', None) or self._roster_ids()))
         except Exception as ex: ci = {'error': str(ex)}
         mem = [{'t': a, 'u': u, 'cat': c} for a, u, c in list(self.__dict__.get('_conn_log') or []) if t0 <= a <= t1]
-        files['conn_now.json'] = json.dumps({'snapshot_at': fmt(time.time()), 'conn_info': ci, 'conn_log_in_window': mem}, ensure_ascii=False, indent=1, default=str)
+        try: cgi = self._cg_info()                                               # V1.2.25 連線管控現況（放慢等級、兩種查法成功率、排隊…）
+        except Exception as ex: cgi = {'error': str(ex)}
+        files['conn_now.json'] = json.dumps({'snapshot_at': fmt(time.time()), 'conn_info': ci, 'cg_info': cgi, 'conn_log_in_window': mem}, ensure_ascii=False, indent=1, default=str)
         try:
             cfg = {k: v for k, v in dict(self._cfg).items() if not any(x in k.lower() for x in ('pw', 'pass', 'token', 'cookie', 'secret'))}
         except Exception: cfg = {}
@@ -25597,6 +25608,14 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 h = datetime.fromtimestamp(m['t']).hour; st = m.get('status') or {}; hr[h][0] += sum(int(v) for k, v in (m.get('http') or {}).items() if 'api-live/user/room' in k); hr[h][1] += int(st.get('403') or 0)
             if any(v[0] >= 20 for v in hr.values()): o.append('    每小時 找直播間被拒（403）比例：' + ' '.join(f'{h:02d}點{v[1] * 100 // max(1, v[0])}%' for h, v in sorted(hr.items()) if v[0] >= 20))
         except Exception: pass
+        try:                                                                    # V1.2.25 現在（最近 15 分鐘）兩種查法哪個比較好
+            G_ = _cg(); n_ = time.time()
+            if time.time() - t1 < 900:
+                rt_ = {m_: [ok_ for t_, ok_ in list(G_['route'][m_]) if n_ - t_ < 900] for m_ in ('api', 'html')}
+                f_ = lambda L: f'{sum(L) * 100 // len(L)}%（{len(L)} 次）' if L else '—'
+                o.append(f"    現在 15 分鐘：輕量 API 成功 {f_(rt_['api'])}、整頁抓取成功 {f_(rt_['html'])}；放慢等級 {int(G_['level'])}" +
+                         (f"；回全速沒多久又被擋 {G_.get('l0_fail')} 次" if G_.get('l0_fail') else '') + (f"；偷試另一種查法 {G_.get('probe_n')} 次" if G_.get('probe_n') else ''))
+        except Exception: pass
         try:                                                                    # V1.2.22 現在的主程式：記憶體、執行緒（最多的是哪幾種）
             import collections as _co
             rss = 0
@@ -25618,14 +25637,17 @@ $r | ConvertTo-Json -Depth 4 -Compress
             o.append(f'💽 SSD 上轉好、還沒搬到硬碟：{n_} 場、{b_ / 1e9:.1f} GB（最久放了 {old_:.0f} 小時）；搬檔排隊 {qn_} 場' + ('　→ 放超過 6 小時：搬檔可能卡住' if old_ > 6 else ''))
         except Exception: pass
         try:
-            M = defaultdict(lambda: [0, 0, 0.0])
+            M = defaultdict(lambda: [0, 0, 0.0]); RS = Counter(); RH = [0.0]; RT = defaultdict(list)     # V1.2.25 重新壓縮原因、倍速
             for ln in _merge_speed_log().read_text(encoding='utf-8').splitlines():
                 try: d = json.loads(ln)
                 except Exception: continue
                 if t0 <= float(d.get('t') or 0) <= t1:
                     k = d.get('mode', '?') + ('／' + {'h264_nvenc': '顯示卡', 'libx264': 'CPU'}.get(d.get('enc'), d.get('enc')) if d.get('enc') else '')
                     M[k][0] += 1; M[k][1] += int(d.get('bytes') or 0); M[k][2] += float(d.get('secs') or 0)
-            if M: o.append('🎬 轉檔：' + '；'.join(f'{k} {v[0]} 支、平均 {v[1] / 1e6 / max(1.0, v[2]):.1f} MB/s' for k, v in M.items()))
+                    if d.get('mode') == 'encode' and d.get('dims') is not None: RS[len(d.get('dims') or []) > 1] += 1; RH[0] += float(d.get('secs') or 0) / 3600
+                    if d.get('dur') and d.get('secs'): RT[k].append(float(d['dur']) / max(1.0, float(d['secs'])))
+            if M: o.append('🎬 轉檔：' + '；'.join(f'{k} {v[0]} 支、平均 {v[1] / 1e6 / max(1.0, v[2]):.1f} MB/s' + (f'（約 {sum(RT[k]) / len(RT[k]):.1f} 倍速）' if RT.get(k) else '') for k, v in M.items()))
+            if sum(RS.values()): o.append(f'    重新壓縮的原因：畫面大小真的有變 {RS[True]} 支、大小一樣只是影片標頭不同 {RS[False]} 支（重新壓縮共花 {RH[0]:.1f} 小時）')
         except Exception: pass
         o.append('')
         return o
@@ -33363,7 +33385,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             c=_merge_queue().get(_mq_keys(folder)[1]) or {}
             if c.get('t0'):
                 with open(_merge_speed_log(),'a',encoding='utf-8') as fh:
-                    fh.write(json.dumps({'t':round(time.time()),'bytes':int(c.get('bytes') or 0),'secs':round(time.time()-float(c['t0']),1),'mode':mode,'files':len(scans),'user':user,'ssd':1 if on_ssd else 0,'enc':str(c.get('enc') or ''),'dur':round(float(c.get('dur') or 0))},ensure_ascii=False)+'\n')   # V1.2.16 記用哪個壓縮器（enc）、影片長度（dur）：LOG 看得出顯示卡還是 CPU
+                    fh.write(json.dumps({'t':round(time.time()),'bytes':int(c.get('bytes') or 0),'secs':round(time.time()-float(c['t0']),1),'mode':mode,'files':len(scans),'user':user,'ssd':1 if on_ssd else 0,'enc':str(c.get('enc') or ''),'dur':round(float(c.get('dur') or 0)),**({'dims':sorted({f'{w_}x{h_}' for w_,h_ in dims})[:6],'vh':len({bytes(x_['data']) for _f,_x,st_ in scans for x_ in st_.get('vh',[])})} if mode=='encode' else {})},ensure_ascii=False)+'\n')   # V1.2.25 重新壓縮的原因：畫面大小真的有變（dims 不只一種），還是只有標頭內容不同（vh 多個、dims 一種）   # V1.2.16 記用哪個壓縮器（enc）、影片長度（dur）：LOG 看得出顯示卡還是 CPU
                 try:                                             # TK_V0.8.34.019 只留最近 500 筆（以前只增不減）
                     lp_=_merge_speed_log()
                     if lp_.stat().st_size>400_000:
@@ -42717,6 +42739,17 @@ exit /b 1
             self._video_stop(u,'ENDED')
         if self.view_context!='live' or u != self.current_username:
             return
+        L_=self.__dict__.get('_lsr_live')
+        if L_ is not None:                                                       # V1.2.25 這一場還在背景讀：表格要用的先放旁邊
+            if time.time()-L_['t']>45: self._lsr_live=None                       # 讀太久（出錯）：不等了，照常顯示
+            elif k in ('comment','song','level_up','gift','join','like','viewer_sample'):
+                L_['buf'].append((k,d))
+                if k=='gift':
+                    try: self._gfx_live(d)                                       # 送禮動畫不用等
+                    except Exception: pass
+                return
+            elif k=='connected' and not d.get('resumed'):                         # 讀的途中開了新的一場：舊的不要了
+                self._lsr_live=None; self._lsr_gen=self.__dict__.get('_lsr_gen',0)+1
         if k=='waiting': self.set_status('WAITING','#8994a4'); self.statusBar().showMessage(d.get('message','等待主播開播…'))
         elif k=='connecting': self.set_status('CONNECTING','#f0ad4e'); self.statusBar().showMessage('正在連線…')
         elif k=='grace':
@@ -42918,8 +42951,9 @@ exit /b 1
         try: self._ov_add('gift', (float(d.get('real_ts') or time.time()), int(d.get('diamonds') or 0)))
         except Exception: pass
         self.gift_rows.append(d); self._append_live_row(self.gift_table,row); self._append_live_row(self.dash_gift,[fmt_real_sec(d['real_ts']),d.get('nickname',''),f"{d.get('gift_name','')} × {d.get('count',1)}",d.get('diamonds') or '—']); self._identity_dirty=True
-        try: self._gfx_live(d)                                                     # V0.6.46 送禮動畫
-        except Exception: pass
+        if not self.__dict__.get('_lsr_nogfx'):                                    # V1.2.25 背景讀完補上的禮物：動畫當時已經播過
+            try: self._gfx_live(d)                                                 # V0.6.46 送禮動畫
+            except Exception: pass
 
     # ---------------- V0.6.46 送禮動畫（主程式畫面；手機／網頁版的在 webpc_api.py + 共用 JS） ----------------
     def _gfx_cfg(self):
@@ -43112,7 +43146,54 @@ exit /b 1
         else: self.status='OFFLINE'; self.live_start=None; self.session_id=None
         self._clear_session_models()
         self.__dict__['_lsr_gen']=self.__dict__.get('_lsr_gen',0)+1            # TK_V0.8.34.023 還在背景讀的歷史場次結果丟掉（回到直播了）
-        if self.session_id: self._load_session_rows(self.session_id,False)     # 直播中照舊當場讀（背景讀的話，讀的這幾秒進來的新留言會被蓋掉）
+        self._lsr_live=None
+        if self.session_id:                                                      # V1.2.25 直播中也改在背景讀（LOG：換分頁卡 3～4 秒）；讀的這幾秒進來的留言／禮物先放旁邊，讀好再補上（不會被蓋掉）
+            L_=self._lsr_live={'sid':self.session_id,'buf':[],'t':time.time()}
+            self.statusBar().showMessage('讀取本場紀錄…')
+            self._load_session_rows_async(self.session_id,False,lambda L_=L_: self._lsr_replay(L_))
+
+    def _lsr_replay(self, L):
+        """V1.2.25 直播中的場次在背景讀好、表格填好之後：把讀的途中進來的留言／禮物／進場／點讚…補上（資料庫已經有的跳過）."""
+        if self.__dict__.get('_lsr_live') is not L: return
+        self._lsr_live=None
+        buf=L.get('buf') or []
+        if not buf: return
+        ts_=lambda r: float(r.get('real_ts') or 0)
+        keyf={'comment':lambda d:(d.get('username'),d.get('comment')),'gift':lambda d:(d.get('username'),d.get('gift_name'),d.get('count')),
+              'join':lambda d:(d.get('username'),d.get('nickname')),'song':lambda d:(d.get('username'),d.get('song')),'level_up':lambda d:(d.get('username'),d.get('new_level'))}
+        lists={'comment':self.chat_rows,'gift':self.gift_rows,'join':self.join_rows,'song':self.song_rows,'level_up':self.levelup_rows}
+        edge={}
+        for k,rows in lists.items():                                            # 資料庫最後一筆的時間，跟那個時間的幾筆（同一秒的不要重複）
+            t=0.0; ks=set()
+            try:
+                t=max(ts_(r) for r in rows[-50:]) if rows else 0.0
+                for r in rows[-50:]:
+                    if abs(ts_(r)-t)<=0.002: ks.add(keyf[k](r))
+            except Exception: pass
+            edge[k]=(t,ks)
+        try: lk=max(x[0] for x in self._ov['like'][-50:]) if self._ov.get('like') else 0.0
+        except Exception: lk=0.0
+        try: vs=float(self.viewer_samples[-1][0]) if self.viewer_samples else 0.0
+        except Exception: vs=0.0
+        add={'comment':self.add_comment,'song':self.add_song,'level_up':self.add_levelup,'gift':self.add_gift,'join':self.add_join}
+        n=0; self._lsr_nogfx=True
+        try:
+            for k,d in buf:
+                try:
+                    if k=='viewer_sample':
+                        if float(d.get('ts',0) or 0)<=vs: continue
+                        self.viewer_samples.append((d.get('ts',time.time()),int(d.get('viewers',0)))); self.viewer_chart.set_samples(self.viewer_samples); n+=1; continue
+                    t_=float(d.get('real_ts') or 0)
+                    if k=='like':
+                        if t_<=lk: continue
+                        self.add_like(d); n+=1; continue
+                    t,ks=edge[k]
+                    if t_<t-0.002 or (abs(t_-t)<=0.002 and keyf[k](d) in ks): continue
+                    add[k](d); n+=1
+                except Exception: pass
+        finally: self._lsr_nogfx=False
+        try: self.statusBar().showMessage(f'本場紀錄已讀好' + (f'（讀的途中進來的 {n} 筆已補上）' if n else ''), 4000)
+        except Exception: pass
 
     def _load_session_rows(self,sid,history=False):
         try: data=self._load_session_fetch(sid)
@@ -43221,7 +43302,7 @@ exit /b 1
         except Exception as e: self.statusBar().showMessage('載入歷史資料失敗：'+str(e))
 
     def load_history_session(self,sid):
-        self._show_history_video(True)
+        self._show_history_video(True); self._lsr_live=None
         self.view_context='history'; self.history_session_id=int(sid); self.current_stats={}
         def after(sid=int(sid)):                                                # TK_V0.8.34.023 資料庫在背景讀好之後才做（畫面不等）
             if getattr(self,'view_context','')!='history' or int(getattr(self,'history_session_id',0) or 0)!=sid: return
@@ -43627,6 +43708,9 @@ exit /b 1
             try:
                 rows=query()
                 if rows is not None: rows=_PreparedRows(tuple('' if x is None else str(x) for x in r) for r in rows)   # V1.2.14 逐格轉字串在背景做（LOG：換表格時畫面卡 13～15 秒）
+                if rows is not None:
+                    try: rows.h=hash(tuple(rows))                                # V1.2.25 跟上次一模一樣就不用重填（每 20 秒重填一次會卡、還會跳回最上面）
+                    except Exception: pass
             finally:
                 self._ui_call.emit(lambda r=rows,k=kind: self._apply_bg_rows(k,r))
         threading.Thread(target=worker,daemon=True).start()
@@ -43639,12 +43723,20 @@ exit /b 1
         if kind=='sessions':
             if getattr(self,'_sessions_query_filter',None)!=getattr(self,'_sessions_user_filter',None) or (getattr(self,'_sessions_query_q','') or '')!=(getattr(self,'_sessions_search_q','') or '') or (getattr(self,'_sessions_query_cat','') or '')!=(getattr(self,'_sessions_cat','') or ''):
                 self._bg_refresh('sessions'); return       # filter / search changed while loading: reload
-            self.fill_model(self.session_model,rows)
+            self._bg_fill(kind,self.session_model,rows)
         elif kind=='gifters':
             if self._gf_state().get('reset'): self._gf_reload(); return     # V0.6.17 sort / search changed while loading
-            self.fill_model(self.gifter_model,rows); self._update_identity_targets([(self.gifter_model,self.gifter_view,1)]); self._gf_label()
+            if self._bg_fill(kind,self.gifter_model,rows): self._update_identity_targets([(self.gifter_model,self.gifter_view,1)]); self._gf_label()
         elif kind=='profiles':
-            self.fill_model(self.profile_model,rows); self._update_identity_targets([(self.profile_model,self.profile_view,0)])
+            if self._bg_fill(kind,self.profile_model,rows): self._update_identity_targets([(self.profile_model,self.profile_view,0)])
+
+    def _bg_fill(self, kind, model, rows):
+        """V1.2.25 背景查好的表格：內容跟上次填的一樣、表格也沒被別的地方動過 → 不重填（False）."""
+        H=self.__dict__.setdefault('_bg_hash',{}); h=getattr(rows,'h',None)
+        if h is not None and H.get(kind)==(h,id(model.rows),len(model.rows)): return False
+        self.fill_model(model,rows)
+        if h is not None: H[kind]=(h,id(model.rows),len(model.rows))
+        return True
 
     def _query_profiles_rows(self):
         con=None
@@ -48188,7 +48280,7 @@ def _cg_patch():
                 if se and now - se < 3600: return max(d, float(c.get('sign_wait', 180)))     # live, but the sign server said no today
                 if self.priority_mode: return max(d, 20.0 * int(G['level'])) if G['level'] else d     # 重點：被限制時至少 20／40 秒
                 if u in G['stale']: m = max(m, float(c.get('stale_mult', 3)))
-                if G['dead'].get(u, 0) >= 3: m = max(m, 10.0)
+                if G['dead'].get(u, 0) >= 3: m = max(m, 30.0 if G['dead'][u] >= 30 else 10.0)     # V1.2.25 連續 30 次都說帳號不存在（LOG：一天 87 次）→ ×30（最多 30 分鐘查一次）
                 try:                                                    # V0.7.42.001 智慧排程：熱區快一點（不低於 30 秒）、冷門時段慢一點
                     sm = (G.get('smart') or {}).get(u); sc = G.get('smart_cfg') or {}
                     if sm == 'cold': m = max(m, float(sc.get('cold', 2)))
@@ -48247,11 +48339,13 @@ def _cg_patch():
             if not c.get('on', True) or not c.get('api_first', True): return await via_html(self, unique_id)
             now = time.time(); rate = lambda m: (lambda L: (sum(1 for _t, ok in L if ok) / len(L), len(L)) if L else (1.0, 0))([x for x in list(G['route'][m]) if now - x[0] < 900])
             (ra, na), (rh, nh) = rate('api'), rate('html')
-            order = ['html', 'api'] if (na >= 15 and nh >= 5 and rh - ra > 0.3) else ['api', 'html']
+            order = ['html', 'api'] if (na >= 8 and nh >= 5 and rh - ra > 0.3) else ['api', 'html']     # V1.2.25 15→8：放慢時另一種只有偷試的樣本
             fallback = int(G['level']) == 0
             last = None
             for i, m in enumerate(order):
-                if i and not fallback: break
+                if i and not fallback:                                          # V1.2.25 放慢時本來不試第二種 → 永遠不知道另一種是不是比較好；每分鐘最多偷試 1 次（樣本不夠時）
+                    if not isinstance(last, FailedParseRoomIdError) or (nh if m == 'html' else na) >= 12 or now - float(G.get('probe_t') or 0) < 60: break
+                    G['probe_t'] = now; G['probe_n'] = int(G.get('probe_n') or 0) + 1
                 try:
                     if m == 'api': r = await via_api(self, unique_id)
                     else: r = await via_html(self, unique_id)
