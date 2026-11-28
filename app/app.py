@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.22"
+APP_VERSION = "1.2.23"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -3339,14 +3339,17 @@ class MainWindow(QMainWindow):
         grace=getattr(self,'stream_grace',{})
         live_users={u for u in self.engines.keys() if self.engine_status.get(u)=='LIVE' or u in grace}
         # Remove stale LIVE tabs and the startup placeholder as soon as a real room is LIVE.
-        for i in range(self.stream_tabs.count()-1,-1,-1):
-            kind=self._tab_kind(i)
-            w=self.stream_tabs.widget(i)
-            u=str(w.property('username') or '') if w else ''
-            if kind=='placeholder':
-                if live_users: self.stream_tabs.removeTab(i)
-            elif kind=='live' and u not in live_users:
-                self.stream_tabs.removeTab(i)
+        self._tab_auto=True                                                     # V1.2.23 程式自己拿掉分頁（下播）→ 換到的那一場先不一定要馬上讀
+        try:
+            for i in range(self.stream_tabs.count()-1,-1,-1):
+                kind=self._tab_kind(i)
+                w=self.stream_tabs.widget(i)
+                u=str(w.property('username') or '') if w else ''
+                if kind=='placeholder':
+                    if live_users: self.stream_tabs.removeTab(i)
+                elif kind=='live' and u not in live_users:
+                    self.stream_tabs.removeTab(i)
+        finally: self._tab_auto=False
         # Before the first room connects, never show a stale streamer name.
         if not live_users and not self._history_tab_indices():
             if not any(self._tab_kind(i)=='placeholder' for i in range(self.stream_tabs.count())):
@@ -3428,6 +3431,8 @@ class MainWindow(QMainWindow):
             return
         w=self.stream_tabs.widget(index); u=str(w.property('username') or '') if w else ''
         if u:
+            if self.__dict__.get('_tab_auto') and not self.isActiveWindow():     # V1.2.23 下播自動換分頁、視窗又不在前面：讀那一場要好幾秒（LOG：卡 4 秒）→ 等你切回視窗再讀
+                self._tab_pending=u; return
             self.tab_gift_alert.discard(u); self.switch_streamer(u)
             bar=self.stream_tabs.tabBar()
             if isinstance(bar,CompactTabBar): bar.clear_alert(index)
@@ -42625,11 +42630,19 @@ exit /b 1
             if time.perf_counter()-t_pump>0.12:
                 self._pump_rr=(k0+i_e+1)%nE; self._pump_over=self.__dict__.get('_pump_over',0)+1; break
         # V0.4.51: coalesce per-event UI work into one pass per 200 ms tick.
-        if self._pending_scroll:
+        vis_=self.isVisible() and not self.isMinimized()                         # V1.2.23 視窗縮小／藏起來：不捲表格（LOG：大表格捲到底一次卡 3 秒），回來再捲
+        if self._pending_scroll and vis_:
             views=list(self._pending_scroll); self._pending_scroll.clear()
             for v in views:
                 try: v.scrollToBottom()
                 except Exception: pass
+        if vis_ and self.__dict__.get('_tab_pending') and self.isActiveWindow():   # V1.2.23 下播換分頁時視窗不在前面 → 先不讀；切回來才讀那一場
+            u_=self._tab_pending; self._tab_pending=None
+            try:
+                w_=self.stream_tabs.currentWidget()
+                if w_ is not None and str(w_.property('username') or '')==u_ and u_!=self.current_username:
+                    self.tab_gift_alert.discard(u_); self.switch_streamer(u_)
+            except Exception: pass
         if self._identity_dirty:
             self._identity_dirty=False; self.update_identity_columns()
         if hasattr(self,'streamer_grid') and self.pages.currentIndex()==10 and time.time()-self._streamer_grid_last>=2.0:
