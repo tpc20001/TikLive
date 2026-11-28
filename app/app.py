@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.51"
+APP_VERSION = "1.2.52"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -25596,19 +25596,33 @@ $r | ConvertTo-Json -Depth 4 -Compress
         from collections import Counter, defaultdict
         o = ['── 🩺 自動診斷（先看這裡）──']
         TS = re.compile(r'^\[(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\] ?(.*)$')
+        s0_ = datetime.fromtimestamp(t0).strftime('%Y-%m-%d %H:%M:%S'); s1_ = datetime.fromtimestamp(t1).strftime('%Y-%m-%d %H:%M:%S'); EC_ = {}
         def ents(name):
-            try: txt = (LOG_DIR / name).read_text(encoding='utf-8', errors='replace')
-            except Exception: return []
+            """V1.2.52 只讀檔案最後面涵蓋這段時間的部分（以前整個檔讀進來、每行轉時間；update_log 可能幾十 MB，一次診斷讀 3 次），同一次診斷記住結果."""
+            if name in EC_: return EC_[name]
+            try:
+                fp_ = LOG_DIR / name; sz_ = fp_.stat().st_size; n_ = 4 << 20
+                with open(fp_, 'rb') as fh:
+                    while True:
+                        st_ = max(0, sz_ - n_); fh.seek(st_); raw_ = fh.read(sz_ - st_)
+                        m0_ = re.search(rb'\n\[(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\]', raw_[:262144]) if st_ else None
+                        if st_ == 0 or (m0_ and m0_.group(1).decode() < s0_) or n_ >= (256 << 20): break   # 讀到的最前面已經比這段時間早（或讀了 256 MB）
+                        n_ *= 2
+                txt = raw_.decode('utf-8', errors='replace')
+                if st_: txt = txt[txt.find('\n') + 1:]
+            except Exception: EC_[name] = []; return []
             out = []; cur = None
             for ln in txt.splitlines():
                 m = TS.match(ln)
                 if m:
-                    try: t = datetime.strptime(m.group(1), '%Y-%m-%d %H:%M:%S').timestamp()
-                    except Exception: t = 0
-                    cur = [t, m.group(2), []]
-                    if t0 <= t <= t1: out.append(cur)
+                    ts_ = m.group(1)
+                    if s0_ <= ts_ <= s1_:
+                        try: t = datetime.strptime(ts_, '%Y-%m-%d %H:%M:%S').timestamp()
+                        except Exception: t = 0
+                        cur = [t, m.group(2), []]; out.append(cur)
+                    else: cur = None
                 elif cur is not None: cur[2].append(ln)
-            return out
+            EC_[name] = out; return out
         norm = lambda x: re.sub(r'\d+', 'N', re.sub(r"'[^']{12,}'", "'…'", x))[:110]
         GEN = {'run_app', 'run_path', '_run_module_code', '_run_code', 'main', '<module>', 'exec', 'run', '_bootstrap', '_bootstrap_inner', 'work', '_loop'}
         try:
