@@ -406,7 +406,8 @@ def route(win, sock, method, rest, q, body):
     if name == 'issues': J(win._issues_info()); return True
     if name == 'cg': J(win._cg_info()); return True                         # V0.6.47 連線管控
     if name == 'cg/roster': J(win._roster_review()); return True            # V0.6.47 主播縮編建議               # V0.6.28 LOG 與問題：自我檢查、網路狀態、自動處理紀錄、異常
-    if name == 'logup': J(win._logup_info()); return True                    # V1.2.12 LOG 上傳 GitHub 設定（只讀；權杖只給最後 4 碼）
+    if name == 'logup': J(win._logup_info()); return True
+    if name == 'logx/diag': h_ = q.get('h', '24'); _bg(win, sock, lambda: win._logx_diag_now(float(h_ or 24))); return True   # V1.2.18 🩺 自動診斷（只讀）                    # V1.2.12 LOG 上傳 GitHub 設定（只讀；權杖只給最後 4 碼）
     if name == 'logx/list': J({'items': win._logx_list(), 'now': time.time()}); return True           # V0.6.23 匯出 LOG
     if name == 'logx/make':
         now = time.time(); t1 = float(q.get('to') or now); t0 = float(q.get('from') or (t1 - float(q.get('min') or 30) * 60))

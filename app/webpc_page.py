@@ -1953,7 +1953,7 @@ _SH_C = {}
 
 
 def _sh_html(G):
-    src = G.get('WEB_DASHBOARD_HTML', '') or ''
+    src = (G['_phone_html']() if callable(G.get('_phone_html')) else G.get('WEB_DASHBOARD_HTML', '')) or ''   # V1.2.18 手機頁搬到 webphone_page.py
     k = (id(src), len(src))
     if k in _SH_C: return _SH_C[k]
     def one(m):
