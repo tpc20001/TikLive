@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.39"
+APP_VERSION = "1.2.40"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -25524,7 +25524,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
 
     def _logup_tick(self):
         """每分鐘看一次（畫面執行緒，只讀一個小檔）；真的要連網路的都丟背景.
-        ① 每天自動：開了自動、有權杖、凌晨 4～6 點、今天還沒自動傳過 → 傳最近 24 小時（手動傳過不算，V1.2.16）.
+        ① 每天自動：開了自動、有權杖、凌晨 4 點以後、今天還沒自動傳成功 → 傳最近 24 小時（手動傳過不算，V1.2.16；V1.2.40 錯過 4～6 點會補、失敗 30 分鐘再試）.
+        ② 出大問題（V1.2.31，要打勾）.
 """
         if time.time() - float(self.__dict__.get('_logup_chk_t') or 0) < 600: return
         self._logup_chk_t = time.time()
@@ -25543,9 +25544,14 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     threading.Thread(target=self._logup_run, args=(6.0, '出問題自動：' + str(hit_.get('title') or '')[:30]), daemon=True, name='TikLiveLogUp').start(); return
             except Exception: pass
         day = datetime.now().strftime('%Y-%m-%d')
-        if c.get('auto') and 4 <= datetime.now().hour < 6 and c.get('auto_day') != day:
-            c['auto_day'] = day; self._logup_save(c)
-            threading.Thread(target=self._logup_run, args=(24.0, '每天自動'), daemon=True, name='TikLiveLogUp').start()
+        # V1.2.40 每天自動：凌晨 4 點以後、今天還沒成功傳過就傳（4～6 點電腦沒開／斷電，白天開著也會補傳）；失敗 30 分鐘後再試，一天最多 4 次
+        if c.get('auto') and datetime.now().hour >= 4 and c.get('auto_day') != day and (c.get('auto_try_day') != day or (int(c.get('auto_try') or 0) < 4 and now_ - float(c.get('auto_try_t') or 0) > 1800)):
+            c['auto_try'] = (int(c.get('auto_try') or 0) + 1) if c.get('auto_try_day') == day else 1; c['auto_try_day'] = day; c['auto_try_t'] = now_; self._logup_save(c)
+            def job_(day=day):
+                r_ = self._logup_run(24.0, '每天自動')
+                if (r_ or {}).get('ok'):
+                    c2 = self._logup_cfg(); c2['auto_day'] = day; self._logup_save(c2)
+            threading.Thread(target=job_, daemon=True, name='TikLiveLogUp').start()
 
     def _logx_diag_now(self, hours=24.0):
         """V1.2.18 LOG 頁「🩺 自動診斷」按鈕（背景）：最近 N 小時，跟 LOG 第一頁同一份."""
