@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.34"
+APP_VERSION = "1.2.35"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -25681,6 +25681,14 @@ $r | ConvertTo-Json -Depth 4 -Compress
             with _HddLane.get().cv: qn_ = len(_HddLane.get().pub)
             o.append(f'💽 SSD 上轉好、還沒搬到硬碟：{n_} 場、{b_ / 1e9:.1f} GB（最久放了 {old_:.0f} 小時）；搬檔排隊 {qn_} 場' + ('　→ 放超過 6 小時：搬檔可能卡住' if old_ > 6 else ''))
         except Exception: pass
+        try:                                                                    # V1.2.35 錄製覆蓋（錄製檢討那份，最近 7 天）：有沒有漏錄、為什麼
+            rv_ = self._rec_review(7)
+            if rv_ and rv_.get('lives'):
+                cn_ = {'down': '程式沒在跑', 'stale': '久未開播放慢', 'cold': '冷門時段放慢', 'limited': '被 TikTok 限制', 'long': '等很久', 'interval': '一般檢查間隔'}
+                cz_ = '、'.join(f'{cn_.get(k, k)} {v}' for k, v in sorted((rv_.get('causes') or {}).items(), key=lambda x: -x[1])[:4])
+                top_ = '、'.join(f'@{r["u"]} {r["lost_h"]} 小時' for r in (rv_.get('rows') or [])[:3] if r.get('lost_h', 0) >= 0.3)
+                o.append(f'🎯 錄製覆蓋（最近 7 天 {rv_["lives"]} 場）：錄到 9 成以上 {rv_.get("good_pct")}%、平均錄到 {rv_.get("cov_avg")}%、晚 5 分鐘以上才連上 {rv_.get("late5")} 場' + (f'（原因：{cz_}）' if cz_ else '') + (f'；漏最多：{top_}' if top_ else ''))
+        except Exception: pass
         try:
             M = defaultdict(lambda: [0, 0, 0.0]); RS = Counter(); RH = [0.0]; RT = defaultdict(list)     # V1.2.25 重新壓縮原因、倍速
             for ln in _merge_speed_log().read_text(encoding='utf-8').splitlines():
@@ -37781,7 +37789,12 @@ $r | ConvertTo-Json -Depth 4 -Compress
     def _pfx_ui_err(self, adb, ser):
         """V1.1.72 讀手機畫面上的文字（uiautomator，不按任何東西），有錯誤訊息就回那段字；讀不到回空字串."""
         rc, out = self._pfx_sh(adb, ser, 'rm -f /sdcard/tlm_ui.xml; uiautomator dump --windows /sdcard/tlm_ui.xml >/dev/null 2>&1; [ -s /sdcard/tlm_ui.xml ] || uiautomator dump /sdcard/tlm_ui.xml >/dev/null 2>&1; cat /sdcard/tlm_ui.xml', 25)   # V1.2.28 連系統浮動視窗一起讀
-        if '<hierarchy' not in out: return ''
+        S_ = self._pfx_S()
+        if '<hierarchy' not in out:                                             # V1.2.35 讀不到（直播畫面一直動，uiautomator 等不到靜止）：連續 5 次記一次
+            S_['ui_fail'] = int(S_.get('ui_fail') or 0) + 1
+            if S_['ui_fail'] == 5: self._pfx_log('（uiautomator 連續 5 次讀不到畫面上的字：' + (out.strip().splitlines() or ['?'])[-1][:80] + '）→ 錯誤訊息／防誤觸改靠截圖判斷（畫面變暗、黑畫面）')
+            return ''
+        S_['ui_fail'] = 0
         try:
             if self._pfx_pocket(adb, ser, out): return ''                       # V1.2.28 小米防誤觸畫面：已經按音量+關掉
         except Exception: pass
