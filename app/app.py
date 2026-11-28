@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.58"
+APP_VERSION = "1.2.59"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -23834,7 +23834,9 @@ try { NLConnect | Out-Null; Unset
     def _smart_info(self):
         G = _cg(); M = G.get('smart') or {}; c = G.get('smart_cfg') or {}; nm = getattr(self, 'streamer_names', {}) or {}; sc = G.get('smart_sc') or {}
         hot = sorted([u for u, m in M.items() if m == 'hot'], key=lambda u: -sc.get(u, 0))
-        return {'on': bool(c.get('on')), 'hot': len(hot), 'hot_all': int(G.get('smart_hot_all') or 0), 'cold': sum(1 for m in M.values() if m == 'cold'),
+        try: blk = bool(self.cfg('conn.smart')) and not bool(self.cfg('x742.auto'))   # V1.2.59 設定開著、但被「⏸ 今天新增功能的自動背景工作」一起關掉
+        except Exception: blk = False
+        return {'on': bool(c.get('on')), 'blocked': blk, 'hot': len(hot), 'hot_all': int(G.get('smart_hot_all') or 0), 'cold': sum(1 for m in M.values() if m == 'cold'),
                 'hot_mult': c.get('hot', 0.5), 'cold_mult': c.get('cold', 2), 'built': float(G.get('smart_t') or 0), 'n': len(G.get('smart_p') or {}), 'nocold': len(G.get('rv_nocold') or ()),
                 'hot_list': [{'u': u, 'name': nm.get(u, u), 'p': round(min(1.0, sc.get(u, 0)) * 100), 'pt': (G.get('smart_pt') or {}).get(u)} for u in hot[:12]],
                 'pt_now': len(G.get('smart_pt') or {}), 'pt_all': int(G.get('smart_pt_all') or 0),
@@ -48665,7 +48667,7 @@ def _cg():
           try:
               p = Path(PACKAGE_ROOT) / '_DB_SSD' / 'sign_usage.json'
               s = json.loads(p.read_text(encoding='utf-8'))
-              if s.get('day') == time.strftime('%Y-%m-%d'): G['sign'].update(s)
+              if s.get('day') == time.strftime('%Y-%m-%d', time.gmtime()): G['sign'].update(s)
           except Exception: pass
           try:                                                       # V0.6.48 which room-id route works on this computer (survives restarts)
               rs = json.loads((Path(PACKAGE_ROOT) / '_DB_SSD' / 'cg_state.json').read_text(encoding='utf-8')).get('route') or {}
@@ -48928,7 +48930,8 @@ def _cg_patch():
             last = None
             for i, m in enumerate(order):
                 if i and not fallback:                                          # V1.2.25 放慢時本來不試第二種 → 永遠不知道另一種是不是比較好；每分鐘最多偷試 1 次（樣本不夠時）
-                    if not isinstance(last, FailedParseRoomIdError) or (nh if m == 'html' else na) >= 12 or now - float(G.get('probe_t') or 0) < 60: break
+                    L2_ = list(G['route'][m]); iv_ = 60 if len(L2_) < 40 or sum(1 for _t, ok in L2_ if ok) / len(L2_) >= 0.05 else 900   # V1.2.59 另一種最近 40 次以上幾乎全失敗（11/28：整頁抓取一整天 0%）→ 15 分鐘才偷試一次（同一個網站、也算進 TikTok 的次數）
+                    if not isinstance(last, FailedParseRoomIdError) or (nh if m == 'html' else na) >= 12 or now - float(G.get('probe_t') or 0) < iv_: break
                     G['probe_t'] = now; G['probe_n'] = int(G.get('probe_n') or 0) + 1
                 try:
                     if m == 'api': r = await via_api(self, unique_id)
@@ -48988,7 +48991,7 @@ def _cg_patch():
         from TikTokLive.client.web.routes.fetch_signed_websocket import FetchSignedWebSocketRoute
         F = FetchSignedWebSocketRoute; of = getattr(F, '_tlm_orig_call', None) or F.__call__
         async def sign_call(self, *a, **k):
-            G = _cg(); S = G['sign']; day = time.strftime('%Y-%m-%d')
+            G = _cg(); S = G['sign']; day = time.strftime('%Y-%m-%d', time.gmtime())   # V1.2.59 跟 Euler 一樣用 UTC 換日（台灣早上 8 點）：LOG 看到 0～8 點那 540 次失敗被算在「今天」
             if S.get('day') != day: S.update(day=day, n=0, ok=0, lim=0, lim_t=0.0)
             D = G.setdefault('sroom', {'d': None, 's': set()}); dd = int(time.time() // 86400)    # V1.2.30 今天（UTC，台灣早上 8 點換日）用過簽章的直播間
             if D.get('d') != dd: D['d'] = dd; D['s'] = set(); D['full'] = (time.time() % 86400) < 3 * 3600   # 換日後 3 小時內開始算的才是整天的數（中途重開的不拿來學）
