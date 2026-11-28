@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.44"
+APP_VERSION = "1.2.45"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -23927,7 +23927,12 @@ try { NLConnect | Out-Null; Unset
                 try: self._mem_trim(f'最近 5 分鐘記憶體平均 {r:.0f}%')
                 except Exception: pass
             if r is not None and n >= 60 and r >= 92: self._anom('ram', 'bad', '記憶體快用完', f'最近 5 分鐘記憶體平均 {r:.0f}%', '關掉不用的程式；若一直往上漲，請重開 TikLive Monitor 並把這段時間的 LOG 給 Claude。')
+            try:                                                                # V1.2.45 只看 TikLive 自己用到的硬碟（11/27：U:、V: 忙碌 97% 的提醒跟 TikLive 無關，也沒辦法處理）
+                mine_ = {(Path(str(x)).drive or '').upper().rstrip('\\') for x in (self.video_root(), PACKAGE_ROOT, DB_PATH, self._ssd_root() or '') if x}
+                mine_.discard('')
+            except Exception: mine_ = set()
             for L in sorted({k for h in H for k in (h.get('busy') or {})}):
+                if mine_ and str(L).upper().rstrip('\\') not in mine_: continue
                 b, n = avg([(h.get('busy') or {}).get(L) for h in H])
                 if b is not None and n >= 60 and b >= 95: self._anom('disk_busy:' + L, 'bad' if b >= 99 else 'warn', f'{L} 硬碟持續 100% 忙碌', f'最近 5 分鐘 {L} 平均忙碌 {b:.0f}%', '主程式可能會卡頓；看「轉檔排隊」或「影片庫重整」是不是正在大量搬檔，可以先按暫停。')
             try:
