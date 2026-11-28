@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.37"
+APP_VERSION = "1.2.38"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -48619,7 +48619,8 @@ def _cg_patch():
             now = time.time(); rate = lambda m: (lambda L: (sum(1 for _t, ok in L if ok) / len(L), len(L)) if L else (1.0, 0))([x for x in list(G['route'][m]) if now - x[0] < 900])
             (ra, na), (rh, nh) = rate('api'), rate('html')
             order = ['html', 'api'] if (na >= 8 and nh >= 5 and rh - ra > 0.3) else ['api', 'html']     # V1.2.25 15→8：放慢時另一種只有偷試的樣本
-            fallback = int(G['level']) == 0
+            n2_, r2_ = (nh, rh) if order[1] == 'html' else (na, ra)
+            fallback = int(G['level']) == 0 and (n2_ < 5 or r2_ >= 0.3)   # V1.2.38 另一種最近幾乎都失敗（11/27：整頁抓取 10,736 次、98.5% 被擋）→ 全速時也不要每次都多試一次（白白多一倍請求）；改成每分鐘偷試 1 次
             last = None
             for i, m in enumerate(order):
                 if i and not fallback:                                          # V1.2.25 放慢時本來不試第二種 → 永遠不知道另一種是不是比較好；每分鐘最多偷試 1 次（樣本不夠時）
