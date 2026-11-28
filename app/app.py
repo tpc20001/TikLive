@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.15"
+APP_VERSION = "1.2.16"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -13492,7 +13492,7 @@ class MainWindow(QMainWindow):
         elif arm == 'A': arm = 'B'                                               # 檔案本來就不在硬碟上／快傳完了：沒得比
         T['arm'] = arm; T['src_buf'] = src != p
         if T.get('reused'): T['fresh'] = False
-        CH = 8 * 1024 * 1024
+        CH = 32 * 1024 * 1024                                             # V1.2.16 每塊 8 → 32 MB：一天少 1.4 萬次來回（LOG：一天 1.9 萬次 308）
         with open(src, 'rb') as fh:
             while it['sent'] < size:
                 if st.get('gen') is not gen or not self.cfg('yt.on'): return 'stop'
@@ -14747,7 +14747,8 @@ try { NLConnect | Out-Null; Unset
         if mv and not self._yt_state().get('del_busy'):
             try: self._yt_delete_ready(mv)
             except Exception: pass
-        n = 0
+        n = 0; SK = self.__dict__.setdefault('_ret_skip', {})
+        be = [x for x in be if SK.get(x, 0) < now]                              # V1.2.16 上次一個檔都搬不了（例如 MP4 還在 C 槽）→ 3 小時內不再試（LOG：同一場一天試 17 次）
         for s in be[:limit]:
             if _app_closing() or not self.cfg('ret.on'): break
             for _ in range(3600):
@@ -14758,6 +14759,7 @@ try { NLConnect | Out-Null; Unset
             try:
                 rr = self.delete_videos(str(r_[0][0]), s, only_mp4=True, force_shots=True, why='ret')
                 if rr.get('ok'): n += 1
+                if not int(rr.get('files') or 0): SK[s] = time.time() + 3 * 3600
             except Exception: pass
         if n or mv: self._wd_log(f"🗓 原檔保留期限：不傳 YouTube 的等級（B／E…）下播超過保留天數刪 MP4 {n} 場（還有 {max(0, len(be) - n)} 場下一輪）；YouTube 傳好的移到隔離區 {len(mv)} 場（其中留原檔的等級滿 {yk_d} 天 {len(yt7)} 場）")
         try: self.__dict__.get('_vb_idx', {}).update(t=0)
@@ -23832,7 +23834,8 @@ try { NLConnect | Out-Null; Unset
             except Exception: pass
             for k, (used, free) in list((d.get('disks') or {}).items()):
                 try:
-                    if free < 15e9: self._anom('free:' + str(k), 'bad' if free < 5e9 else 'warn', '硬碟空間快滿', f'{k} 只剩 {free / 1e9:.1f} GB', '空間不夠時錄影會失敗：清理影片／錄音或移到別顆硬碟。')
+                    if free < 15e9 and used + free >= 64e9: self._anom('free:' + str(k),   # V1.2.16 小於 64 GB 的（光碟、讀卡機、USB）不算（LOG：I:\ 只剩 0 GB 是誤報）
+                     'bad' if free < 5e9 else 'warn', '硬碟空間快滿', f'{k} 只剩 {free / 1e9:.1f} GB', '空間不夠時錄影會失敗：清理影片／錄音或移到別顆硬碟。')
                 except Exception: pass
             # files that grow without good reason
             files = {'db': Path(str(DB_PATH)), 'wal': Path(str(DB_PATH) + '-wal')}
@@ -23865,7 +23868,10 @@ try { NLConnect | Out-Null; Unset
                 elif now - first[0] >= 2 * 3600 and rss - first[1] > 1.5e9: self._anom('rss_grow', 'warn', '主程式記憶體一直增加', f'{(now - first[0]) / 3600:.1f} 小時內從 {first[1] / 1e9:.1f} GB 漲到 {rss / 1e9:.1f} GB', '可能有東西沒有釋放；請把 LOG 給 Claude。')
             except Exception: pass
             nt = threading.active_count()
-            if nt > 300: self._anom('threads', 'warn', '執行緒數量異常', f'目前 {nt} 個執行緒', '可能有工作卡住沒有結束；請把 LOG 給 Claude。')
+            if nt > 300:                                                        # V1.2.16 順便記「哪一種執行緒最多」（之前 LOG 只看得到 307 個，不知道是誰）
+                import collections as _co
+                top_ = _co.Counter(re.sub(r'[-_ ]?\d+$', '', t.name or '?') for t in threading.enumerate()).most_common(6)
+                self._anom('threads', 'warn', '執行緒數量異常', f'目前 {nt} 個執行緒：' + '、'.join(f'{k}×{v}' for k, v in top_), '可能有工作卡住沒有結束；請把 LOG 給 Claude。')
             fz = getattr(self, '_freeze', None)
             if fz is not None:
                 stalls = list(getattr(fz, 'stalls', []) or [])
@@ -25405,13 +25411,17 @@ $r | ConvertTo-Json -Depth 4 -Compress
         finally: self._logup_run_f = False
 
     def _logup_tick(self):
-        """每分鐘看一次（畫面執行緒，只讀一個小檔）：開了自動、有權杖、凌晨 4～6 點、20 小時內沒傳過 → 背景傳最近 24 小時."""
+        """每分鐘看一次（畫面執行緒，只讀一個小檔）；真的要連網路的都丟背景.
+        ① 每天自動：開了自動、有權杖、凌晨 4～6 點、今天還沒自動傳過 → 傳最近 24 小時（手動傳過不算，V1.2.16）.
+"""
         if time.time() - float(self.__dict__.get('_logup_chk_t') or 0) < 600: return
         self._logup_chk_t = time.time()
         c = self._logup_cfg()
-        if not c.get('auto') or not c.get('token') or self.__dict__.get('_logup_run_f'): return
-        if not (4 <= datetime.now().hour < 6) or time.time() - float(c.get('last') or 0) < 20 * 3600: return
-        threading.Thread(target=self._logup_run, args=(24.0, '每天自動'), daemon=True, name='TikLiveLogUp').start()
+        if not c.get('token') or self.__dict__.get('_logup_run_f'): return
+        day = datetime.now().strftime('%Y-%m-%d')
+        if c.get('auto') and 4 <= datetime.now().hour < 6 and c.get('auto_day') != day:
+            c['auto_day'] = day; self._logup_save(c)
+            threading.Thread(target=self._logup_run, args=(24.0, '每天自動'), daemon=True, name='TikLiveLogUp').start()
 
     def _logx_summary(self, t0, t1, ev, mem, ci):
         """Human-readable first page: what happened minute by minute, who dropped, which addresses were asked how often."""
@@ -33115,7 +33125,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             c=_merge_queue().get(_mq_keys(folder)[1]) or {}
             if c.get('t0'):
                 with open(_merge_speed_log(),'a',encoding='utf-8') as fh:
-                    fh.write(json.dumps({'t':round(time.time()),'bytes':int(c.get('bytes') or 0),'secs':round(time.time()-float(c['t0']),1),'mode':mode,'files':len(scans),'user':user,'ssd':1 if on_ssd else 0},ensure_ascii=False)+'\n')
+                    fh.write(json.dumps({'t':round(time.time()),'bytes':int(c.get('bytes') or 0),'secs':round(time.time()-float(c['t0']),1),'mode':mode,'files':len(scans),'user':user,'ssd':1 if on_ssd else 0,'enc':str(c.get('enc') or ''),'dur':round(float(c.get('dur') or 0))},ensure_ascii=False)+'\n')   # V1.2.16 記用哪個壓縮器（enc）、影片長度（dur）：LOG 看得出顯示卡還是 CPU
                 try:                                             # TK_V0.8.34.019 只留最近 500 筆（以前只增不減）
                     lp_=_merge_speed_log()
                     if lp_.stat().st_size>400_000:
