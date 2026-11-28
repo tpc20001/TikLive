@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.52"
+APP_VERSION = "1.2.53"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -25317,29 +25317,42 @@ try { NLConnect | Out-Null; Unset
 
     @staticmethod
     def _logx_text_lines(path, t0, t1, cap=20000):
-        """Lines of a [YYYY-mm-dd HH:MM:SS] text log inside the window (continuation lines follow their entry)."""
-        out = []; cur = None
+        """Lines of a [YYYY-mm-dd HH:MM:SS] text log inside the window (continuation lines follow their entry).
+        V1.2.53 從檔尾往前讀到比這段時間早為止（不整個檔讀）；超過 cap 行時留「最新的」cap 行（以前留最舊的，最近發生的反而被切掉）."""
+        s0 = datetime.fromtimestamp(t0).strftime('%Y-%m-%d %H:%M:%S'); s1 = datetime.fromtimestamp(t1).strftime('%Y-%m-%d %H:%M:%S')
+        out = []; keep = False
         try:
-            with open(path, 'r', encoding='utf-8', errors='replace') as fh:
-                for line in fh:
-                    m = re.match(r'\[(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\]', line)
-                    if m:
-                        try: cur = datetime.strptime(m.group(1), '%Y-%m-%d %H:%M:%S').timestamp()
-                        except Exception: pass
-                    if cur is not None and t0 <= cur <= t1:
-                        out.append(line.rstrip('\n'))
-                        if len(out) >= cap: out.append(f'…（超過 {cap} 行，後面省略）'); break
+            sz = os.path.getsize(path); n = 4 << 20
+            with open(path, 'rb') as fh:
+                while True:
+                    st = max(0, sz - n); fh.seek(st); raw = fh.read(sz - st)
+                    m0 = re.search(rb'\n\[(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\]', raw[:262144]) if st else None
+                    if st == 0 or (m0 and m0.group(1).decode() < s0) or n >= (256 << 20): break
+                    n *= 2
+            txt = raw.decode('utf-8', errors='replace')
+            if st: txt = txt[txt.find('\n') + 1:]
+            for line in txt.splitlines():
+                if line.startswith('[') and len(line) > 21 and line[20] == ']':
+                    ts = line[1:20]; keep = s0 <= ts <= s1
+                if keep: out.append(line)
         except Exception: pass
+        if len(out) > cap: out = [f'…（這段時間有 {len(out):,} 行，前面 {len(out) - cap:,} 行省略，只留最新的 {cap:,} 行）'] + out[-cap:]
         return out
 
     @staticmethod
     def _logx_jsonl(path, t0, t1, cap=200000):
         out = []
         try:
+            rt = re.compile(r'"t":\s*([0-9.]+)')
             with open(path, 'r', encoding='utf-8', errors='replace') as fh:
                 for line in fh:
-                    try: t = float(json.loads(line).get('t') or 0)
-                    except Exception: continue
+                    m = rt.search(line, 0, 80)                                   # V1.2.53 先用字串找時間，不在範圍的不解析整行 JSON
+                    if m:
+                        try: t = float(m.group(1))
+                        except Exception: t = 0.0
+                    else:
+                        try: t = float(json.loads(line).get('t') or 0)
+                        except Exception: continue
                     if t0 <= t <= t1:
                         out.append(line.rstrip('\n'))
                         if len(out) >= cap: break
