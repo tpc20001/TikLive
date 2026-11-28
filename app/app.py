@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.61"
+APP_VERSION = "1.2.62"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -3634,23 +3634,41 @@ class MainWindow(QMainWindow):
         sig=tuple((u,u in self.priority_streamers,self.streamer_names.get(u,u)) for u in pending)   # TK_V0.8.34.037 按鈕上沒有顯示等待／連線中：狀態在這兩種之間跳來跳去不用整排重做（以前上百顆按鈕每 0.2 秒可能重建一次）
         if sig==self._pending_signature: return
         self._pending_signature=sig
-        while self.pending_grid.count():
-            item=self.pending_grid.takeAt(0); widget=item.widget()
-            if widget: widget.deleteLater()
+        # V1.2.62 有人開播／下播就整排 100 多個按鈕全部砍掉重建、每個各自設一份樣式表（Qt 要一個一個解析）→ 改成重用按鈕：
+        # 只新建新的、拿掉不在的；樣式放在外面那層（一份），按鈕只換屬性 pt（重點＝1）
+        B=self.__dict__.setdefault('_pend_btns',{})
+        css=('QPushButton#pendTile{background:%(tile_bg)s;border:1px solid %(tile_border)s;color:%(tile_text)s;padding:2px 5px;text-align:left;} '
+             'QPushButton#pendTile[pt="1"]{background:%(prio_bg)s;border:1px solid #ff4d6d;} QPushButton#pendTile:hover{background:%(tile_hover)s;} '
+             'QPushButton#pendTile:checked{background:%(prio_bg)s;border:1px solid #ff4d6d;color:%(text_strong)s;font-weight:800;}') % THEME
+        pw=self.pending_widget
+        if getattr(pw,'_tlm_css',None)!=css: pw.setStyleSheet(css); pw._tlm_css=css
+        keep=set(pending)
+        for u in [u for u in B if u not in keep]:
+            b=B.pop(u)
+            try: self.pending_grid.removeWidget(b); b.deleteLater()
+            except Exception: pass
+        mine={id(b) for b in B.values()}
+        while self.pending_grid.count():                                        # 只從版面拿下來（按鈕留著），下面照新的順序放回去
+            it_=self.pending_grid.takeAt(0); w_=it_.widget() if it_ is not None else None
+            if w_ is not None and id(w_) not in mine: w_.deleteLater()           # 舊版建的按鈕（輕量更新前）：刪掉
         self.pending_count_label.setText(str(len(pending)))
-        cols=1
+        cols=1; fnt=self._make_ui_font(9)
         for i,u in enumerate(pending):
-            priority=u in self.priority_streamers
-            b=QPushButton(); b.setCheckable(True); b.setChecked(priority); b.setMinimumHeight(25); b.setMaximumHeight(27)
-            b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            b.setText(('★ ' if priority else '○ ') + self.streamer_names.get(u,u))
-            b.setToolTip('點擊切換重點搜尋')
-            b.setFont(self._make_ui_font(9))
-            b.setStyleSheet(
-                'QPushButton{background:%s;border:1px solid %s;color:%s;padding:2px 5px;text-align:left;} '
-                'QPushButton:hover{background:%s;} QPushButton:checked{background:%s;border:1px solid #ff4d6d;color:%s;font-weight:800;}'
-                % (THEME['prio_bg'] if priority else THEME['tile_bg'], '#ff4d6d' if priority else THEME['tile_border'], THEME['tile_text'], THEME['tile_hover'], THEME['prio_bg'], THEME['text_strong']))
-            b.clicked.connect(lambda checked,u=u:self.toggle_priority_streamer(u)); self.pending_grid.addWidget(b,i//cols,i%cols)
+            priority=u in self.priority_streamers; b=B.get(u)
+            if b is None:
+                b=QPushButton(); b.setObjectName('pendTile'); b.setCheckable(True); b.setMinimumHeight(25); b.setMaximumHeight(27)
+                b.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed); b.setToolTip('點擊切換重點搜尋')
+                b.clicked.connect(lambda checked,u=u:self.toggle_priority_streamer(u)); B[u]=b
+            if b.font()!=fnt: b.setFont(fnt)
+            t=('★ ' if priority else '○ ') + self.streamer_names.get(u,u)
+            if b.text()!=t: b.setText(t)
+            if b.isChecked()!=priority: b.setChecked(priority)
+            pv='1' if priority else '0'
+            if b.property('pt')!=pv:
+                b.setProperty('pt',pv)
+                try: b.style().unpolish(b); b.style().polish(b)
+                except Exception: pass
+            self.pending_grid.addWidget(b,i//cols,i%cols)
         self.pending_grid.setRowStretch((len(pending)+cols-1)//cols,1)
 
 
