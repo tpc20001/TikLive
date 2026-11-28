@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.62"
+APP_VERSION = "1.2.63"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -25865,11 +25865,26 @@ $r | ConvertTo-Json -Depth 4 -Compress
             for t, head, body in F:
                 m = re.search(r'沒有回應 ([\d.]+)', head); sec = float(m.group(1)) if m else 0.0
                 fr = [x for x in re.findall(r', in (\w+)', '\n'.join(body)) if x not in GEN]
-                k = ' › '.join(list(dict.fromkeys(fr))[-3:]) or ('（沒有堆疊：那時候 Python 在整理記憶體）' if any('整理記憶體' in b for b in body) else '（沒有堆疊）'); S[k][0] += 1; S[k][1] = max(S[k][1], sec)
+                k = ' › '.join(list(dict.fromkeys(fr))[-3:])
+                if not k:                                                       # V1.2.63 沒有堆疊：看 1.2.56 起附上的「那時候在整理記憶體／其他執行緒在跑」
+                    bz_ = next((b for b in body if '其他執行緒在跑：' in b), '')
+                    m_ = re.search(r'其他執行緒在跑：([^:]+):.*?(\w+):\d+ ｜', bz_) if bz_ else None
+                    k = ('（沒有堆疊：那時候 Python 在整理記憶體）' if any('整理記憶體' in b for b in body) else
+                         f'（沒有堆疊：那時候 {_thr_kind(m_.group(1).strip())} 在跑 {m_.group(2)}）' if m_ else '（沒有堆疊）')
+                S[k][0] += 1; S[k][1] = max(S[k][1], sec)
             hot = [float((re.search(r'沒有回應 ([\d.]+)', h) or [0, 0])[1]) for t, h, b in F if '_hot_reload' in '\n'.join(b)]
             try: nl = sum(1 for t, h, b in ents('update_log.txt') if '⚡ 輕量更新' in h)
             except Exception: nl = 0
             if hot or nl: o.append(f'🔄 更新：熱更新卡住 {len(hot)} 次（平均 {sum(hot) / max(1, len(hot)):.0f} 秒）、⚡ 輕量更新 {nl} 次（不卡）')
+            try:                                                                # V1.2.63 YouTube 隔離區：這段時間移進去多少、自動刪多少（1.2.55 修好搬到 R 之後一直搬不進去）
+                mv_n = mv_f = 0; mv_g = dl_f = 0.0; dl_g = 0.0; mv_c = 0
+                for t_, h_, b_ in ents('update_log.txt'):
+                    m_ = re.search(r'YouTube：(\d+) 場已上傳好的 MP4 移到暫放資料夾（(\d+) 個、([\d.]+) GB', h_)
+                    if m_: mv_n += int(m_.group(1)); mv_f += int(m_.group(2)); mv_g += float(m_.group(3)); c_ = re.search(r'；(\d+) 場還在 C 槽', h_); mv_c += int(c_.group(1)) if c_ else 0; continue
+                    m_ = re.search(r'YouTube 隔離區：(\d+) 個 MP4（([\d.]+) GB）', h_)
+                    if m_: dl_f += int(m_.group(1)); dl_g += float(m_.group(2))
+                if mv_n or dl_f: o.append(f'🗑 YouTube 隔離區：移進去 {mv_n} 場（{mv_f} 個 MP4、{mv_g:.1f} GB）' + (f'，還在 C 槽先不移 {mv_c} 場' if mv_c else '') + f'；確認過 YouTube 自動刪原檔 {dl_f:.0f} 個（{dl_g:.1f} GB）')
+            except Exception: pass
             if F:
                 o.append(f'🧊 主程式畫面卡住 {len(F)} 次（最久 {max(v[1] for v in S.values()):.0f} 秒）：')
                 FX = (('tabSizeHint', '1.2.24'), ('_tab_live_size', '1.2.24'), ('_live_pre_build', '1.2.25'), ('_load_session_fetch', '1.2.25'), ('reload_current_models', '1.2.43'),
