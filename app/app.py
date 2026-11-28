@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.57"
+APP_VERSION = "1.2.58"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -22978,6 +22978,12 @@ try { NLConnect | Out-Null; Unset
                 rp_ = min(1.0, rp_ + st_)
             G['ramp'] = round(rp_, 3)
         else: G['ramp'] = 1.0
+        try:
+            n1_, r1_ = _cg_ratio(G, 60)
+            RH = G.get('rh')
+            if RH is None: RH = G['rh'] = deque(maxlen=1500)                    # 最近 25 小時，一分鐘一筆
+            RH.append((int(now), int(G['level']), float(G.get('ramp') or 1.0), float(G.get('ceil') or 0), n1_, round(r1_, 2)))
+        except Exception: pass
         if int(G['level']) == 2 and since >= 1800 and r5 >= 0.6:
             self._anom('cg_block', 'warn', 'TikTok 持續限制這台電腦', f'已經大幅放慢 {since / 60:.0f} 分鐘，拒絕比例還是 {r5 * 100:.0f}%',
                        '先不要重新啟動（不會換網址，還會斷掉直播中的場次）；可以考慮縮編主播清單（主播清單 →「🚦 連線管控／縮編」）。')
@@ -25618,6 +25624,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
         mem = [{'t': a, 'u': u, 'cat': c} for a, u, c in list(self.__dict__.get('_conn_log') or []) if t0 <= a <= t1]
         try: cgi = self._cg_info()                                               # V1.2.25 連線管控現況（放慢等級、兩種查法成功率、排隊…）
         except Exception as ex: cgi = {'error': str(ex)}
+        try: cgi['rh'] = [list(x) for x in list(_cg().get('rh') or ()) if t0 <= x[0] <= t1]   # V1.2.58 每分鐘：等級、加速比例、學到的上限、最近 1 分鐘檢查／被拒（給 Claude 看調得對不對）
+        except Exception: pass
         files['conn_now.json'] = json.dumps({'snapshot_at': fmt(time.time()), 'conn_info': ci, 'cg_info': cgi, 'conn_log_in_window': mem}, ensure_ascii=False, indent=1, default=str)
         try:
             cfg = {k: v for k, v in dict(self._cfg).items() if not any(x in k.lower() for x in ('pw', 'pass', 'token', 'cookie', 'secret'))}
@@ -25916,6 +25924,12 @@ $r | ConvertTo-Json -Depth 4 -Compress
             except Exception: pass
             top_ = _co.Counter(_thr_kind(t.name) for t in threading.enumerate()).most_common(4)
             o.append(f'🖥 現在：主程式記憶體 {rss / 1e9:.1f} GB、執行緒 {threading.active_count()} 個（最多：' + '、'.join(f'{k}×{v}' for k, v in top_) + '）')
+            try: hn_ = int(getattr(QApplication.instance(), '_tlm_hot_n', 0) or 0)
+            except Exception: hn_ = 0
+            bt_ = (self.__dict__.get('_bgto') or {}).get('last') or {}
+            if hn_ or bt_.get('old'):                                           # V1.2.58 熱更新留下的舊版還在跑什麼（1.2.55 起交給新版）
+                o.append(f'    這次開程式後熱更新 {hn_} 次' + (f"；舊版還在跑的背景工作：{'；'.join(bt_['old'])[:300]}" if bt_.get('old') else '；舊版的背景工作都結束了') +
+                         (f"；交給新版 {'、'.join(bt_['ended'])}" if bt_.get('ended') else ''))
         except Exception: pass
         try:                                                                    # V1.2.20 SSD 上轉好、還沒搬到硬碟的
             root = self._ssd_dir(); n_ = 0; b_ = 0; old_ = 0
@@ -26507,6 +26521,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
         """熱更新留下的舊視窗：背景找出來 → 回畫面執行緒把它身上的東西全部放掉（Qt 物件一定要在畫面執行緒放）.
         還在做轉檔、剪輯、截圖、刪除…的舊視窗先跳過（等它做完下次再放），監控和錄影早就交給新視窗."""
         try:
+            try: self._gc_unfreeze('熱更新後找舊視窗')                          # V1.2.58 冷凍區的物件 gc.get_objects() 看不到 → 先拿出來才找得到舊視窗
+            except Exception: pass
             before = self._mem_rss(); cur, W = self._mem_wins()
             old = [w for w in W if w is not cur and getattr(w, '_handoff', False)]; del W
             busy = [w for w in old if any(m in self.MEM_BUSY for _n, m in self._mem_thr_of(w))]; todo = [w for w in old if w not in busy]
@@ -26514,7 +26530,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             def strip(todo=todo):
                 import gc as _gc
                 if todo:
-                    try: self._gc_unfreeze('放掉熱更新留下的舊視窗')                # V1.2.56 冷凍的舊視窗收不掉
+                    try: self._gc_unfreeze('放掉熱更新留下的舊視窗')                # V1.2.56 冷凍的舊視窗收不掉（1.2.58 起前面已經先拿出來，這裡通常不用再做）
                     except Exception: pass
                 try:
                     for w in todo:
