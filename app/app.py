@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.35"
+APP_VERSION = "1.2.36"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -37668,6 +37668,11 @@ $r | ConvertTo-Json -Depth 4 -Compress
             cur['chk'] = now
             if dev.get('awake') is False: self._pfx_wake(adb, ser)
             fg, act, foc = dev.get('fg') or '', dev.get('act') or '', dev.get('focus') or ''; cur['act'] = act
+            if re.search(r'proxim|pocketmode|pocket_mode|mistouch|misoper|earpiece', foc, re.I) and now - float(S.get('pocket_t') or 0) > 20:   # V1.2.36 防誤觸那層搶到焦點（看視窗名字）→ 音量+
+                v0_ = self._pfx_vol(adb, ser); self._pfx_sh(adb, ser, 'input keyevent KEYCODE_VOLUME_UP', 8); time.sleep(0.8)
+                if v0_ is not None: self._pfx_vol(adb, ser, v0_)
+                S['pocket_t'] = now; S['pocket_n'] = int(S.get('pocket_n') or 0) + 1
+                self._pfx_log(f'📵 小米防誤觸畫面（視窗 {foc[:60]}）→ 按「音量+」關掉')
             if re.search(r'NotificationShade|StatusBar|PopupWindow|Usb|Dialog|Chooser|Toast', foc, re.I) or (fg and fg not in self.PFX_PKGS):
                 self._pfx_sh(adb, ser, 'cmd statusbar collapse', 8)                  # V1.1.66 通知欄、USB 用途選單、系統對話框：自己收掉（不用按鍵）
                 self._pfx_sh(adb, ser, 'am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS', 8)
