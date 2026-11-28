@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.46"
+APP_VERSION = "1.2.47"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -23987,7 +23987,7 @@ try { NLConnect | Out-Null; Unset
             except Exception: lim_ = 300
             if nt > max(300, lim_):                                             # V1.2.16 順便記「哪一種執行緒最多」（之前 LOG 只看得到 307 個，不知道是誰）
                 import collections as _co
-                top_ = _co.Counter(re.sub(r'[-_ ]?\d+$', '', t.name or '?') for t in threading.enumerate()).most_common(6)
+                top_ = _co.Counter(_thr_kind(t.name) for t in threading.enumerate()).most_common(6)
                 self._anom('threads', 'warn', '執行緒數量異常', f'目前 {nt} 個執行緒：' + '、'.join(f'{k}×{v}' for k, v in top_), '可能有工作卡住沒有結束；請把 LOG 給 Claude。')
             try:                                                                # V1.2.27 扣掉監控／錄影本來就要的，其他的 2 小時內一直變多 → 有東西沒結束
                 oth_ = nt - (lim_ - 160)
@@ -23995,7 +23995,7 @@ try { NLConnect | Out-Null; Unset
                 lo_ = min(v for t_, v in th_ if now - t_ <= 2 * 3600)
                 if now - th_[0][0] >= 2 * 3600 and oth_ - lo_ > 100:
                     import collections as _co
-                    top_ = _co.Counter(re.sub(r'[-_ ]?\d+$', '', t.name or '?') for t in threading.enumerate()).most_common(6)
+                    top_ = _co.Counter(_thr_kind(t.name) for t in threading.enumerate()).most_common(6)
                     self._anom('thr_grow', 'warn', '執行緒一直增加', f'扣掉監控、錄影本來就要的，2 小時內從 {lo_} 條變 {oth_} 條：' + '、'.join(f'{k}×{v}' for k, v in top_), '可能有工作卡住沒有結束；請把 LOG 給 Claude。')
             except Exception: pass
             fz = getattr(self, '_freeze', None)
@@ -25693,7 +25693,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             try:
                 import psutil; rss = psutil.Process().memory_info().rss
             except Exception: pass
-            top_ = _co.Counter(re.sub(r'[-_ ]?\d+$', '', t.name or '?') for t in threading.enumerate()).most_common(4)
+            top_ = _co.Counter(_thr_kind(t.name) for t in threading.enumerate()).most_common(4)
             o.append(f'🖥 現在：主程式記憶體 {rss / 1e9:.1f} GB、執行緒 {threading.active_count()} 個（最多：' + '、'.join(f'{k}×{v}' for k, v in top_) + '）')
         except Exception: pass
         try:                                                                    # V1.2.20 SSD 上轉好、還沒搬到硬碟的
@@ -26256,7 +26256,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             if isinstance(v, (dict, list, set, deque, tuple, bytes, bytearray)):
                 b, cut = self._mem_size(v, 50000); big.append({'k': k, 't': type(v).__name__, 'n': len(v) if hasattr(v, '__len__') else 0, 'mb': round(b / 1e6, 1), 'more': cut})
         big.sort(key=lambda x: -x['mb'])
-        tn = Counter(re.sub(r'[-_ ]?\d+$', '', t.name) for t in threading.enumerate())
+        tn = Counter(_thr_kind(t.name) for t in threading.enumerate())
         r = {'ok': True, 'rss_mb': round(self._mem_rss() / 1e6), 'wins': wins, 'old_wins': len(old), 'refs': refs.most_common(12), 'thr_names': tn.most_common(15),
              'big': big[:10], 'threads': threading.active_count(), 'secs': round(time.time() - t0, 1), 'reclaim': self.__dict__.get('_mem_rc_last')}
         try: (LOG_DIR / 'mem_diag.txt').open('a', encoding='utf-8').write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {json.dumps(r, ensure_ascii=False)}\n")
@@ -46814,6 +46814,13 @@ def _curwin(default):
         w = getattr(QApplication.instance(), '_tlm_window', None)
         return w if w is not None else default
     except Exception: return default
+
+
+def _thr_kind(name):
+    """V1.2.47 執行緒名字歸類：「Thread-123 (process_request_thread)」→「process_request_thread」、「TikLiveX-3」→「TikLiveX」."""
+    n = str(name or '?'); m = re.match(r'^Thread-\d+ \((.+)\)$', n)
+    if m: n = m.group(1)
+    return re.sub(r'[-_ ]?\d+$', '', n) or '?'
 
 
 def _pylight_plan(old_src, new_src):
