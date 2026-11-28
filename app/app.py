@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.41"
+APP_VERSION = "1.2.42"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -48463,6 +48463,9 @@ def _cg_outcome(u, kind, data):
     now = time.time(); G['out'].append((now, res)); G['last'][u] = et if kind == 'retry' else 'connected'
     if et == 'UserNotFoundError': G['dead'][u] = G['dead'].get(u, 0) + 1          # page parsed fine: account does not exist / cannot go live
     else: G['dead'].pop(u, None)                                                  # only consecutive ones count
+    A_ = G.setdefault('age18', {})                                                # V1.2.42 18+ 年齡限制（沒有登入錄不到）：連續幾次
+    if et == 'AgeRestrictedError': A_[u] = A_.get(u, 0) + 1
+    else: A_.pop(u, None)
     if res == 'sign':
         G['sign_err'][u] = now
         if 'account_day' in msg or 'rate_limit_account_day' in msg:
@@ -48573,7 +48576,8 @@ def _cg_patch():
                 if se and now - se < 3600: return max(d, float(c.get('sign_wait', 180)))     # live, but the sign server said no today
                 if self.priority_mode: return max(d, 20.0 * int(G['level'])) if G['level'] else d     # 重點：被限制時至少 20／40 秒
                 if u in G['stale']: m = max(m, float(c.get('stale_mult', 3)))
-                if G['dead'].get(u, 0) >= 3: m = max(m, 30.0 if G['dead'][u] >= 30 else 10.0)     # V1.2.25 連續 30 次都說帳號不存在（LOG：一天 87 次）→ ×30（最多 30 分鐘查一次）
+                if G['dead'].get(u, 0) >= 3: m = max(m, 30.0 if G['dead'][u] >= 30 else 10.0)
+                if (G.get('age18') or {}).get(u, 0) >= 3: m = max(m, 3.0)        # V1.2.42 18+ 直播（沒有登入 Cookie 錄不到）連續 3 次 → 查慢 3 倍（11/27：@zian.2003 一天 66 次）     # V1.2.25 連續 30 次都說帳號不存在（LOG：一天 87 次）→ ×30（最多 30 分鐘查一次）
                 try:                                                    # V0.7.42.001 智慧排程：熱區快一點（不低於 30 秒）、冷門時段慢一點
                     sm = (G.get('smart') or {}).get(u); sc = G.get('smart_cfg') or {}
                     if sm == 'cold': m = max(m, float(sc.get('cold', 2)))
