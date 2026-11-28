@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.49"
+APP_VERSION = "1.2.50"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -48754,7 +48754,6 @@ def _cg_patch():
         async def sign_call(self, *a, **k):
             G = _cg(); S = G['sign']; day = time.strftime('%Y-%m-%d')
             if S.get('day') != day: S.update(day=day, n=0, ok=0, lim=0, lim_t=0.0)
-            S['n'] = int(S.get('n') or 0) + 1
             D = G.setdefault('sroom', {'d': None, 's': set()}); dd = int(time.time() // 86400)    # V1.2.30 今天（UTC，台灣早上 8 點換日）用過簽章的直播間
             if D.get('d') != dd: D['d'] = dd; D['s'] = set(); D['full'] = (time.time() % 86400) < 3 * 3600   # 換日後 3 小時內開始算的才是整天的數（中途重開的不拿來學）
             try: rid_ = str((getattr(self._web, 'params', None) or {}).get('room_id') or '')
@@ -48771,6 +48770,7 @@ def _cg_patch():
                     raise RuntimeError(f'[RATE_LIMIT] 簽章額度快用完（今天 {len(D["s"])}/{cap_} 個直播間），留給重點主播：這位先只錄影片 (reserve day)')
             except RuntimeError: raise
             except Exception: pass
+            S['n'] = int(S.get('n') or 0) + 1                                   # V1.2.50 留給重點主播而沒送出的不算
             try:
                 try: r = await of(self, *a, **k)
                 except TypeError as ex:                                           # TikTokLive builds its 429 error from a header that may be missing
@@ -48782,7 +48782,7 @@ def _cg_patch():
                     G['sign_cap'] = len(D['s'])
                     try: (Path(PACKAGE_ROOT) / '_DB_SSD' / 'cg_sign_cap.json').write_text(json.dumps({'cap': len(D['s']), 't': time.time()}), encoding='utf-8')
                     except Exception: pass
-                if 'SignatureRateLimit' in type(ex).__name__ or 'RATE_LIMIT' in str(ex) or 'SignAPIError' in [c_.__name__ for c_ in type(ex).__mro__]:   # V1.2.28 記下來：外面改成只錄影片；V1.2.49 簽章伺服器連不上／回錯誤（不是額度）也一樣
+                if 'SignatureRateLimit' in type(ex).__name__ or 'RATE_LIMIT' in str(ex) or any(n_ in ('SignAPIError', 'WebcastBlockedError') for n_ in [c_.__name__ for c_ in type(ex).__mro__]):   # V1.2.28 記下來：外面改成只錄影片；V1.2.49 簽章伺服器連不上／回錯誤（不是額度）也一樣
                     try:
                         box = getattr(LiveEngine, '_tlm_cv').get()
                         if box is not None: box['sign'] = True; box['client'] = getattr(box.get('eng'), 'client', None); box['msg'] = str(ex)[:300]
