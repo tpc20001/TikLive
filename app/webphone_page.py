@@ -4535,7 +4535,7 @@ function cgStatusHtml(I){if(!I)return '<div class="cgS">讀取中…</div>';cons
 <div><b>${q[0]} · ${q[1]} · ${q[2]}</b><span>排隊：續寫 · 重點 · 一般</span></div><div><b>${I.wait_avg} 秒</b><span>一般主播平均等</span></div>
 <div><b>${I.stale}</b><span>久未開播（${I.stale_days} 天）放慢 ×${I.stale_mult}</span></div><div><b>${I.dead}</b><span>帳號不存在 放慢 ×10</span></div>
 <div><b>${I.live} / ${I.engines}</b><span>直播中 / 監控中</span></div></div>
-${I.scap?`<p>🔑 今天（台灣早上 8 點換日）用了簽章 <b>${I.srooms}/${I.scap}</b> 個直播間${I.srsv?`；剩 ${I.srsv} 個時只留給 S／A 級和紅色重點主播，其他人先只錄影片`:""}</p>`:""}
+${I.scap||I.srooms?`<p>🔑 今天（台灣早上 8 點換日）用了簽章 <b>${I.srooms}${I.scap?"/"+I.scap:""}</b> 個直播間${I.scap?(I.srsv?`；剩 ${I.srsv} 個時只留給 S／A 級和紅色重點主播，其他人先只錄影片`:""):"（Euler 免費版一天約 100 個；第一次用完時程式會記住實際上限）"}</p>`:""}
 ${(I.nows||[]).length?`<p class="cgW">📼 只錄影片中（簽章額度用完，沒有留言／禮物）：${I.nows.map(x=>"@"+cgE(x)).join("、")}</p>`:""}
 ${I.l0_fail?`<p class="cgW">⏳ 回全速後沒多久又被擋 ${I.l0_fail} 次 → 下次要先放慢 ${I.l0_wait} 分鐘才試著回全速（全速撐過 2 小時就重新算）</p>`:""}
 ${cgSmartHtml(I.smart)}<p>查開播的方式：輕量 API 成功 ${rt((I.route||{}).api)}、整頁抓取成功 ${rt((I.route||{}).html)}${I.api_first?"（先用輕量 API）":""}${I.probe_n?`；放慢時偷試另一種 ${I.probe_n} 次`:""}</p>
