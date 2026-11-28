@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.42"
+APP_VERSION = "1.2.43"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -43474,7 +43474,10 @@ exit /b 1
             self.join_model.replace_rows(pre['join'],prepared=True); self.dash_join.model.replace_rows(pre['djoin'],prepared=True)
             self._rebuild_levelup_view()
             for view in [self.chat_view,self.gift_view,self.join_view,self.dash_chat.view,self.dash_gift.view,self.dash_join.view,self.dash_song.view,self.dash_levelup.view]:
-                view.scrollToBottom()
+                try:                                                             # V1.2.43 看不到的表格先不捲（大表格捲到底很慢），切過去時 pump 會捲
+                    if view.isVisible(): view.scrollToBottom()
+                    else: self._pending_scroll.add(view)
+                except Exception: pass
             self.update_identity_columns(); return
         chat=[]; dchat=[]; gift=[]; dgift=[]; dsong=[]; join=[]; djoin=[]
         for d in self.chat_rows:
@@ -43497,7 +43500,10 @@ exit /b 1
         self.join_model.replace_rows(join); self.dash_join.model.replace_rows(djoin)
         self._rebuild_levelup_view()
         for view in [self.chat_view,self.gift_view,self.join_view,self.dash_chat.view,self.dash_gift.view,self.dash_join.view,self.dash_song.view,self.dash_levelup.view]:
-            view.scrollToBottom()
+            try:
+                if view.isVisible(): view.scrollToBottom()
+                else: self._pending_scroll.add(view)
+            except Exception: pass
         self.update_identity_columns()
 
     def flash_card(self,key):
