@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.28"
+APP_VERSION = "1.2.29"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -23657,7 +23657,7 @@ try { NLConnect | Out-Null; Unset
         return {'on': bool(c.get('on', True)), 'level': lv, 'level_name': _CG_LEVEL_NAME[lv], 'level_min': round((now - float(G['level_t'] or now)) / 60),
                 'rate': int(c.get('rate', 80)), 'rate_now': int(c.get('rate', 80) * _CG_LEVEL_RATE[lv]), 'att_min': att1, 'http_min': http_n,
                 'block_pct': round(r5 * 100), 'n5': n5, 'res10': dict(res), 'q': [len(x) for x in G['q']], 'wait_avg': round(sum(waits) / len(waits)) if waits else 0,
-                'stale': len(G['stale']), 'stale_mult': int(c.get('stale_mult', 3)), 'stale_days': int(c.get('stale_days', 7)), 'dead': sum(1 for v in list(G['dead'].values()) if v >= 3), 'probe_n': int(G.get('probe_n') or 0), 'l0_fail': int(G.get('l0_fail') or 0), 'l0_wait': 30 * 2 ** min(3, int(G.get('l0_fail') or 0)),
+                'stale': len(G['stale']), 'stale_mult': int(c.get('stale_mult', 3)), 'stale_days': int(c.get('stale_days', 7)), 'dead': sum(1 for v in list(G['dead'].values()) if v >= 3), 'probe_n': int(G.get('probe_n') or 0), 'nows': sorted((G.get('nows') or {}).keys()), 'l0_fail': int(G.get('l0_fail') or 0), 'l0_wait': 30 * 2 ** min(3, int(G.get('l0_fail') or 0)),
                 'api_first': bool(c.get('api_first', True)), 'route': {'api': rt('api'), 'html': rt('html')},
                 'sign': {'day': S.get('day'), 'n': int(S.get('n') or 0), 'ok': int(S.get('ok') or 0), 'lim': int(S.get('lim') or 0),
                          'limited': bool(S.get('lim_t') and now - float(S['lim_t']) < 900), 'waiting': sum(1 for t in list(G['sign_err'].values()) if now - t < 3600)},
@@ -25613,6 +25613,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
             nf = [f'@{u}（{c} 次）' for (e_, u), c in uu.most_common() if e_ == 'UserNotFoundError' and c >= 10]
             ar = [f'@{u}（{c} 次）' for (e_, u), c in uu.most_common() if e_ == 'AgeRestrictedError' and c >= 10]
             if nf: o.append('    👤 找不到這個帳號（可能改名或刪帳號，到主播清單更新帳號或拿掉）：' + '、'.join(nf[:8]))
+            sg = [x for x in E if x.get('type') == 'engine' and x.get('k') == 'retry' and x.get('etype') == 'SignatureRateLimitError']   # V1.2.29 簽章額度用完
+            if sg:
+                su = Counter(x.get('u') for x in sg); t_ = min(float(x.get('t') or 0) for x in sg)
+                o.append(f'    🔑 簽章伺服器拒絕（Euler 免費版一天 100 個直播間）：{len(sg)} 次、{len(su)} 位主播（{datetime.fromtimestamp(t_).strftime("%m-%d %H:%M")} 起），這些人開播時連不上聊天室 → V1.2.29 起先只錄影片；要留言／禮物得換付費方案')
             if ar: o.append('    🔞 18+ 年齡限制的直播（沒有登入 Cookie 錄不到，一直檢查也沒用）：' + '、'.join(ar[:8]))
             hr = defaultdict(lambda: [0, 0])
             for m in (x for x in E if x.get('type') == 'minute'):
@@ -41061,7 +41065,7 @@ exit /b 1
         for u, e in list(self.engines.items()):
             try:
                 sid = getattr(e, 'session_id', None)
-                if self.engine_status.get(u) != 'LIVE' or not sid: S.pop(u, None); continue
+                if self.engine_status.get(u) != 'LIVE' or not sid or getattr(e, '_tlm_nows', False): S.pop(u, None); continue   # V1.2.29 只錄影片模式本來就沒有留言
                 x = C.setdefault(str(u), {'fails': 0})
                 if not x.get('act_t'): x['act_t'] = now; continue          # 剛更新程式：從現在開始算
                 idle = now - float(x['act_t'])
@@ -42777,6 +42781,11 @@ exit /b 1
             self.experiment_live_start=d.get('live_start') or time.time()
             self._experiment_start_audio(u,d.get('session_id'),self.experiment_live_start,d.get('stream_url',''))
             self._video_start(u,d.get('session_id'),d.get('live_start') or time.time())
+            if d.get('nows') and not d.get('resumed'):                            # V1.2.29 簽章額度用完：只錄影片
+                try:
+                    m_=f"📼 {self.streamer_names.get(u,u)}（@{u}）開播了，但簽章伺服器今天的額度用完（Euler 免費版一天 100 個直播間）→ 先只錄影片（沒有留言／禮物），早上 8 點額度重算後自動接回聊天室"
+                    self._wd_log(m_); self.statusBar().showMessage(m_, 15000)
+                except Exception: pass
             self._nickname_from_engine(u)
         elif k=='viewers':
             self.stream_viewers[u]=int(d.get('viewers',0) or 0)
@@ -48400,11 +48409,79 @@ def _cg_patch():
     try:
         L = LiveEngine
         o1 = getattr(L, '_tlm_orig_one_connection', None) or L._one_connection
+        cv = getattr(L, '_tlm_cv', None)
+        if cv is None: cv = L._tlm_cv = _ctxv.ContextVar('tlm_cg_eng', default=None)
         async def _one_connection(self):
             try: ok = await _cg_gate(self)
             except Exception: ok = True                              # the gate can never be the reason a streamer is not checked
             if not ok: return None
-            return await o1(self)
+            box = {'eng': self}; tok = cv.set(box)
+            try: return await o1(self)
+            except Exception as ex:
+                # V1.2.28 簽章伺服器（Euler 免費版一天 100 個不同的直播間）拒絕 → 照樣錄影片（沒有留言／禮物），不要漏掉整場
+                # （11/27 LOG：23:56 起額度用完，之後開播的 5 位主播一直連不上，要等到早上 8 點額度重算）
+                if box.get('sign') and box.get('client') is not None and _cg()['cfg'].get('nows', True):
+                    try: return await _cg_nows(self, box)
+                    except Exception as ex2:
+                        try: self.emit('warning', message=f'只錄影片模式失敗：{type(ex2).__name__}: {ex2}')
+                        except Exception: pass
+                raise
+            finally:
+                try: cv.reset(tok)
+                except Exception: pass
+        async def _cg_nows(self, box):
+            import asyncio as _aio
+            M = _core_module(); client = box['client']; info = getattr(client, 'room_info', None) or {}
+            url = M.extract_stream_pull_url(info)
+            if not url: raise RuntimeError('拿不到影片串流網址')
+            room_id = str(getattr(client, 'room_id', '') or ''); G = _cg()
+            self.client = client; self.loop = _aio.get_running_loop(); self._tlm_nows = True
+            try:
+                self._check_grace_expiry(); self.connection_wall = time.time(); resumed = False; gap = 0.0
+                try: self._set_live_start(client)
+                except Exception: pass
+                g = self._grace
+                if g and time.time() <= g['until'] and (not g['room_id'] or not room_id or g['room_id'] == room_id):    # 同一場 10 分鐘內：續寫
+                    self._grace = None; resumed = True; gap = time.time() - g['since']
+                    self.session_id = g['sid']; self.log = g['log']; self.live_start = g['live_start'] or self.live_start; self.time_source = g['time_source'] or self.time_source
+                    self._ended_sent = False
+                    try: self.db.session_resume(self.session_id)
+                    except Exception: pass
+                else:
+                    if g: self._finalize_grace()
+                    self._reset_live_state()
+                    self.session_id = self.db.session_start(self.username, room_id, self.live_start, self.time_source, self.display_name)
+                    self.log = M.LiveLogWriter(self.username, self.session_id, room_id)
+                self.room_id = room_id
+                try:
+                    if self.log: self.log.write('sessions', f'只錄影片：{M.now_iso()} · 簽章伺服器今天的額度用完，連不上聊天室（沒有留言／禮物），影片照錄\n')
+                except Exception: pass
+                G.setdefault('nows', {})[self.username] = time.time()
+                self.emit('connected', room_id=room_id, time_source=self.time_source, live_start=self.live_start, session_id=self.session_id, stream_url=url, resumed=resumed, gap=gap, nows=True)
+                t0 = time.time(); miss = unk = 0; why = 'DISCONNECTED'
+                if 'day' in str(box.get('msg') or '').lower():                    # 一天的額度：台灣早上 8 點（UTC 0 點）才重算 → 到時候再試聊天室，中間不要斷（斷了再連可能被 403 擋，10 分鐘沒接回場次就結束）
+                    retry_at = (int(time.time() // 86400) + 1) * 86400 + 90
+                else: retry_at = t0 + 900
+                while not self.stop_flag.is_set():
+                    for _ in range(60):
+                        if self.stop_flag.is_set(): break
+                        await _aio.sleep(1)
+                    if self.stop_flag.is_set(): break
+                    try: alive = await client._web.fetch_is_live(room_id=int(room_id))
+                    except Exception: alive = None
+                    if alive is False: miss += 1; unk = 0
+                    elif alive: miss = unk = 0
+                    else: unk += 1
+                    if miss >= 2: why = 'ENDED'; break                       # 下播了
+                    if unk >= 10: break                                       # 一直問不到：交回一般流程確認
+                    if time.time() >= retry_at: break                         # 額度應該回來了：交回一般流程接聊天室（同一場續寫）
+                if self.session_id: self._enter_grace(why)
+                return None
+            finally:
+                G.get('nows', {}).pop(self.username, None); self._tlm_nows = False
+                self.client = None; self.loop = None
+                try: await client.close()
+                except Exception: pass
         L._tlm_orig_one_connection = o1; L._one_connection = _one_connection
         o2 = getattr(L, '_tlm_orig_nrd', None) or L._next_retry_delay
         def _next_retry_delay(self):
@@ -48544,10 +48621,18 @@ def _cg_patch():
             G = _cg(); S = G['sign']; day = time.strftime('%Y-%m-%d')
             if S.get('day') != day: S.update(day=day, n=0, ok=0, lim=0, lim_t=0.0)
             S['n'] = int(S.get('n') or 0) + 1
-            try: r = await of(self, *a, **k)
-            except TypeError as ex:                                           # TikTokLive builds its 429 error from a header that may be missing
-                import traceback as _tb
-                if 'calculate_retry_after' in ''.join(_tb.format_tb(ex.__traceback__)): raise RuntimeError('[RATE_LIMIT] 簽章伺服器拒絕（429，沒有附 RateLimit 標頭）') from ex
+            try:
+                try: r = await of(self, *a, **k)
+                except TypeError as ex:                                           # TikTokLive builds its 429 error from a header that may be missing
+                    import traceback as _tb
+                    if 'calculate_retry_after' in ''.join(_tb.format_tb(ex.__traceback__)): raise RuntimeError('[RATE_LIMIT] 簽章伺服器拒絕（429，沒有附 RateLimit 標頭）') from ex
+                    raise
+            except Exception as ex:
+                if 'SignatureRateLimit' in type(ex).__name__ or 'RATE_LIMIT' in str(ex):   # V1.2.28 記下來：外面改成只錄影片
+                    try:
+                        box = getattr(LiveEngine, '_tlm_cv').get()
+                        if box is not None: box['sign'] = True; box['client'] = getattr(box.get('eng'), 'client', None); box['msg'] = str(ex)[:300]
+                    except Exception: pass
                 raise
             S['ok'] = int(S.get('ok') or 0) + 1
             return r
