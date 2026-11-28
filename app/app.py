@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.48"
+APP_VERSION = "1.2.49"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -23523,7 +23523,7 @@ try { NLConnect | Out-Null; Unset
             Gd_ = _cg(); dd_ = sorted((u for u, n in (Gd_.get('dead') or {}).items() if n >= 30), key=lambda u: -Gd_['dead'][u])
             if dd_: add('dead', '👤', '帳號找不到', f'{len(dd_)} 位一直找不到帳號（可能改名或刪帳號）：' + '、'.join('@' + u for u in dd_[:4]) + '；請到主播清單更新帳號或拿掉', 'warn')
             nw_ = sorted((Gd_.get('nows') or {}).keys())
-            if nw_: add('nows', '📼', '只錄影片', f'{len(nw_)} 位在播但簽章額度用完，只錄影片（沒有留言／禮物）：' + '、'.join('@' + u for u in nw_[:4]), 'warn')
+            if nw_: add('nows', '📼', '只錄影片', f'{len(nw_)} 位在播但簽章伺服器拒絕（額度用完或連不上），只錄影片（沒有留言／禮物）：' + '、'.join('@' + u for u in nw_[:4]), 'warn')
         except Exception: pass
         try:                                                                    # V1.1.70 硬碟有壞掉的資料夾
             B_ = self._badp()
@@ -42896,7 +42896,9 @@ exit /b 1
             self._video_start(u,d.get('session_id'),d.get('live_start') or time.time())
             if d.get('nows') and not d.get('resumed'):                            # V1.2.29 簽章額度用完：只錄影片
                 try:
-                    m_=f"📼 {self.streamer_names.get(u,u)}（@{u}）開播了，但簽章伺服器今天的額度用完（Euler 免費版一天 100 個直播間）→ 先只錄影片（沒有留言／禮物），早上 8 點額度重算後自動接回聊天室"
+                    w_=str(d.get('nows_why') or '')
+                    why_=('簽章額度快用完，留給 S／A 和重點主播' if 'reserve' in w_ else '簽章伺服器今天的額度用完（Euler 免費版一天 100 個直播間），早上 8 點額度重算後自動接回聊天室' if ('day' in w_.lower() or 'rooms' in w_) else '簽章伺服器連不上／回錯誤，15 分鐘後再試聊天室')
+                    m_=f"📼 {self.streamer_names.get(u,u)}（@{u}）開播了，但{why_} → 先只錄影片（沒有留言／禮物）"
                     self._wd_log(m_); self.statusBar().showMessage(m_, 15000)
                 except Exception: pass
             self._nickname_from_engine(u)
@@ -48583,10 +48585,10 @@ def _cg_patch():
                     self.log = M.LiveLogWriter(self.username, self.session_id, room_id)
                 self.room_id = room_id
                 try:
-                    if self.log: self.log.write('sessions', f'只錄影片：{M.now_iso()} · 簽章伺服器今天的額度用完，連不上聊天室（沒有留言／禮物），影片照錄\n')
+                    if self.log: self.log.write('sessions', f'只錄影片：{M.now_iso()} · 簽章伺服器拒絕（{str(box.get("msg") or "")[:80]}），連不上聊天室（沒有留言／禮物），影片照錄\n')
                 except Exception: pass
                 G.setdefault('nows', {})[self.username] = time.time()
-                self.emit('connected', room_id=room_id, time_source=self.time_source, live_start=self.live_start, session_id=self.session_id, stream_url=url, resumed=resumed, gap=gap, nows=True)
+                self.emit('connected', room_id=room_id, time_source=self.time_source, live_start=self.live_start, session_id=self.session_id, stream_url=url, resumed=resumed, gap=gap, nows=True, nows_why=str(box.get('msg') or '')[:200])
                 t0 = time.time(); miss = unk = 0; why = 'DISCONNECTED'
                 if 'day' in str(box.get('msg') or '').lower():                    # 一天的額度：台灣早上 8 點（UTC 0 點）才重算 → 到時候再試聊天室，中間不要斷（斷了再連可能被 403 擋，10 分鐘沒接回場次就結束）
                     retry_at = (int(time.time() // 86400) + 1) * 86400 + 90
@@ -48780,7 +48782,7 @@ def _cg_patch():
                     G['sign_cap'] = len(D['s'])
                     try: (Path(PACKAGE_ROOT) / '_DB_SSD' / 'cg_sign_cap.json').write_text(json.dumps({'cap': len(D['s']), 't': time.time()}), encoding='utf-8')
                     except Exception: pass
-                if 'SignatureRateLimit' in type(ex).__name__ or 'RATE_LIMIT' in str(ex):   # V1.2.28 記下來：外面改成只錄影片
+                if 'SignatureRateLimit' in type(ex).__name__ or 'RATE_LIMIT' in str(ex) or 'SignAPIError' in [c_.__name__ for c_ in type(ex).__mro__]:   # V1.2.28 記下來：外面改成只錄影片；V1.2.49 簽章伺服器連不上／回錯誤（不是額度）也一樣
                     try:
                         box = getattr(LiveEngine, '_tlm_cv').get()
                         if box is not None: box['sign'] = True; box['client'] = getattr(box.get('eng'), 'client', None); box['msg'] = str(ex)[:300]
