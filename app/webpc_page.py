@@ -290,7 +290,7 @@ video.hv{width:100%;height:100%;background:#000;object-fit:contain;border-radius
 setTimeout(()=>{const sd=document.getElementById("side");if(sd&&!document.getElementById("qsBtn")){const b=document.createElement("button");b.id="qsBtn";b.className="qsBtnPc";b.innerHTML="🔍 快速找 <small>Ctrl+K · ? 快速鍵</small>";b.onclick=qsOpen;sd.insertBefore(b,sd.firstChild);}},0);
 @@SH83@@
 /* TK_V1.0.55 電腦網頁：分頁標題前面顯示待處理數（跟手機紅點同一套） */
-const PC_TODO_K=["nvexp","orphm","pup","ytauth","mem","guard","err","dhealth","pfx"];
+const PC_TODO_K=["nvexp","orphm","pup","ytauth","mem","guard","err","dhealth","pfx","dead"];
 async function pcTodo(){clearTimeout(window._pcTodoT);window._pcTodoT=setTimeout(pcTodo,300000);if(document.hidden)return;let j=null;try{j=await api("/api/pc/smart/sum");}catch(e){}if(!j||!j.items)return;
   const n=j.items.filter(x=>PC_TODO_K.includes(x.k)&&(x.lv==="warn"||x.lv==="bad")).length;const b0=document.title.replace(/^\(\d+\) /,"");document.title=n?`(${n}) ${b0}`:b0;}
 setTimeout(pcTodo,9000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)setTimeout(pcTodo,1500);});
@@ -1291,7 +1291,7 @@ PAGES[18]={render(pg){this.vt=null;pg.innerHTML=`<div class="pg"><h1 class="titl
 /* V0.7.42.021 點「接下來可能開播」的名字：到主播清單、搜尋框填那位 */
 /* V0.7.42.026 智慧功能狀態：點一行跳到那一頁 */
 function smtGo(k){if(k==="pup"){if(typeof pupOpen==="function")pupOpen();return;}if(k==="nvexp"||k==="orphm"){window.LVS_KIND_NEXT=k==="nvexp"?"nv":"orph";go(42);return;}if(k==="ytauth")k="yt";   /* TK_V1.0.09 */
-  const M={pfx:60,chv:13,today:51,dhealth:49,err:22,mem:16,smart:24,review:24,rescue:24,hl:33,reel:33,yt:34,disk:29,guard:30};if(M[k]==null)return;if(M[k]===24){const el=document.querySelector(k==="today"?".cgTd":k==="review"?".cgRv":k==="rescue"?".cgRq":".cgS");if(el){el.scrollIntoView({behavior:"smooth",block:"start"});return;}}go(M[k]);}
+  const M={pfx:60,dead:24,nows:24,chv:13,today:51,dhealth:49,err:22,mem:16,smart:24,review:24,rescue:24,hl:33,reel:33,yt:34,disk:29,guard:30};if(M[k]==null)return;if(M[k]===24){const el=document.querySelector(k==="today"?".cgTd":k==="review"?".cgRv":k==="rescue"?".cgRq":".cgS");if(el){el.scrollIntoView({behavior:"smooth",block:"start"});return;}}go(M[k]);}
 function soonPick(u){const f=()=>{const q=$("#stQ");if(!q)return false;q.value=u;PAGES[10].draw(true);return true;};if(!f()){go(10);setTimeout(f,350);}}
 PAGES[10]={render(pg){pg.innerHTML=`<div class="pg"><div class="row"><h1 class="title">主播清單 Streamers</h1><span class="grow"></span><span class="sub" id="stC"></span><button id="stNv" title="批次設定：照常監控，只錄 M4A 聲音、不錄 MP4；可順便刪掉已存的 MP4">🎧 只錄聲音的主播</button><button id="stDeep" title="對久未開播和 0 場的主播，用 15 種不同方式測試連線">🔬 深度連線測試</button><button id="stEx">⇪ 匯出清單</button><button id="stIm">⇩ 匯入清單</button><input type="file" id="stImF" accept=".json" style="display:none"></div>
 <div class="hero" style="margin-top:6px"><div class="row" style="align-items:stretch"><b style="align-self:center">新增／更新</b><textarea id="stAdd" class="grow" style="height:58px" placeholder="直接貼上：TikTok 主播網址（…/@帳號 或 …/@帳號/live）、[帳號](網址) 加下一行暱稱，或 @帳號。可一次貼多位；已存在的只更新暱稱。Ctrl+Enter 套用"></textarea><button class="start" id="stAddB">套用</button></div><div class="sub" id="stAddR" style="margin-top:4px"></div></div>

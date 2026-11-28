@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.40"
+APP_VERSION = "1.2.41"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -23516,6 +23516,12 @@ try { NLConnect | Out-Null; Unset
         try:
             M = self._smart_info()
             add('smart', '🧠', '智慧排程', f"🔥 {M['hot']} 位熱區加快 · ❄ {M['cold']} 位冷門放慢" + (f" · 🎯 {M['pt_n']} 位開播很準" + (f"（{M['pt_now']} 位快到時間，提早查）" if M.get('pt_now') else '') if M.get('pt_n') else '') if M['on'] else '關閉（設定 → 連線管控）', '' if M['on'] else 'off')
+        except Exception: pass
+        try:                                                                    # V1.2.41 帳號一直找不到（改名／刪帳號）：白白一直查 → 提醒更新主播清單
+            Gd_ = _cg(); dd_ = sorted((u for u, n in (Gd_.get('dead') or {}).items() if n >= 30), key=lambda u: -Gd_['dead'][u])
+            if dd_: add('dead', '👤', '帳號找不到', f'{len(dd_)} 位一直找不到帳號（可能改名或刪帳號）：' + '、'.join('@' + u for u in dd_[:4]) + '；請到主播清單更新帳號或拿掉', 'warn')
+            nw_ = sorted((Gd_.get('nows') or {}).keys())
+            if nw_: add('nows', '📼', '只錄影片', f'{len(nw_)} 位在播但簽章額度用完，只錄影片（沒有留言／禮物）：' + '、'.join('@' + u for u in nw_[:4]), 'warn')
         except Exception: pass
         try:                                                                    # V1.1.70 硬碟有壞掉的資料夾
             B_ = self._badp()

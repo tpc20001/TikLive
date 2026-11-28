@@ -2742,7 +2742,7 @@ const TOOLS=[["緊急事件",[["emg","🚨","緊急處理","C／I 槽堆積、�
 function toolName(k){if(k==="host")return "👤 主播總覽";if(k==="gifs")return "🎞 GIF 製作";for(const [,L] of TOOLS)for(const x of L)if(x[0]===k)return x[1]+" "+x[2];return "工具";}
 /* V0.7.42.026 智慧功能狀態：點一行跳到那一頁 */
 /* TK_V1.0.21 「工具」分頁上的紅點：今天要處理的件數（智慧狀態卡裡 warn／bad 的待辦項目），5 分鐘看一次 */
-const TODO_K=["nvexp","orphm","pup","ytauth","mem","guard","err","dhealth","pfx"];
+const TODO_K=["nvexp","orphm","pup","ytauth","mem","guard","err","dhealth","pfx","dead"];
 async function todoBadge(){clearTimeout(window._todoT);window._todoT=setTimeout(todoBadge,300000);if(document.hidden)return;let j=null;try{j=await J("/api/pc/smart/sum");}catch(e){}
   const el=document.getElementById("ntodo");if(!el||!j||!j.items)return;const n=j.items.filter(x=>TODO_K.includes(x.k)&&(x.lv==="warn"||x.lv==="bad")).length;
   try{if(navigator.setAppBadge){n?navigator.setAppBadge(n).catch(()=>{}):navigator.clearAppBadge&&navigator.clearAppBadge().catch(()=>{});}}catch(e){}   /* TK_V1.0.55 主畫面 App 圖示右上角也顯示待處理數 */
@@ -2751,7 +2751,7 @@ async function todoBadge(){clearTimeout(window._todoT);window._todoT=setTimeout(
 setTimeout(todoBadge,9000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)setTimeout(todoBadge,1500);});
 function smtGo(k){if(k==="today"){location.hash="tool/dtl";return;}   /* TK_V1.0.50 今天漏開頭 → 時間軸 */
 if(k==="mem"){S.scat="perf";location.hash="set";return;}if(k==="err"){S.scat="logx";location.hash="set";return;}if(k==="dhealth"){location.hash="tool/dhh";return;}if(k==="chv"){location.hash="tool/chv";return;}if(k==="pup"){if(typeof pupOpen==="function")pupOpen();return;}if(k==="nvexp"||k==="orphm"){window.LVS_KIND_NEXT=k==="nvexp"?"nv":"orph";location.hash="fx";return;}   /* TK_V1.0.09 */
-  const H={pfx:"tool/pfx",smart:"tool/cg",review:"tool/cg",rescue:"tool/cg",today:"tool/cg",hl:"hl",reel:"hl",yt:"tool/yt",ytauth:"tool/yt",disk:"tool/org",guard:"bg"};if(H[k])location.hash=H[k];}
+  const H={pfx:"tool/pfx",dead:"tool/cg",nows:"tool/cg",smart:"tool/cg",review:"tool/cg",rescue:"tool/cg",today:"tool/cg",hl:"hl",reel:"hl",yt:"tool/yt",ytauth:"tool/yt",disk:"tool/org",guard:"bg"};if(H[k])location.hash=H[k];}
 function viewTools(){$("#clk").textContent="";
   V().innerHTML=`<div id="smtT"></div><div class="tbgS" id="tbgS">🖥 後台狀態讀取中…</div>`+TOOLS.filter(([g])=>g!=="緊急事件"||(typeof LEND!=="undefined"&&LEND.d&&LEND.d.emg_show)).map(([g,L])=>`<div class="tgh">${g}</div><div class="wsGrid">${L.map(([k,ic,t,sub])=>`<button class="wsCard" data-tl="${k}"><i>${ic}</i><b>${t}</b><small>${sub}</small></button>`).join("")}</div>`).join("");
   V().onclick=e=>{const b=e.target.closest("[data-tl]");if(b){const k=b.dataset.tl;if(k==="vb")vbOpen();else if(k==="vg")location.hash="fx";else if(k==="sp")spOpen();else if(k==="nv")nvOpen();else if(k==="bg")location.hash="bg";else if(k==="gift")location.hash="gift";else if(k==="hrank")location.hash="hrank";else location.hash="tool/"+k;return;}if(e.target.closest("#tbgS"))location.hash="bg";};
