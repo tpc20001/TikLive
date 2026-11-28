@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.54"
+APP_VERSION = "1.2.55"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -14370,10 +14370,30 @@ try { NLConnect | Out-Null; Unset
             if names and all(any(x['name'] == n and x.get('state') == 'ready' for x in L) for n in names) and self._yt_prep_ok(sid)[0]: out.append(sid)
         return sorted(out)
 
+    def _hold_on_c(self, f):
+        """V1.2.55 這個 MP4 還在 C（程式那顆 SSD、或 SSD 工作區）→ 先不移到隔離區.
+        原本拿「資料位置」那顆當 C：11 月搬到 R 之後資料位置在 R，R 上的 MP4 全被當成「還在 C」，
+        LOG 11/27–28：466 場、每場一天試 15 次、一次都沒搬成（每次還先檢查 60 張截圖，等於整天白做工）."""
+        try:
+            if self._is_ssd_path(Path(f)): return True
+            d = (Path(str(f)).drive or '').upper(); pr = (Path(str(PACKAGE_ROOT)).drive or '').upper()
+            return bool(d) and d == pr and pr != (Path(str(self.video_root())).drive or '').upper()
+        except Exception: return False
+
     def _yt_delete_ready(self, sids=None, _q=False):
         """刪已經上傳好的場次的 MP4（跟整理 MP4 同一套：先截 20 張、只刪 MP4、剪輯成品不碰）."""
         ok = set(self._yt_ready_sids()); want = [s for s in (sids or sorted(ok)) if int(s) in ok]
         if not want: return {'ok': False, 'message': '沒有已經上傳好、還有 MP4 的場次'}
+        nC = 0
+        try:                                                                    # V1.2.55 MP4 全都還在 C 的場次先不排（排了也搬不了，LOG：每小時白試 400 多場）
+            vi = self._vb_index() or {}; w2 = []
+            for s in want:
+                L = [p for p in (vi.get(int(s)) or []) if str(p).lower().endswith('.mp4')]
+                if L and all(self._hold_on_c(p) for p in L): nC += 1
+                else: w2.append(s)
+            want = w2
+        except Exception: pass
+        if not want: return {'ok': False, 'message': f'{nC} 場的 MP4 都還在 C 槽（SSD），等搬到硬碟再移到隔離區'}
         fv = self._hlf_sids(); fmsg = self._hlf_skip_msg(fv, want); want = [s for s in want if not fv.get(int(s))]   # V0.7.42.033 有 ⭐ 收藏的場次不刪
         if not want: return {'ok': False, 'message': '已經上傳好的場次都有 ⭐ 收藏的片段，沒有刪本機 MP4'}
         st = self._lv_state()
@@ -14382,8 +14402,13 @@ try { NLConnect | Out-Null; Unset
         with ys_['lock']:
             if ys_.get('del_busy'): return {'ok': False, 'message': '上一批還在刪，請稍等'}
             ys_['del_busy'] = True
+        if len(want) >= 30:                                                     # V1.2.55 一次很多（修好之後補做）：這批先在隔離區留 12 小時才自動刪原檔
+            try:
+                if not float(ys_.get('hold_grace') or 0) > time.time():
+                    ys_['hold_grace'] = time.time() + 12 * 3600; self._wd_log(f'YouTube：這次一次移 {len(want)} 場到隔離區，先留 12 小時才照「隔離區自動刪原檔」的設定刪')
+            except Exception: pass
         def work():
-            n = 0
+            n = 0; nf = 0; nb = 0; n0 = 0
             for sid in want:
                 r = self._web_db('SELECT username FROM sessions WHERE id=?', (sid,))
                 if not r: continue
@@ -14392,11 +14417,13 @@ try { NLConnect | Out-Null; Unset
                     time.sleep(1)
                 rr = self.delete_videos(str(r[0][0]), sid, only_mp4=True, force_shots=True, why='yt', hold=True)   # V0.8.20 先移到暫放，等你確認再刪
                 if rr.get('ok'):
-                    n += 1
                     for _ in range(36000):
                         if not self._purge_state().get('running'): break
                         time.sleep(1)
-            self._wd_log(f'YouTube：{n} 場已上傳好的 MP4 移到暫放資料夾（先截 60 張、網址留在場次裡；確認後再按「刪除暫放資料夾」）')
+                    res_ = self._purge_state().get('result') or {}                # V1.2.55 算真的搬了幾個（原本「開始」就算一場：LOG 寫 420 場，其實 0 個）
+                    if int(res_.get('files') or 0): n += 1; nf += int(res_.get('files') or 0); nb += int(res_.get('bytes') or 0)
+                    else: n0 += 1
+            self._wd_log(f'YouTube：{n} 場已上傳好的 MP4 移到暫放資料夾（{nf} 個、{nb / 1e9:.1f} GB；先截 60 張、網址留在場次裡）' + (f'；{n0} 場沒有可以移的 MP4' if n0 else '') + (f'；{nC} 場還在 C 槽先不移' if nC else ''))
             try: self.__dict__.get('_vb_idx', {}).update(t=0)
             except Exception: pass
         threading.Thread(target=self._ytdel_run, args=(work,), name='TikLiveYTDel', daemon=True).start()
@@ -14480,6 +14507,10 @@ try { NLConnect | Out-Null; Unset
         while dst.exists(): dst = d / f"#{sid:05d}__{k}__{f.name}"; k += 1
         if (f.drive or '').upper() != (dst.drive or '').upper(): raise OSError('不同顆槽，不搬')
         sz = f.stat().st_size; ent = {'src': str(f), 'dst': str(dst), 'sid': sid, 'size': sz, 't': round(time.time(), 3)}
+        try:
+            g_ = float(self._yt_state().get('hold_grace') or 0)
+            if g_ > time.time(): ent['grace'] = round(g_)                       # V1.2.55 補做的那一大批：時間到之前不自動刪
+        except Exception: pass
         with _YTH_LOCK:
             L = self._yt_hold_load(); L['items'].append(ent); self._yt_save('yt_hold.json', L)
             try: os.replace(str(f), str(dst))
@@ -14528,6 +14559,67 @@ try { NLConnect | Out-Null; Unset
     #   傳 YouTube、傳好原檔留著（S、A-Dance…）：YouTube 處理好超過 ret.yt_keep_days（7）天 → 移到隔離區 → 跟 YouTube 確認後馬上刪
     #   傳 YouTube、原檔不留（A、A-Sing、G…）：處理好就移到隔離區 → 確認後馬上刪
     #   不動：還在 YouTube 排隊／上傳中／處理中的（不受時間限制）、直播／錄影中、⭐ 收藏、標 +1 待剪輯／+2 保存 的場次
+    BG_TAKEOVER = (('TikLiveRetention', '_tlm_ret', 'on', '_ret_loop'), ('TikLiveCloudUpd', '_tlm_cloud', 'loop', '_cu_loop'))
+
+    def _bg_takeover_tick(self):
+        """V1.2.55 每 60 秒（視窗執行緒、只看時間）：最多 10 分鐘一次，背景檢查熱更新留下的舊版背景迴圈."""
+        if getattr(self, '_handoff', False): return
+        S = self.__dict__.setdefault('_bgto', {'t': 0, 'run': False, 'last': None, 'said': ''})
+        if S['run'] or time.time() - S['t'] < 600: return
+        S['t'] = time.time(); S['run'] = True
+        def run_():
+            try: S['last'] = self._bg_takeover()
+            except Exception as ex: S['last'] = {'err': str(ex)[:200]}
+            finally: S['run'] = False
+        threading.Thread(target=run_, name='TikLiveBgTakeover', daemon=True).start()
+
+    def _bg_takeover(self):
+        """V1.2.55 熱更新後舊版的常駐迴圈交給新版（LOG 11/28 04:31：V1.1.80 的雲端檢查還在跑、說「現在 V1.1.80」；
+        保留期限也一直是最早那版在跑，新版的修正都沒用到）。做法：找出目標程式碼屬於舊版模組的執行緒 →
+        只對清單上的常駐迴圈，讓舊模組的 _app_closing() 對那條執行緒回答「要關了」→ 它自己照正常關程式的路結束 →
+        新版重新開一條。錄影、轉檔、剪輯、上傳…其他舊執行緒完全不碰（它們做完就自己結束）."""
+        me = globals(); app_ = QApplication.instance(); old = {}
+        for t in threading.enumerate():
+            f = getattr(t, '_target', None)
+            g = getattr(getattr(f, '__func__', f), '__globals__', None)
+            if not isinstance(g, dict) or g is me or 'MainWindow' not in g or 'APP_VERSION' not in g: continue
+            old.setdefault(id(g), (g, []))[1].append(t)
+        names = {n: (a, k, m) for n, a, k, m in self.BG_TAKEOVER}; ended = []; seen = []
+        for g, ts in old.values():
+            ver = str(g.get('APP_VERSION') or '?'); seen.append(f"V{ver}：" + '、'.join(f'{n}×{c}' if c > 1 else n for n, c in Counter(t.name for t in ts).most_common(12)))
+            ca = g.get('_app_closing')
+            if not callable(ca): continue
+            for t in ts:
+                if t.name not in names or not t.is_alive(): continue
+                END = getattr(ca, '_tlm_end', None)
+                if END is None:
+                    END = set()
+                    def _app_closing(orig=ca, END=END):
+                        try:
+                            if threading.get_ident() in END: return True
+                        except Exception: pass
+                        try: return orig()
+                        except Exception: return False
+                    _app_closing._tlm_end = END; g['_app_closing'] = ca = _app_closing
+                END.add(t.ident); ended.append((t, ver))
+        t0 = time.time()
+        while any(t.is_alive() for t, _ in ended) and time.time() - t0 < 90: time.sleep(2)
+        gone = [(t.name, v) for t, v in ended if not t.is_alive()]; started = []
+        for n, a, k, m in self.BG_TAKEOVER:                                     # 沒在跑就開（已經在跑的會自己跳過）
+            st = getattr(app_, a, None) if app_ is not None else None
+            was = bool(isinstance(st, dict) and st.get(k))
+            try: getattr(self, m)()
+            except Exception: continue
+            st = getattr(app_, a, None) if app_ is not None else None
+            if not was and isinstance(st, dict) and st.get(k): started.append(n)
+        R = {'t': time.time(), 'old': seen, 'ended': [f'{n}（V{v}）' for n, v in gone], 'stuck': [f'{t.name}（V{v}）' for t, v in ended if t.is_alive()], 'started': started}
+        S = self.__dict__.get('_bgto') or {}; say = '；'.join(seen)
+        if gone or started or R['stuck'] or (say and say != S.get('said')):
+            S['said'] = say
+            try: self._wd_log('🔁 熱更新留下的舊版背景工作：' + (say or '沒有') + (f"；交給新版：{'、'.join(R['ended'])}" if gone else '') + (f"；新版開始：{'、'.join(started)}" if started else '') + (f"；還沒停：{'、'.join(R['stuck'])}（下次再試）" if R['stuck'] else ''))
+            except Exception: pass
+        return R
+
     def _ret_loop(self):
         app_ = QApplication.instance(); st = getattr(app_, '_tlm_ret', None) if app_ is not None else None
         if st is None:
@@ -14788,7 +14880,7 @@ try { NLConnect | Out-Null; Unset
         if not acc: return 0
         wait_h = max(0.0, float(self.cfg('yt.hold_auto_h') or 0))
         with _YTH_LOCK: L = [dict(x) for x in self._yt_hold_load()['items']]
-        due = [x for x in L if now - float(x.get('t') or now) >= wait_h * 3600 and os.path.exists(x['dst'])]
+        due = [x for x in L if now - float(x.get('t') or now) >= wait_h * 3600 and float(x.get('grace') or 0) <= now and os.path.exists(x['dst'])]
         if not due: return 0
         qi = {}
         for it in self._yt_q().get('items') or []:
@@ -17411,10 +17503,8 @@ try { NLConnect | Out-Null; Unset
                 files = [f for f in files if not any(str(Path(f).resolve()).lower().startswith(x) for x in er)]
             except Exception: pass
             if hold:                                                      # V0.8.20 移到暫放：只搬 MP4，其他都不動；還在 C（SSD 工作區）的先不搬（等它搬到 E 下次再說，C 不暫放）
-                jsons = []; cdrv = {(Path(str(PACKAGE_DIR)).drive or '').upper()}
-                try: cdrv.add((Path(str(self._ssd_dir())).drive or '').upper())
-                except Exception: pass
-                n0 = len(files); files = [f for f in files if (Path(f).drive or '').upper() not in cdrv and not self._is_ssd_path(Path(f))]
+                jsons = []
+                n0 = len(files); files = [f for f in files if not self._hold_on_c(f)]
                 if len(files) < n0: res['errors'].append(f'{n0 - len(files)} 個 MP4 還在 C 槽（還沒搬到 E），先不移到暫放')
             st['stage'] = '移到暫放資料夾' if hold else '刪除影片'; st['total'] = len(files) + len(jsons); st['done'] = 0
             for f in list(files) + list(jsons):
@@ -23897,6 +23987,8 @@ try { NLConnect | Out-Null; Unset
     def _anom_tick(self):
         try: self._logup_tick()                                                 # V1.2.12 每天凌晨自動上傳 LOG
         except Exception: pass
+        try: self._bg_takeover_tick()                                           # V1.2.55 熱更新留下的舊版常駐迴圈交給新版
+        except Exception: pass
         try: self._ssd_heal_tick()                                              # V1.2.20 SSD 轉好沒排隊的放回排隊
         except Exception: pass
         try: self._health_tick()
@@ -26290,7 +26382,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
         big.sort(key=lambda x: -x['mb'])
         tn = Counter(_thr_kind(t.name) for t in threading.enumerate())
         r = {'ok': True, 'rss_mb': round(self._mem_rss() / 1e6), 'wins': wins, 'old_wins': len(old), 'refs': refs.most_common(12), 'thr_names': tn.most_common(15),
-             'big': big[:10], 'threads': threading.active_count(), 'secs': round(time.time() - t0, 1), 'reclaim': self.__dict__.get('_mem_rc_last')}
+             'big': big[:10], 'threads': threading.active_count(), 'secs': round(time.time() - t0, 1), 'reclaim': self.__dict__.get('_mem_rc_last'),
+             'takeover': (self.__dict__.get('_bgto') or {}).get('last')}
         try: (LOG_DIR / 'mem_diag.txt').open('a', encoding='utf-8').write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {json.dumps(r, ensure_ascii=False)}\n")
         except Exception: pass
         return r
