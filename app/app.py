@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.16"
+APP_VERSION = "1.2.17"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -25423,6 +25423,86 @@ $r | ConvertTo-Json -Depth 4 -Compress
             c['auto_day'] = day; self._logup_save(c)
             threading.Thread(target=self._logup_run, args=(24.0, '每天自動'), daemon=True, name='TikLiveLogUp').start()
 
+    def _logx_diag(self, t0, t1, E):
+        """V1.2.17 🩺 自動診斷（LOG 第一頁最上面）：把這段時間的卡頓、錯誤、異常、重複失敗、連線拒絕比例、轉檔速度先整理成幾行，
+        不用一個一個檔案看。全部只讀 LOG 資料夾的檔，失敗的部分就略過."""
+        from collections import Counter, defaultdict
+        o = ['── 🩺 自動診斷（先看這裡）──']
+        TS = re.compile(r'^\[(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\] ?(.*)$')
+        def ents(name):
+            try: txt = (LOG_DIR / name).read_text(encoding='utf-8', errors='replace')
+            except Exception: return []
+            out = []; cur = None
+            for ln in txt.splitlines():
+                m = TS.match(ln)
+                if m:
+                    try: t = datetime.strptime(m.group(1), '%Y-%m-%d %H:%M:%S').timestamp()
+                    except Exception: t = 0
+                    cur = [t, m.group(2), []]
+                    if t0 <= t <= t1: out.append(cur)
+                elif cur is not None: cur[2].append(ln)
+            return out
+        norm = lambda x: re.sub(r'\d+', 'N', re.sub(r"'[^']{12,}'", "'…'", x))[:110]
+        GEN = {'run_app', 'run_path', '_run_module_code', '_run_code', 'main', '<module>', 'exec', 'run', '_bootstrap', '_bootstrap_inner', 'work', '_loop'}
+        try:
+            F = ents('ui_freeze_log.txt'); S = defaultdict(lambda: [0, 0.0])
+            for t, head, body in F:
+                m = re.search(r'沒有回應 ([\d.]+)', head); sec = float(m.group(1)) if m else 0.0
+                fr = [x for x in re.findall(r', in (\w+)', '\n'.join(body)) if x not in GEN]
+                k = ' › '.join(list(dict.fromkeys(fr))[-3:]) or '（沒有堆疊）'; S[k][0] += 1; S[k][1] = max(S[k][1], sec)
+            if F:
+                o.append(f'🧊 主程式畫面卡住 {len(F)} 次（最久 {max(v[1] for v in S.values()):.0f} 秒）：')
+                o += [f'    {v[0]}×  最久 {v[1]:.0f} 秒  {k}' for k, v in sorted(S.items(), key=lambda kv: -kv[1][0])[:6]]
+            else: o.append('🧊 主程式畫面沒有卡住紀錄')
+        except Exception: pass
+        for fn, lab in (('ui_error_log.txt', '🐞 程式錯誤'), ('web_error_log.txt', '🌐 網頁錯誤')):
+            try:
+                L = ents(fn); C = Counter()
+                for t, head, body in L:
+                    last = next((x.strip() for x in reversed(body) if x.strip() and not x.startswith(' ')), head)
+                    where = (re.findall(r', in (\w+)', '\n'.join(body)) or [''])[-1]
+                    C[f'{norm(last)}' + (f'（{where}）' if where else '') + f' ← {norm(head)[:50]}'] += 1
+                if L: o.append(f'{lab} {len(L)} 筆：'); o += [f'    {v}×  {k}' for k, v in C.most_common(6)]
+            except Exception: pass
+        try:
+            A = Counter(); last = {}
+            for ln in (LOG_DIR / 'anomaly_log.jsonl').read_text(encoding='utf-8', errors='replace').splitlines():
+                try: d = json.loads(ln)
+                except Exception: continue
+                if t0 <= float(d.get('t') or 0) <= t1: k = str(d.get('title') or d.get('key')); A[k] += 1; last[k] = str(d.get('detail') or '')[:80]
+            if A: o.append('⚠ 資源異常：' + '；'.join(f'{k}×{v}（最後：{last[k]}）' for k, v in A.most_common(6)))
+        except Exception: pass
+        try:
+            U = ents('update_log.txt'); C = Counter()
+            for t, head, body in U:
+                for x in [head] + body:
+                    if re.search(r'✖|失敗|錯誤|出錯|Error', x): C[norm(x.strip())] += 1
+            if C: o.append('🔁 常常重複的失敗訊息：'); o += [f'    {v}×  {k}' for k, v in C.most_common(6) if v >= 3]
+        except Exception: pass
+        try:
+            et = Counter(x.get('etype') for x in E if x.get('type') == 'engine' and x.get('k') == 'retry')
+            tot = sum(et.values())
+            if tot:
+                rej = et.get('FailedParseRoomIdError', 0) + et.get('SignatureRateLimitError', 0)
+                o.append(f'📡 找直播間：{tot:,} 次，沒開播 {et.get("UserOfflineError", 0):,}（正常）、被 TikTok 拒絕／限流 {rej:,}（{rej * 100 // max(1, tot)}%）' + ('　→ 拒絕超過 25%：大概有三分之一的檢查是白做的，開播可能會晚發現' if rej * 4 > tot else ''))
+            hr = defaultdict(lambda: [0, 0])
+            for m in (x for x in E if x.get('type') == 'minute'):
+                h = datetime.fromtimestamp(m['t']).hour; st = m.get('status') or {}; hr[h][0] += sum(int(v) for k, v in (m.get('http') or {}).items() if 'api-live/user/room' in k); hr[h][1] += int(st.get('403') or 0)
+            if hr: o.append('    每小時 找直播間被拒（403）比例：' + ' '.join(f'{h:02d}點{v[1] * 100 // max(1, v[0])}%' for h, v in sorted(hr.items())))
+        except Exception: pass
+        try:
+            M = defaultdict(lambda: [0, 0, 0.0])
+            for ln in _merge_speed_log().read_text(encoding='utf-8').splitlines():
+                try: d = json.loads(ln)
+                except Exception: continue
+                if t0 <= float(d.get('t') or 0) <= t1:
+                    k = d.get('mode', '?') + ('／' + {'h264_nvenc': '顯示卡', 'libx264': 'CPU'}.get(d.get('enc'), d.get('enc')) if d.get('enc') else '')
+                    M[k][0] += 1; M[k][1] += int(d.get('bytes') or 0); M[k][2] += float(d.get('secs') or 0)
+            if M: o.append('🎬 轉檔：' + '；'.join(f'{k} {v[0]} 支、平均 {v[1] / 1e6 / max(1.0, v[2]):.1f} MB/s' for k, v in M.items()))
+        except Exception: pass
+        o.append('')
+        return o
+
     def _logx_summary(self, t0, t1, ev, mem, ci):
         """Human-readable first page: what happened minute by minute, who dropped, which addresses were asked how often."""
         fmt = lambda t: datetime.fromtimestamp(t).strftime('%m-%d %H:%M:%S'); hm = lambda t: datetime.fromtimestamp(t).strftime('%H:%M')
@@ -25442,6 +25522,8 @@ $r | ConvertTo-Json -Depth 4 -Compress
         if isinstance(ci, dict) and ci.get('verdict'):
             v = ci['verdict']; o.append(f'目前判斷：{v.get("title", "") if isinstance(v, dict) else v}')
         o.append('')
+        try: o += self._logx_diag(t0, t1, E)                                 # V1.2.17
+        except Exception: pass
         if mins:
             o.append('── 每分鐘（請求數、連線動作、直播中人數）──')
             o.append('時間   請求  失敗  connecting connected retry error discon ended  直播中  管控(等級/排隊/今日簽章)')
@@ -25454,7 +25536,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             stt = Counter()
             for m in mins: stt.update(m.get('status') or {})
             o += ['', '回應狀態：' + '、'.join(f'{k}×{v}' for k, v in stt.most_common())]
-        drops = [x for x in eng if x.get('k') in ('disconnected', 'ended', 'retry', 'error')]
+        drops = [x for x in eng if x.get('k') in ('disconnected', 'ended', 'retry', 'error') and not (x.get('k') == 'retry' and x.get('etype') == 'UserOfflineError')]   # V1.2.17 「還沒開播」是正常的，不列（原本 300 筆幾乎全是它）
         if drops:
             o += ['', '── 斷線／重試／錯誤（時間順序，最多 300 筆）──']
             for x in drops[:300]:
@@ -42809,7 +42891,7 @@ exit /b 1
             full.append([fmt_real_sec(seg['first_ts']),fmt_elapsed(seg.get('first_live_sec')),seg.get('username',''),seg.get('nickname',''),seg.get('count',0),seg['room_total'] if seg.get('room_total') is not None else '—'])
         for seg in active: add(seg)
         if active and closed: full.append(['──────── 已結算紀錄 ────────','','','','',''])
-        for seg in closed: add(seg)
+        for seg in closed[:3000]: add(seg)                                     # V1.2.17 已結算只列最近 3000 筆（LOG：大場次重畫一次卡 4 秒）
         # Dashboard 即時點讚 (V0.4.51): no time column.
         #   top    = users liking within the last 5 minutes (current streak), most likes first
         #   bottom = every user's total likes this session, most likes first
@@ -42821,9 +42903,10 @@ exit /b 1
             totals[k]=totals.get(k,0)+int(seg.get('count',0) or 0); names[k]=who(seg)
         if totals:
             dash.append(['──── 本場累計 ────',''])
-            dash.extend([names[k],n] for k,n in sorted(totals.items(),key=lambda kv:kv[1],reverse=True))
+            dash.extend([names[k],n] for k,n in sorted(totals.items(),key=lambda kv:kv[1],reverse=True)[:1000])   # V1.2.17 累計只列前 1000 位
         # one model reset per table instead of thousands of row-insert signals
-        self.likes_model.replace_rows(full); self.dash_like.model.replace_rows(dash)
+        P_=lambda R: _PreparedRows(tuple('' if x is None else str(x) for x in r) for r in R)
+        self.likes_model.replace_rows(P_(full), prepared=True); self.dash_like.model.replace_rows(P_(dash), prepared=True)
         QTimer.singleShot(0, lambda st=like_state: self._restore_like_scroll(self.likes_table,st))
         QTimer.singleShot(0, lambda st=dash_like_state: self._restore_like_scroll(self.dash_like,st))
         self._identity_dirty=True
