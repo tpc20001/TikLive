@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.21"
+APP_VERSION = "1.2.22"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -25576,10 +25576,24 @@ $r | ConvertTo-Json -Depth 4 -Compress
             if tot:
                 rej = et.get('FailedParseRoomIdError', 0) + et.get('SignatureRateLimitError', 0)
                 o.append(f'📡 找直播間：{tot:,} 次，沒開播 {et.get("UserOfflineError", 0):,}（正常）、被 TikTok 拒絕／限流 {rej:,}（{rej * 100 // max(1, tot)}%）' + ('　→ 拒絕超過 25%：大概有三分之一的檢查是白做的，開播可能會晚發現' if rej * 4 > tot else ''))
+            uu = Counter((x.get('etype'), x.get('u')) for x in E if x.get('type') == 'engine' and x.get('k') == 'retry' and x.get('etype') in ('UserNotFoundError', 'AgeRestrictedError'))   # V1.2.22 一直失敗、而且不會自己好的主播
+            nf = [f'@{u}（{c} 次）' for (e_, u), c in uu.most_common() if e_ == 'UserNotFoundError' and c >= 10]
+            ar = [f'@{u}（{c} 次）' for (e_, u), c in uu.most_common() if e_ == 'AgeRestrictedError' and c >= 10]
+            if nf: o.append('    👤 找不到這個帳號（可能改名或刪帳號，到主播清單更新帳號或拿掉）：' + '、'.join(nf[:8]))
+            if ar: o.append('    🔞 18+ 年齡限制的直播（沒有登入 Cookie 錄不到，一直檢查也沒用）：' + '、'.join(ar[:8]))
             hr = defaultdict(lambda: [0, 0])
             for m in (x for x in E if x.get('type') == 'minute'):
                 h = datetime.fromtimestamp(m['t']).hour; st = m.get('status') or {}; hr[h][0] += sum(int(v) for k, v in (m.get('http') or {}).items() if 'api-live/user/room' in k); hr[h][1] += int(st.get('403') or 0)
             if any(v[0] >= 20 for v in hr.values()): o.append('    每小時 找直播間被拒（403）比例：' + ' '.join(f'{h:02d}點{v[1] * 100 // max(1, v[0])}%' for h, v in sorted(hr.items()) if v[0] >= 20))
+        except Exception: pass
+        try:                                                                    # V1.2.22 現在的主程式：記憶體、執行緒（最多的是哪幾種）
+            import collections as _co
+            rss = 0
+            try:
+                import psutil; rss = psutil.Process().memory_info().rss
+            except Exception: pass
+            top_ = _co.Counter(re.sub(r'[-_ ]?\d+$', '', t.name or '?') for t in threading.enumerate()).most_common(4)
+            o.append(f'🖥 現在：主程式記憶體 {rss / 1e9:.1f} GB、執行緒 {threading.active_count()} 個（最多：' + '、'.join(f'{k}×{v}' for k, v in top_) + '）')
         except Exception: pass
         try:                                                                    # V1.2.20 SSD 上轉好、還沒搬到硬碟的
             root = self._ssd_dir(); n_ = 0; b_ = 0; old_ = 0
