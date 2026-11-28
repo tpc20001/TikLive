@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.32"
+APP_VERSION = "1.2.33"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -22794,6 +22794,13 @@ try { NLConnect | Out-Null; Unset
             self._wd_log(msg)
             try: self._nf_act(msg, auto=True)
             except Exception: pass
+        if int(G['level']) == 0 and c.get('on', True):                          # V1.2.33 回全速不一口氣：從 50% 開始，每分鐘拒絕 <15% 就 +10%，>30% 就 ×0.8（像網路塞車控制）
+            rp_ = float(G.get('ramp') or 1.0)
+            if lv > 0: rp_ = 0.5                                                 # 剛回全速
+            elif n5 >= 20 and r5 > 0.3: rp_ = max(0.45, rp_ * 0.8)
+            elif r5 < 0.15: rp_ = min(1.0, rp_ + 0.1)
+            G['ramp'] = round(rp_, 3)
+        else: G['ramp'] = 1.0
         if int(G['level']) == 2 and since >= 1800 and r5 >= 0.6:
             self._anom('cg_block', 'warn', 'TikTok 持續限制這台電腦', f'已經大幅放慢 {since / 60:.0f} 分鐘，拒絕比例還是 {r5 * 100:.0f}%',
                        '先不要重新啟動（不會換網址，還會斷掉直播中的場次）；可以考慮縮編主播清單（主播清單 →「🚦 連線管控／縮編」）。')
@@ -22941,7 +22948,7 @@ try { NLConnect | Out-Null; Unset
             if sc >= 0.2 and int(p.get('n') or 0) >= 3: hot.append((sc + (0.3 if u in (G.get('rv_late') or ()) else 0.0), u))   # 錄製檢討：常常晚連上的優先
             elif cd and u not in (G.get('rv_nocold') or ()): cold.append(u)
         hot.sort(reverse=True); c = G['cfg']
-        rate_now = float(c.get('rate', 80)) * _CG_LEVEL_RATE[min(2, int(G['level']))]
+        rate_now = float(c.get('rate', 80)) * _CG_LEVEL_RATE[min(2, int(G['level']))] * (float(G.get('ramp') or 1.0) if not int(G['level']) else 1.0)
         att1 = sum(1 for t in list(G['att'])[-600:] if now - t <= 60)
         room = max(0.0, rate_now * 0.8 - att1)                                  # 上限還沒用到的空間（只用一半，留 2 成給續寫／重點）
         k = 0 if int(G['level']) else int(len(cold) * 0.5 + room * 0.5)          # 加快的名額＝冷門省下來的＋空著的一半；被限制時完全不加快，不多發請求
@@ -23659,7 +23666,7 @@ try { NLConnect | Out-Null; Unset
         except Exception: http_n = 0
         dl = [k for t, k in list(G['dis']) if now - t <= 600]
         return {'on': bool(c.get('on', True)), 'level': lv, 'level_name': _CG_LEVEL_NAME[lv], 'level_min': round((now - float(G['level_t'] or now)) / 60),
-                'rate': int(c.get('rate', 80)), 'rate_now': int(c.get('rate', 80) * _CG_LEVEL_RATE[lv]), 'att_min': att1, 'http_min': http_n,
+                'rate': int(c.get('rate', 80)), 'rate_now': int(c.get('rate', 80) * _CG_LEVEL_RATE[lv] * (float(G.get('ramp') or 1.0) if not lv else 1.0)), 'ramp': float(G.get('ramp') or 1.0) if not lv else 1.0, 'att_min': att1, 'http_min': http_n,
                 'block_pct': round(r5 * 100), 'n5': n5, 'res10': dict(res), 'q': [len(x) for x in G['q']], 'wait_avg': round(sum(waits) / len(waits)) if waits else 0,
                 'stale': len(G['stale']), 'stale_mult': int(c.get('stale_mult', 3)), 'stale_days': int(c.get('stale_days', 7)), 'dead': sum(1 for v in list(G['dead'].values()) if v >= 3), 'probe_n': int(G.get('probe_n') or 0), 'nows': sorted((G.get('nows') or {}).keys()), 'srooms': len((G.get('sroom') or {}).get('s') or ()) if (G.get('sroom') or {}).get('d') == int(time.time() // 86400) else 0, 'scap': max(0, int(G.get('sign_cap') or 0)), 'srsv': int(c.get('sign_reserve', 15)), 'l0_fail': int(G.get('l0_fail') or 0), 'l0_wait': 30 * 2 ** min(3, int(G.get('l0_fail') or 0)),
                 'api_first': bool(c.get('api_first', True)), 'route': {'api': rt('api'), 'html': rt('html')},
@@ -48369,7 +48376,7 @@ def _cg_cls(eng):
 
 def _cg_refill(G):
     now = time.monotonic(); c = G['cfg']
-    per_s = max(0.05, float(c.get('rate', 80)) / 60.0 * _CG_LEVEL_RATE[min(2, int(G['level']))])
+    per_s = max(0.05, float(c.get('rate', 80)) / 60.0 * _CG_LEVEL_RATE[min(2, int(G['level']))] * (min(1.0, max(0.45, float(G.get('ramp') or 1.0))) if not int(G['level']) else 1.0))   # V1.2.33 回全速慢慢加
     cap = max(2.0, per_s * 6)
     G['tokens'] = min(cap, G['tokens'] + (now - G['tt']) * per_s); G['tt'] = now
 
@@ -48540,6 +48547,7 @@ def _cg_patch():
                     elif sm == 'hot' and m <= 1.0 and not G['level']: return max(min(d, 30.0), min(d, d * float(sc.get('hot', 0.5)) * random.uniform(0.92, 1.08)))
                 except Exception: pass
                 m *= _CG_LEVEL_MULT[min(2, int(G['level']))]
+                if not int(G['level']) and float(G.get('ramp') or 1.0) < 1.0: m *= 1.0 / max(0.45, float(G.get('ramp') or 1.0))   # V1.2.33 回全速慢慢加
                 return min(1800.0, d * m * random.uniform(0.92, 1.08)) if m > 1 else d
             except Exception: return d
         L._tlm_orig_nrd = o2; L._next_retry_delay = _next_retry_delay
