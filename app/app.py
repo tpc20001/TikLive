@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.19"
+APP_VERSION = "1.2.20"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -23858,6 +23858,8 @@ try { NLConnect | Out-Null; Unset
     def _anom_tick(self):
         try: self._logup_tick()                                                 # V1.2.12 每天凌晨自動上傳 LOG
         except Exception: pass
+        try: self._ssd_heal_tick()                                              # V1.2.20 SSD 轉好沒排隊的放回排隊
+        except Exception: pass
         try: self._health_tick()
         except Exception: self._ui_error('health tick')
         try: self._netfix_queue()                                               # V0.7.42.025 只處理你按的「重建連線」排隊（之前這裡誤呼叫每 2 秒的流量 tick）
@@ -25578,6 +25580,17 @@ $r | ConvertTo-Json -Depth 4 -Compress
             for m in (x for x in E if x.get('type') == 'minute'):
                 h = datetime.fromtimestamp(m['t']).hour; st = m.get('status') or {}; hr[h][0] += sum(int(v) for k, v in (m.get('http') or {}).items() if 'api-live/user/room' in k); hr[h][1] += int(st.get('403') or 0)
             if any(v[0] >= 20 for v in hr.values()): o.append('    每小時 找直播間被拒（403）比例：' + ' '.join(f'{h:02d}點{v[1] * 100 // max(1, v[0])}%' for h, v in sorted(hr.items()) if v[0] >= 20))
+        except Exception: pass
+        try:                                                                    # V1.2.20 SSD 上轉好、還沒搬到硬碟的
+            root = self._ssd_dir(); n_ = 0; b_ = 0; old_ = 0
+            for d in root.glob('*/session_*'):
+                mp = list(d.glob('*.mp4'))
+                if mp and not any(d.glob('*.flv')):
+                    n_ += 1; b_ += sum(f.stat().st_size for f in mp)
+                    try: old_ = max(old_, (time.time() - d.stat().st_mtime) / 3600)
+                    except Exception: pass
+            with _HddLane.get().cv: qn_ = len(_HddLane.get().pub)
+            o.append(f'💽 SSD 上轉好、還沒搬到硬碟：{n_} 場、{b_ / 1e9:.1f} GB（最久放了 {old_:.0f} 小時）；搬檔排隊 {qn_} 場' + ('　→ 放超過 6 小時：搬檔可能卡住' if old_ > 6 else ''))
         except Exception: pass
         try:
             M = defaultdict(lambda: [0, 0, 0.0])
@@ -28015,6 +28028,35 @@ $r | ConvertTo-Json -Depth 4 -Compress
         if n:
             try: self._wd_log(f'分流：I 槽上有 {n} 部 FLV 沒在轉檔排隊（重開程式前搬過去的），已補排進 I 那條')
             except Exception: pass
+
+    def _ssd_heal_tick(self):
+        """V1.2.20 自我修復（每 30 分鐘，背景）：SSD 工作區裡「已經轉好 MP4、沒在錄、沒在轉、沒在排隊、放超過 20 分鐘」的場次，
+        放回搬到硬碟的排隊。以前只有開程式時才會掃（1.1.82～1.2.13 搬檔壞掉時被丟掉的那些，修好後不重開程式就不會再搬）."""
+        if time.time() - float(self.__dict__.get('_ssd_heal_t') or 0) < 1800 or self.__dict__.get('_ssd_heal_busy'): return
+        self._ssd_heal_t = time.time(); self._ssd_heal_busy = True
+        def work():
+            n = 0
+            try:
+                root = self._ssd_dir()
+                if not root.exists(): return
+                lane = _HddLane.get(); active = self._active_rec_dirs(); q = _merge_queue()
+                conv = set(str(x) for x in list(q.get('waiting') or [])) | {str(x or '') for x in _mq_act_t(q)} | set(self.__dict__.get('_video_finalizing') or ())
+                with lane.cv: inq = set(lane.pub) | ({lane.cur[1]} if lane.cur else set())
+                for d in root.glob('*/session_*'):
+                    sd = str(d)
+                    if not d.is_dir() or sd in active or sd in conv or sd in inq: continue
+                    if any(d.glob('*.flv')) or any(d.glob('*.copying')) or any(d.glob('*.part')) or (d / '_merge_work').exists() or not any(d.glob('*.mp4')): continue
+                    try:
+                        if time.time() - d.stat().st_mtime < 1200: continue
+                    except Exception: continue
+                    lane.put('publish', sd); n += 1
+                    if n >= 60: break
+                if n: self._wd_log(f'🩹 自我修復：SSD 上有 {n} 場轉好了但沒在排隊搬到硬碟 → 放回排隊')
+            except Exception:
+                try: self._ui_error('ssd heal')
+                except Exception: pass
+            finally: self._ssd_heal_busy = False
+        threading.Thread(target=work, daemon=True, name='TikLiveSsdHeal').start()
 
     def _ovf_drain(self):
         """V0.7.42.045 分流資料夾當緩衝區：C 不緊急（HDD 排隊空、沒在搬、沒暫停、C 剩 ≥ 2 倍保留空間）就放一場（最舊的）進 HDD 排隊，
