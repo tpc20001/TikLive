@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.29"
+APP_VERSION = "1.2.30"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -22732,6 +22732,10 @@ try { NLConnect | Out-Null; Unset
     def _cg_tick(self):
         """Every minute on the window thread: settings → engines, which streamers are quiet, how much TikTok is refusing → level."""
         self._cg_cfg_push(); G = _cg(); c = G['cfg']; now = time.time()
+        try:                                                                    # V1.2.30 重點（S／A／A-Dance／A-Sing＋紅色重點）：簽章額度快用完時留給他們
+            RG = self._rv_grades() or {}
+            G['vip'] = {str(u).lower() for u, x in RG.items() if isinstance(x, dict) and x.get('g') in ('S', 'A', 'AD', 'AS')} | {str(u).lower() for u in self.priority_streamers}
+        except Exception: pass
         if G.get('patch_code') is not _cg_patch.__code__:                        # V1.2.25 輕量更新換了 _cg_patch 的內容 → 重新裝一次（可以重複裝），新的連線規則馬上生效
             G['patch_code'] = _cg_patch.__code__
             try: _cg_patch()
@@ -23657,7 +23661,7 @@ try { NLConnect | Out-Null; Unset
         return {'on': bool(c.get('on', True)), 'level': lv, 'level_name': _CG_LEVEL_NAME[lv], 'level_min': round((now - float(G['level_t'] or now)) / 60),
                 'rate': int(c.get('rate', 80)), 'rate_now': int(c.get('rate', 80) * _CG_LEVEL_RATE[lv]), 'att_min': att1, 'http_min': http_n,
                 'block_pct': round(r5 * 100), 'n5': n5, 'res10': dict(res), 'q': [len(x) for x in G['q']], 'wait_avg': round(sum(waits) / len(waits)) if waits else 0,
-                'stale': len(G['stale']), 'stale_mult': int(c.get('stale_mult', 3)), 'stale_days': int(c.get('stale_days', 7)), 'dead': sum(1 for v in list(G['dead'].values()) if v >= 3), 'probe_n': int(G.get('probe_n') or 0), 'nows': sorted((G.get('nows') or {}).keys()), 'l0_fail': int(G.get('l0_fail') or 0), 'l0_wait': 30 * 2 ** min(3, int(G.get('l0_fail') or 0)),
+                'stale': len(G['stale']), 'stale_mult': int(c.get('stale_mult', 3)), 'stale_days': int(c.get('stale_days', 7)), 'dead': sum(1 for v in list(G['dead'].values()) if v >= 3), 'probe_n': int(G.get('probe_n') or 0), 'nows': sorted((G.get('nows') or {}).keys()), 'srooms': len((G.get('sroom') or {}).get('s') or ()) if (G.get('sroom') or {}).get('d') == int(time.time() // 86400) else 0, 'scap': max(0, int(G.get('sign_cap') or 0)), 'srsv': int(c.get('sign_reserve', 15)), 'l0_fail': int(G.get('l0_fail') or 0), 'l0_wait': 30 * 2 ** min(3, int(G.get('l0_fail') or 0)),
                 'api_first': bool(c.get('api_first', True)), 'route': {'api': rt('api'), 'html': rt('html')},
                 'sign': {'day': S.get('day'), 'n': int(S.get('n') or 0), 'ok': int(S.get('ok') or 0), 'lim': int(S.get('lim') or 0),
                          'limited': bool(S.get('lim_t') and now - float(S['lim_t']) < 900), 'waiting': sum(1 for t in list(G['sign_err'].values()) if now - t < 3600)},
@@ -48621,6 +48625,22 @@ def _cg_patch():
             G = _cg(); S = G['sign']; day = time.strftime('%Y-%m-%d')
             if S.get('day') != day: S.update(day=day, n=0, ok=0, lim=0, lim_t=0.0)
             S['n'] = int(S.get('n') or 0) + 1
+            D = G.setdefault('sroom', {'d': None, 's': set()}); dd = int(time.time() // 86400)    # V1.2.30 今天（UTC，台灣早上 8 點換日）用過簽章的直播間
+            if D.get('d') != dd: D['d'] = dd; D['s'] = set(); D['full'] = (time.time() % 86400) < 3 * 3600   # 換日後 3 小時內開始算的才是整天的數（中途重開的不拿來學）
+            try: rid_ = str((getattr(self._web, 'params', None) or {}).get('room_id') or '')
+            except Exception: rid_ = ''
+            try:
+                if not G.get('sign_cap'):
+                    try: G['sign_cap'] = int(json.loads((Path(PACKAGE_ROOT) / '_DB_SSD' / 'cg_sign_cap.json').read_text(encoding='utf-8')).get('cap') or 0)
+                    except Exception: G['sign_cap'] = -1
+                cap_ = int(G.get('sign_cap') or 0); rsv_ = int(G['cfg'].get('sign_reserve', 15))
+                box_ = getattr(LiveEngine, '_tlm_cv').get(); u_ = str(getattr((box_ or {}).get('eng'), 'username', '') or '').lower()
+                if cap_ > 20 and rsv_ > 0 and rid_ and rid_ not in D['s'] and len(D['s']) >= cap_ - rsv_ and u_ and u_ not in (G.get('vip') or set()):
+                    G.setdefault('sign_saved', set()).add(u_)
+                    box_['sign'] = True; box_['client'] = getattr(box_.get('eng'), 'client', None); box_['msg'] = 'reserve day'
+                    raise RuntimeError(f'[RATE_LIMIT] 簽章額度快用完（今天 {len(D["s"])}/{cap_} 個直播間），留給重點主播：這位先只錄影片 (reserve day)')
+            except RuntimeError: raise
+            except Exception: pass
             try:
                 try: r = await of(self, *a, **k)
                 except TypeError as ex:                                           # TikTokLive builds its 429 error from a header that may be missing
@@ -48628,6 +48648,10 @@ def _cg_patch():
                     if 'calculate_retry_after' in ''.join(_tb.format_tb(ex.__traceback__)): raise RuntimeError('[RATE_LIMIT] 簽章伺服器拒絕（429，沒有附 RateLimit 標頭）') from ex
                     raise
             except Exception as ex:
+                if ('rooms_day' in str(ex) or 'daily_rooms' in str(ex)) and D.get('full') and len(D['s']) >= 20 and len(D['s']) != int(G.get('sign_cap') or 0):   # V1.2.30 學到一天幾個直播間（存起來，重開也記得）
+                    G['sign_cap'] = len(D['s'])
+                    try: (Path(PACKAGE_ROOT) / '_DB_SSD' / 'cg_sign_cap.json').write_text(json.dumps({'cap': len(D['s']), 't': time.time()}), encoding='utf-8')
+                    except Exception: pass
                 if 'SignatureRateLimit' in type(ex).__name__ or 'RATE_LIMIT' in str(ex):   # V1.2.28 記下來：外面改成只錄影片
                     try:
                         box = getattr(LiveEngine, '_tlm_cv').get()
@@ -48635,6 +48659,7 @@ def _cg_patch():
                     except Exception: pass
                 raise
             S['ok'] = int(S.get('ok') or 0) + 1
+            if rid_: D['s'].add(rid_)
             return r
         F._tlm_orig_call = of; F.__call__ = sign_call
     except Exception: pass
