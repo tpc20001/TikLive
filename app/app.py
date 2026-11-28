@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.25"
+APP_VERSION = "1.2.26"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -18291,8 +18291,8 @@ try { NLConnect | Out-Null; Unset
         """V1.2.19 套用：舊函式直接換新的程式碼（按鈕、計時器接著的也一起換），新函式加進去；然後跟網頁輕量更新一樣收尾."""
         r = _pylight_apply(globals(), plan)
         if r: self._web_update_log(f'⚡ 輕量更新做不到（{r}）→ 改用一般熱更新'); return False
-        n1, n2 = len(plan['swap']), len(plan['add'])
-        self._upd_light_apply(why=f'改了 {n1} 個函式' + (f'、新增 {n2} 個' if n2 else '') + '，直接換掉程式碼')
+        n1, n2, n3 = len(plan['swap']), len(plan['add']), len(plan.get('exec') or [])
+        self._upd_light_apply(why=f'改了 {n1} 個函式' + (f'、新增 {n2} 個' if n2 else '') + (f'、{n3} 個常數／類別' if n3 else '') + '，直接換掉程式碼')
         return True
 
     def _web_update_go(self):
@@ -46651,14 +46651,49 @@ def _pylight_plan(old_src, new_src):
     def ui_only(name): return name in NOREL or name.startswith(('page_', 'build_', '_build', 'make_'))
     try: O = ast.parse(old_src); N = ast.parse(new_src)
     except SyntaxError as ex: return None, f'語法：{ex}'
-    swap, add = [], []
+    swap, add, ex, tw, defs = [], [], [], set(), {}
+    def compat(o, n):
+        rd = lambda f: ast.dump(f.returns) if f.returns is not None else ''
+        if [ast.dump(d) for d in o.decorator_list] != [ast.dump(d) for d in n.decorator_list] or rd(o) != rd(n): return '的裝飾改了'
+        A, B = o.args, n.args
+        pa, pb = [a.arg for a in A.posonlyargs + A.args], [a.arg for a in B.posonlyargs + B.args]
+        if pb[:len(pa)] != pa or len(B.posonlyargs) != len(A.posonlyargs): return '的參數改了（不是只在後面加）'
+        if len(pb) - len(B.defaults) > len(pa) - len(A.defaults): return '多了一定要給的參數'
+        if (A.vararg and not B.vararg) or (A.kwarg and not B.kwarg): return '拿掉了 *args／**kwargs'
+        ka = {a.arg for a in A.kwonlyargs}; kb = {a.arg: d for a, d in zip(B.kwonlyargs, B.kw_defaults)}
+        if not ka <= set(kb) or any(kb[k] is None for k in set(kb) - ka): return '關鍵字參數改了'
+        return ''
+    def tnames(n):                                                          # V1.2.26 這一句指定了哪些名字（只認簡單的名字）
+        if isinstance(n, (FD + (ast.ClassDef,))): return {n.name}
+        if isinstance(n, (ast.Import, ast.ImportFrom)):
+            return set() if any(a.name == '*' for a in n.names) else {a.asname or a.name.split('.')[0] for a in n.names}
+        T = n.targets if isinstance(n, ast.Assign) else [n.target] if isinstance(n, ast.AnnAssign) and n.value is not None else []
+        out = set()
+        for t in T:
+            for x in (t.elts if isinstance(t, ast.Tuple) else [t]):
+                if not isinstance(x, ast.Name): return set()
+                out.add(x.id)
+        return out
+    def lit(v):                                                             # V1.2.26 不會被改動的常數（數字、字串、tuple…）
+        try: x = ast.literal_eval(v)
+        except Exception: return False
+        def imm(y): return isinstance(y, (int, float, str, bytes, bool, type(None))) or (isinstance(y, (tuple, frozenset)) and all(imm(z) for z in y))
+        return imm(x)
     def walk(ob, nb, pre):
         onames = {x.name for x in ob if isinstance(x, FD + (ast.ClassDef,))}
+        oall = set().union(*[tnames(x) for x in ob]) if ob else set()
         i = j = 0
         while i < len(ob) or j < len(nb):
             o = ob[i] if i < len(ob) else None; n = nb[j] if j < len(nb) else None
             if o is not None and n is not None and isinstance(o, FD) and isinstance(n, FD) and o.name == n.name:
-                if type(o) is not type(n) or sig(o) != sig(n): return f'{pre}{o.name} 的參數／裝飾改了'
+                if type(o) is not type(n): return f'{pre}{o.name} 的參數／裝飾改了'
+                if sig(o) != sig(n):                                               # V1.2.26 只是在後面加了有預設值的參數（舊的呼叫方式照樣能用）→ 可以
+                    why_ = compat(o, n)
+                    if why_: return f'{pre}{o.name} {why_}'
+                    if ui_only(n.name): return f'{pre}{n.name} 只在開程式／建畫面時跑'
+                    defs[pre + n.name] = ([ast.unparse(d) for d in n.args.defaults], {a.arg: ast.unparse(d) for a, d in zip(n.args.kwonlyargs, n.args.kw_defaults) if d is not None})
+                    if pre + n.name not in swap: swap.append(pre + n.name)
+                    i += 1; j += 1; continue
                 if bod(o) != bod(n):
                     if ui_only(n.name): return f'{pre}{n.name} 只在開程式／建畫面時跑'
                     swap.append(pre + n.name)
@@ -46676,11 +46711,34 @@ def _pylight_plan(old_src, new_src):
                 add.append((pre + n.name, dec[0] if dec else '', [ast.unparse(d) for d in n.args.defaults],
                             {a.arg: ast.unparse(d) for a, d in zip(n.args.kwonlyargs, n.args.kw_defaults) if d is not None})); j += 1; continue
             if o is not None and n is not None and ast.dump(o) == ast.dump(n): i += 1; j += 1; continue
+            if n is not None and isinstance(n, (ast.Assign, ast.AnnAssign, ast.Import, ast.ImportFrom, ast.ClassDef)) and (not pre or not isinstance(n, ast.ClassDef)):   # V1.2.26 新增的常數／import／類別
+                nm = tnames(n)
+                if nm and not (nm & oall):
+                    if isinstance(n, ast.ClassDef) and n.name.startswith(('page_', 'Main')): return f'新類別 {n.name}'
+                    ex.append((pre, ast.unparse(n), sorted(nm))); j += 1; continue
+            if (o is not None and n is not None and isinstance(o, ast.Assign) and isinstance(n, ast.Assign) and tnames(o) and tnames(o) == tnames(n)
+                    and [ast.dump(t) for t in o.targets] == [ast.dump(t) for t in n.targets] and lit(o.value) and lit(n.value)):   # V1.2.26 常數改了數字／文字
+                ex.append((pre, ast.unparse(n), sorted(tnames(n)))); tw.update(pre + k for k in tnames(n)); i += 1; j += 1; continue
             return f'{pre or "最外層"}有不是函式的地方改了（第 {getattr(n or o, "lineno", "?")} 行附近）'
         return None
     r = walk([x for x in O.body if not isver(x)], [x for x in N.body if not isver(x)], '')
     if r: return None, r
-    if not swap and not add: return {'swap': [], 'add': []}, '沒有 Python 改動'
+    if tw:                                                                  # V1.2.26 改了的常數如果開程式時就被拿去算別的（預設值、別的常數）→ 換了也不會跟著變 → 不行
+        used = set()
+        def mref(nodes, pre):
+            for x in nodes:
+                if isinstance(x, FD):
+                    for d in x.decorator_list + x.args.defaults + [k for k in x.args.kw_defaults if k is not None]: mref([d], pre)
+                elif isinstance(x, ast.ClassDef):
+                    for d in x.bases + x.decorator_list + [k.value for k in x.keywords]: mref([d], pre)
+                    mref(x.body, pre + x.name + '.')
+                else:
+                    for y in ast.walk(x):
+                        if isinstance(y, ast.Name) and isinstance(y.ctx, ast.Load): used.update((y.id, pre + y.id))
+        mref(N.body, '')
+        bad = sorted(k for k in tw if k in used)
+        if bad: return None, f'{bad} 開程式時就被拿去算別的'
+    if not swap and not add and not ex: return {'swap': [], 'add': [], 'exec': []}, '沒有 Python 改動'
     try: code = compile(new_src, 'app.py', 'exec')
     except Exception as ex: return None, f'編譯：{ex}'
     Q = {}
@@ -46691,7 +46749,7 @@ def _pylight_plan(old_src, new_src):
                 if '<locals>' not in k.co_qualname: coll(k, depth + 1)
     coll(code, 0)
     try:
-        return {'swap': [(q, Q[q]) for q in swap], 'add': [(q, Q[q], dc, df, kw) for q, dc, df, kw in add]}, ''
+        return {'swap': [(q, Q[q]) for q in swap], 'add': [(q, Q[q], dc, df, kw) for q, dc, df, kw in add], 'exec': ex, 'defs': defs}, ''
     except KeyError as ex: return None, f'找不到 {ex}'
 
 
@@ -46699,6 +46757,18 @@ def _pylight_apply(G, plan):
     """把 plan 套到正在跑的模組（G＝globals()）：舊函式物件直接換 __code__（按鈕／計時器接著的也會用新的）；新函式加進去.
     先全部檢查過才動手；有一個不行就整個不做，回傳原因."""
     import types
+    NS = {}; CA = []; CL = {}                                                   # V1.2.26 新增／改了的常數、import、類別：先算好（還沒動到正在跑的程式）
+    for pre, src, names in sorted(plan.get('exec') or [], key=lambda x: bool(x[0])):    # 最外層的先（類別層的可能用到新的最外層常數）
+        try:
+            if not pre: exec(compile(src, 'app.py', 'exec'), G, NS); miss = [k for k in names if k not in NS]
+            else:
+                cls = G.get(pre.split('.')[0])
+                for k_ in pre.strip('.').split('.')[1:]: cls = getattr(cls, k_, None)
+                if not isinstance(cls, type): return f'找不到類別 {pre}'
+                L = CL.setdefault(id(cls), {**NS, **dict(vars(cls))}); exec(compile(src, 'app.py', 'exec'), G, L); miss = [k for k in names if k not in L]   # 同一個類別接著算（K2 = K + 10 用到新的 K）
+                CA.append((cls, {k: L[k] for k in names if k in L}))
+        except Exception as ex: return f'{pre}{names} 算不出來：{ex}'
+        if miss: return f'{pre}{miss} 沒有設定到'
     todo = []
     for q, c in plan['swap']:
         parts = q.split('.'); obj = G.get(parts[0])
@@ -46708,19 +46778,29 @@ def _pylight_apply(G, plan):
             if isinstance(obj, (staticmethod, classmethod)): obj = obj.__func__
         if not isinstance(obj, types.FunctionType): return f'{q} 不是一般函式'
         if obj.__code__.co_freevars != c.co_freevars: return f'{q} 的閉包變數不一樣'
-        todo.append((obj, c))
+        dd = None
+        if q in (plan.get('defs') or {}):                                        # V1.2.26 參數在後面加了：預設值也要跟著換
+            df_, kw_ = plan['defs'][q]
+            try: dd = (tuple(eval(x, G, NS) for x in df_) or None, {k: eval(v, G, NS) for k, v in kw_.items()} or None)
+            except Exception as ex: return f'{q} 的預設值：{ex}'
+        todo.append((obj, c, dd))
     adds = []
     for q, c, dc, df, kw in plan['add']:
         if c.co_freevars: return f'新函式 {q} 有閉包（super 之類）'
         parts = q.split('.')
         if len(parts) == 2 and not isinstance(G.get(parts[0]), type): return f'找不到類別 {parts[0]}'
         try:
-            f = types.FunctionType(c, G, parts[-1], tuple(eval(x, G) for x in df) or None)
-            if kw: f.__kwdefaults__ = {k: eval(v, G) for k, v in kw.items()}
+            f = types.FunctionType(c, G, parts[-1], tuple(eval(x, G, NS) for x in df) or None)
+            if kw: f.__kwdefaults__ = {k: eval(v, G, NS) for k, v in kw.items()}
         except Exception as ex: return f'新函式 {q} 的預設值：{ex}'
         f.__qualname__ = q
         adds.append((parts, staticmethod(f) if dc == 'staticmethod' else classmethod(f) if dc == 'classmethod' else f))
-    for obj, c in todo: obj.__code__ = c
+    G.update(NS)
+    for cls, d in CA:
+        for k, v in d.items(): setattr(cls, k, v)
+    for obj, c, dd in todo:
+        obj.__code__ = c
+        if dd is not None: obj.__defaults__, obj.__kwdefaults__ = dd
     for parts, f in adds:
         if len(parts) == 1: G[parts[0]] = f
         else: setattr(G[parts[0]], parts[1], f)
