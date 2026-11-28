@@ -2568,7 +2568,7 @@ async function openCal(onApply){
 const APPV="__APPVER__";
 async function updInit(){const box=$("#updIn");if(!box)return;let st={};try{st=await J("/api/update/status");}catch(e){}
   if(!$("#updIn"))return;const s=st.status||{},now=Date.now()/1000;let h="";
-  if(s.state==="done"&&s.to===st.current&&now-(s.t||0)<1800)h+=`<div class="uok">✔ 已更新到 V${esc(s.to)}，監控與錄音沒有中斷${s.core?"（含核心變更，下次重開程式後完全生效）":""}</div>`;
+  if(s.state==="done"&&s.to===st.current&&now-(s.t||0)<1800)h+=`<div class="uok">✔ 已更新到 V${esc(s.to)}，監控與錄音沒有中斷${s.core?"（含核心變更，下次重開程式後完全生效）":""}${s.light?"（⚡ 輕量更新，電腦程式畫面沒有重整）":""}</div>`;
   if(s.state==="failed"&&now-(s.t||0)<1800)h+=`<div class="ubad">✖ 上次更新沒有完成：${esc(s.message||"")}</div>`;
   h+=`<div id="cuIn"></div>`;   /* V1.1.13 ☁ 雲端更新 */
   h+=`<div class="snote" style="margin:0 0 8px">選手機裡的 TK_V版本_Update.zip，上傳後會先顯示更新內容，按「確定更新」才會開始。更新時監控與錄音不會中斷。</div>
@@ -2619,7 +2619,7 @@ ${j.pw?`<input type="password" class="upw" id="updPw" placeholder="輸入網頁�
 async function updWait(m,to,t0){const sec=Math.round((Date.now()-t0)/1000);
   m.innerHTML=`⟳ 電腦正在更新到 V${esc(to)}…（${sec} 秒，網頁斷線幾秒是正常的）`;
   let d=null;try{d=await J("/api/update/status");}catch(e){}
-  if(d&&d.current===to){m.innerHTML=`<span class="uok">✔ 已更新到 V${esc(to)}，監控與錄音沒有中斷。回到主頁…</span>`;
+  if(d&&d.current===to){const lt=d.status&&d.status.light;m.innerHTML=`<span class="uok">✔ 已更新到 V${esc(to)}${lt?"（⚡ 輕量更新：電腦程式畫面沒有重整、沒有卡）":""}，監控與錄音沒有中斷。回到主頁…</span>`;
     setTimeout(()=>{location.hash="#live";location.reload();},1500);return;}
   if(d&&d.status&&d.status.state==="failed"&&d.status.to===to){m.innerHTML=`<span class="ubad">✖ 沒有更新成功：${esc(d.status.message||"")}</span>`;return;}
   if(sec>120){m.innerHTML=`<span class="ubad">電腦還沒回應。可能還在重新載入，請過一下再重新整理看右上角的版本號。</span>`;return;}
