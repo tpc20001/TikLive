@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.47"
+APP_VERSION = "1.2.48"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -25623,7 +25623,12 @@ $r | ConvertTo-Json -Depth 4 -Compress
             if hot or nl: o.append(f'🔄 更新：熱更新卡住 {len(hot)} 次（平均 {sum(hot) / max(1, len(hot)):.0f} 秒）、⚡ 輕量更新 {nl} 次（不卡）')
             if F:
                 o.append(f'🧊 主程式畫面卡住 {len(F)} 次（最久 {max(v[1] for v in S.values()):.0f} 秒）：')
-                o += [f'    {v[0]}×  最久 {v[1]:.0f} 秒  {k}' for k, v in sorted(S.items(), key=lambda kv: -kv[1][0])[:6]]
+                FX = (('tabSizeHint', '1.2.24'), ('_tab_live_size', '1.2.24'), ('_live_pre_build', '1.2.25'), ('_load_session_fetch', '1.2.25'), ('reload_current_models', '1.2.43'),
+                      ('_apply_bg_rows', '1.2.25'), ('_phr_pick', '1.2.14'), ('page_changelog', '1.2.14'), ('_mig_info', '1.2.14'), ('rebuild_like_view', '1.2.17'), ('strip', '1.2.24'))   # V1.2.48 已經改過的卡頓：之後還出現＝沒改好
+                def fx_(k):
+                    fr_ = k.split(' › '); v_ = [ver for f, ver in FX if f in fr_]
+                    return f'（V{v_[0]} 改過）' if v_ else ''
+                o += [f'    {v[0]}×  最久 {v[1]:.0f} 秒  {k}{fx_(k)}' for k, v in sorted(S.items(), key=lambda kv: -kv[1][0])[:6]]
             else: o.append('🧊 主程式畫面沒有卡住紀錄')
         except Exception: pass
         for fn, lab in (('ui_error_log.txt', '🐞 程式錯誤'), ('web_error_log.txt', '🌐 網頁錯誤')):
