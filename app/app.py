@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.55"
+APP_VERSION = "1.2.56"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -14561,6 +14561,29 @@ try { NLConnect | Out-Null; Unset
     #   不動：還在 YouTube 排隊／上傳中／處理中的（不受時間限制）、直播／錄影中、⭐ 收藏、標 +1 待剪輯／+2 保存 的場次
     BG_TAKEOVER = (('TikLiveRetention', '_tlm_ret', 'on', '_ret_loop'), ('TikLiveCloudUpd', '_tlm_cloud', 'loop', '_cu_loop'))
 
+    def _gc_guard(self):
+        """V1.2.56 每 60 秒（視窗執行緒，只看數字）：Python 整理記憶體（第 2 代＝全部物件掃一遍）1 小時內有 3 次超過 1.5 秒
+        （或 2 次超過 3 秒）→ gc.freeze()：現在的物件放進「冷凍區」，之後的整理只掃新的（冷凍本身一瞬間）。
+        冷凍區裡互相指來指去、沒人用的不會被收 → 每天 4:30 拿出來全部整理一次再冷凍；熱更新放掉舊視窗前也先拿出來."""
+        import gc as _gc
+        S = _gcmon(); now = time.time()
+        if not S.get('frozen'):
+            big = [e for e in list(S['ev']) if e[2] == 2 and now - e[0] <= 3600 and e[1] >= 1.5]
+            if len(big) >= 3 or sum(1 for e in big if e[1] >= 3) >= 2:
+                _gc.freeze(); S['frozen'] = now; S['fz_n'] = int(S.get('fz_n') or 0) + 1
+                self._wd_log(f'🧊 Python 整理記憶體一次卡 {max(e[1] for e in big):.1f} 秒（1 小時 {len(big)} 次）→ 現在的 {_gc.get_freeze_count():,} 個物件先冷凍，之後只整理新的；每天 4:30 再全部整理一次')
+        elif now - float(S['frozen']) >= 18 * 3600 and datetime.now().hour == 4 and datetime.now().minute >= 30:
+            t0 = time.perf_counter(); fz = _gc.get_freeze_count(); _gc.unfreeze(); n_ = _gc.collect(2); d = time.perf_counter() - t0; _gc.freeze(); S['frozen'] = time.time()
+            self._wd_log(f'🧊 每天一次：冷凍的 {fz:,} 個物件全部整理一次（收掉 {n_:,} 個，花 {d:.1f} 秒），再冷凍')
+
+    def _gc_unfreeze(self, why=''):
+        """冷凍中 → 拿出來（下一次 Python 自己整理時會全部掃一遍，可以收掉舊視窗）."""
+        import gc as _gc
+        S = _gcmon()
+        if S.get('frozen'):
+            fz = _gc.get_freeze_count(); _gc.unfreeze(); S['frozen'] = 0.0
+            self._wd_log(f'🧊 {why}：冷凍的 {fz:,} 個物件先拿出來（等下全部整理一次）')
+
     def _bg_takeover_tick(self):
         """V1.2.55 每 60 秒（視窗執行緒、只看時間）：最多 10 分鐘一次，背景檢查熱更新留下的舊版背景迴圈."""
         if getattr(self, '_handoff', False): return
@@ -22869,12 +22892,17 @@ try { NLConnect | Out-Null; Unset
         new = lv
         if c.get('on', True):
             if n5 >= 30 and r5 >= 0.6 and lv < 2 and since >= 300: new = lv + 1
-            elif lv == 2 and n10 >= 15 and r10 <= 0.25 and since >= 600: new = 1
+            elif lv == 2 and n10 >= 15 and r10 <= 0.25 and since >= 600 * 2 ** min(3, int(G.get('l1_fail') or 0)): new = 1   # V1.2.56 回「放慢」沒多久又被擋 → 下次在「大幅放慢」多等（10→20→40→80 分）
             elif lv == 1 and n10 >= 15 and r10 <= 0.10 and since >= 1800 * 2 ** min(3, int(G.get('l0_fail') or 0)): new = 0    # TK_V1.0.98 回全速要更保守；V1.2.25 回全速沒多久又被擋，下次就等更久（30→60→120→240 分）
             if lv == 0 and since >= 7200: G['l0_fail'] = 0                          # V1.2.25 全速撐過 2 小時 → 重新算
+            if lv <= 1 and since >= 7200: G['l1_fail'] = 0
         elif lv: new = 0
         if new != lv:
             if lv == 1 and new == 0: G['l0_try'] = now
+            if lv == 2 and new == 1: G['l1_try'] = now
+            elif lv == 1 and new == 2 and now - float(G.get('l1_try') or 0) < 1800:   # V1.2.56 LOG 11/28 晚上：大幅放慢 ↔ 放慢 每 10～20 分鐘來回一次
+                G['l1_fail'] = int(G.get('l1_fail') or 0) + 1
+                self._wd_log(f'連線管控：回「放慢」{(now - float(G["l1_try"])) / 60:.0f} 分鐘就又被擋（第 {G["l1_fail"]} 次）→ 下次在「大幅放慢」多等 {10 * 2 ** min(3, G["l1_fail"])} 分鐘')
             elif lv == 0 and new > 0 and now - float(G.get('l0_try') or 0) < 1800:   # V1.2.25 LOG：回全速 5 分鐘就又被擋 75%，一天來回好幾次
                 G['l0_fail'] = int(G.get('l0_fail') or 0) + 1
                 self._wd_log(f'連線管控：回全速 {(now - float(G["l0_try"])) / 60:.0f} 分鐘就又被擋（第 {G["l0_fail"]} 次）→ 下次要先放慢 {30 * 2 ** min(3, G["l0_fail"])} 分鐘才試著回全速')
@@ -22886,11 +22914,12 @@ try { NLConnect | Out-Null; Unset
             self._wd_log(msg)
             try: self._nf_act(msg, auto=True)
             except Exception: pass
-        if int(G['level']) == 0 and c.get('on', True):                          # V1.2.33 回全速不一口氣：從 50% 開始，每分鐘拒絕 <15% 就 +10%，>30% 就 ×0.8（像網路塞車控制）
-            rp_ = float(G.get('ramp') or 1.0)
-            if lv > 0: rp_ = 0.5                                                 # 剛回全速
+        if int(G['level']) < 2 and c.get('on', True):                           # V1.2.33 回全速不一口氣：從 50% 開始，每分鐘拒絕 <15% 就 +10%，>30% 就 ×0.8（像網路塞車控制）
+            rp_ = float(G.get('ramp') or 1.0); L_ = int(G['level'])              # V1.2.56 「大幅放慢 → 放慢」也一樣慢慢加（放慢這級每分鐘 +5%）
+            if lv > L_: rp_ = 0.5                                                # 剛往快的那級換
+            elif lv < L_: rp_ = 1.0                                              # 剛往慢的那級換（換級本身就是減速）
             elif n5 >= 20 and r5 > 0.3: rp_ = max(0.45, rp_ * 0.8)
-            elif r5 < 0.15: rp_ = min(1.0, rp_ + 0.1)
+            elif r5 < 0.15: rp_ = min(1.0, rp_ + (0.1 if L_ == 0 else 0.05))
             G['ramp'] = round(rp_, 3)
         else: G['ramp'] = 1.0
         if int(G['level']) == 2 and since >= 1800 and r5 >= 0.6:
@@ -23040,7 +23069,7 @@ try { NLConnect | Out-Null; Unset
             if sc >= 0.2 and int(p.get('n') or 0) >= 3: hot.append((sc + (0.3 if u in (G.get('rv_late') or ()) else 0.0), u))   # 錄製檢討：常常晚連上的優先
             elif cd and u not in (G.get('rv_nocold') or ()): cold.append(u)
         hot.sort(reverse=True); c = G['cfg']
-        rate_now = float(c.get('rate', 80)) * _CG_LEVEL_RATE[min(2, int(G['level']))] * (float(G.get('ramp') or 1.0) if not int(G['level']) else 1.0)
+        rate_now = float(c.get('rate', 80)) * _CG_LEVEL_RATE[min(2, int(G['level']))] * (float(G.get('ramp') or 1.0) if int(G['level']) < 2 else 1.0)
         att1 = sum(1 for t in list(G['att'])[-600:] if now - t <= 60)
         room = max(0.0, rate_now * 0.8 - att1)                                  # 上限還沒用到的空間（只用一半，留 2 成給續寫／重點）
         k = 0 if int(G['level']) else int(len(cold) * 0.5 + room * 0.5)          # 加快的名額＝冷門省下來的＋空著的一半；被限制時完全不加快，不多發請求
@@ -23764,7 +23793,7 @@ try { NLConnect | Out-Null; Unset
         except Exception: http_n = 0
         dl = [k for t, k in list(G['dis']) if now - t <= 600]
         return {'on': bool(c.get('on', True)), 'level': lv, 'level_name': _CG_LEVEL_NAME[lv], 'level_min': round((now - float(G['level_t'] or now)) / 60),
-                'rate': int(c.get('rate', 80)), 'rate_now': int(c.get('rate', 80) * _CG_LEVEL_RATE[lv] * (float(G.get('ramp') or 1.0) if not lv else 1.0)), 'ramp': float(G.get('ramp') or 1.0) if not lv else 1.0, 'att_min': att1, 'http_min': http_n,
+                'rate': int(c.get('rate', 80)), 'rate_now': int(c.get('rate', 80) * _CG_LEVEL_RATE[lv] * (float(G.get('ramp') or 1.0) if lv < 2 else 1.0)), 'ramp': float(G.get('ramp') or 1.0) if lv < 2 else 1.0, 'l1_fail': int(G.get('l1_fail') or 0), 'att_min': att1, 'http_min': http_n,
                 'block_pct': round(r5 * 100), 'n5': n5, 'res10': dict(res), 'q': [len(x) for x in G['q']], 'wait_avg': round(sum(waits) / len(waits)) if waits else 0,
                 'stale': len(G['stale']), 'stale_mult': int(c.get('stale_mult', 3)), 'stale_days': int(c.get('stale_days', 7)), 'dead': sum(1 for v in list(G['dead'].values()) if v >= 3), 'probe_n': int(G.get('probe_n') or 0), 'nows': sorted((G.get('nows') or {}).keys()), 'srooms': len((G.get('sroom') or {}).get('s') or ()) if (G.get('sroom') or {}).get('d') == int(time.time() // 86400) else 0, 'scap': max(0, int(G.get('sign_cap') or 0)), 'srsv': int(c.get('sign_reserve', 15)), 'l0_fail': int(G.get('l0_fail') or 0), 'l0_wait': 30 * 2 ** min(3, int(G.get('l0_fail') or 0)),
                 'api_first': bool(c.get('api_first', True)), 'route': {'api': rt('api'), 'html': rt('html')},
@@ -23988,6 +24017,8 @@ try { NLConnect | Out-Null; Unset
         try: self._logup_tick()                                                 # V1.2.12 每天凌晨自動上傳 LOG
         except Exception: pass
         try: self._bg_takeover_tick()                                           # V1.2.55 熱更新留下的舊版常駐迴圈交給新版
+        except Exception: pass
+        try: self._gc_guard()                                                   # V1.2.56 Python 整理記憶體一次卡太久 → 冷凍舊物件
         except Exception: pass
         try: self._ssd_heal_tick()                                              # V1.2.20 SSD 轉好沒排隊的放回排隊
         except Exception: pass
@@ -25735,7 +25766,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             for t, head, body in F:
                 m = re.search(r'沒有回應 ([\d.]+)', head); sec = float(m.group(1)) if m else 0.0
                 fr = [x for x in re.findall(r', in (\w+)', '\n'.join(body)) if x not in GEN]
-                k = ' › '.join(list(dict.fromkeys(fr))[-3:]) or '（沒有堆疊）'; S[k][0] += 1; S[k][1] = max(S[k][1], sec)
+                k = ' › '.join(list(dict.fromkeys(fr))[-3:]) or ('（沒有堆疊：那時候 Python 在整理記憶體）' if any('整理記憶體' in b for b in body) else '（沒有堆疊）'); S[k][0] += 1; S[k][1] = max(S[k][1], sec)
             hot = [float((re.search(r'沒有回應 ([\d.]+)', h) or [0, 0])[1]) for t, h, b in F if '_hot_reload' in '\n'.join(b)]
             try: nl = sum(1 for t, h, b in ents('update_log.txt') if '⚡ 輕量更新' in h)
             except Exception: nl = 0
@@ -25749,6 +25780,14 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     return f'（V{v_[0]} 改過）' if v_ else ''
                 o += [f'    {v[0]}×  最久 {v[1]:.0f} 秒  {k}{fx_(k)}' for k, v in sorted(S.items(), key=lambda kv: -kv[1][0])[:6]]
             else: o.append('🧊 主程式畫面沒有卡住紀錄')
+        except Exception: pass
+        try:                                                                    # V1.2.56 Python 整理記憶體（垃圾回收）花多久
+            G_ = _gcmon(); E_ = [e for e in list(G_['ev']) if t0 <= e[0] <= t1]; E2 = [e for e in E_ if e[2] == 2]; Es = [e for e in E_ if e[1] >= 1.0]
+            import gc as _gc
+            if E_ or G_.get('frozen'):
+                o.append(f"🧹 Python 整理記憶體：全部掃一遍 {len(E2)} 次" + (f"（平均 {sum(e[1] for e in E2) / len(E2):.1f} 秒、最久 {max(e[1] for e in E2):.1f} 秒）" if E2 else '') +
+                         f"；超過 1 秒 {len(Es)} 次" + (f"（{Counter(e[4] for e in Es).most_common(1)[0][0]} 最多）" if Es else '') +
+                         (f"；冷凍中 {_gc.get_freeze_count():,} 個（{datetime.fromtimestamp(G_['frozen']).strftime('%m/%d %H:%M')} 起）" if G_.get('frozen') else '') + f"；從 {datetime.fromtimestamp(G_['since']).strftime('%m/%d %H:%M')} 開始量")
         except Exception: pass
         for fn, lab in (('ui_error_log.txt', '🐞 程式錯誤'), ('web_error_log.txt', '🌐 網頁錯誤')):
             try:
@@ -25807,7 +25846,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 f_ = lambda L: f'{sum(L) * 100 // len(L)}%（{len(L)} 次）' if L else '—'
                 o.append(f"    現在 15 分鐘：輕量 API 成功 {f_(rt_['api'])}、整頁抓取成功 {f_(rt_['html'])}；放慢等級 {int(G_['level'])}" +
                          (f"；回全速沒多久又被擋 {G_.get('l0_fail')} 次" if G_.get('l0_fail') else '') + (f"；偷試另一種查法 {G_.get('probe_n')} 次" if G_.get('probe_n') else '') +
-                         (f"；慢慢回全速 {float(G_.get('ramp') or 1) * 100:.0f}%" if not int(G_['level']) and float(G_.get('ramp') or 1) < 1 else '') +
+                         (f"；慢慢加速 {float(G_.get('ramp') or 1) * 100:.0f}%" if int(G_['level']) < 2 and float(G_.get('ramp') or 1) < 1 else '') + (f"；回放慢沒多久又被擋 {G_.get('l1_fail')} 次" if G_.get('l1_fail') else '') +
                          (f"；今天用了簽章 {len((G_.get('sroom') or {}).get('s') or ())}" + (f"/{G_.get('sign_cap')}" if int(G_.get('sign_cap') or 0) > 0 else '') + " 個直播間" if (G_.get('sroom') or {}).get('d') == int(time.time() // 86400) else '') +
                          (f"；只錄影片中 {len(G_.get('nows') or {})} 位" if G_.get('nows') else ''))
         except Exception: pass
@@ -26416,6 +26455,9 @@ $r | ConvertTo-Json -Depth 4 -Compress
             done = threading.Event(); R = {'attrs': 0}
             def strip(todo=todo):
                 import gc as _gc
+                if todo:
+                    try: self._gc_unfreeze('放掉熱更新留下的舊視窗')                # V1.2.56 冷凍的舊視窗收不掉
+                    except Exception: pass
                 try:
                     for w in todo:
                         try: w.blockSignals(True)
@@ -48578,7 +48620,7 @@ def _cg_cls(eng):
 
 def _cg_refill(G):
     now = time.monotonic(); c = G['cfg']
-    per_s = max(0.05, float(c.get('rate', 80)) / 60.0 * _CG_LEVEL_RATE[min(2, int(G['level']))] * (min(1.0, max(0.45, float(G.get('ramp') or 1.0))) if not int(G['level']) else 1.0))   # V1.2.33 回全速慢慢加
+    per_s = max(0.05, float(c.get('rate', 80)) / 60.0 * _CG_LEVEL_RATE[min(2, int(G['level']))] * (min(1.0, max(0.45, float(G.get('ramp') or 1.0))) if int(G['level']) < 2 else 1.0))   # V1.2.33 回全速慢慢加；V1.2.56 放慢那級也是
     cap = max(2.0, per_s * 6)
     G['tokens'] = min(cap, G['tokens'] + (now - G['tt']) * per_s); G['tt'] = now
 
@@ -48753,7 +48795,7 @@ def _cg_patch():
                     elif sm == 'hot' and m <= 1.0 and not G['level']: return max(min(d, 30.0), min(d, d * float(sc.get('hot', 0.5)) * random.uniform(0.92, 1.08)))
                 except Exception: pass
                 m *= _CG_LEVEL_MULT[min(2, int(G['level']))]
-                if not int(G['level']) and float(G.get('ramp') or 1.0) < 1.0: m *= 1.0 / max(0.45, float(G.get('ramp') or 1.0))   # V1.2.33 回全速慢慢加
+                if int(G['level']) < 2 and float(G.get('ramp') or 1.0) < 1.0: m *= 1.0 / max(0.45, float(G.get('ramp') or 1.0))   # V1.2.33 回全速慢慢加；V1.2.56 放慢那級也是
                 return min(1800.0, d * m * random.uniform(0.92, 1.08)) if m > 1 else d
             except Exception: return d
         L._tlm_orig_nrd = o2; L._next_retry_delay = _next_retry_delay
@@ -49170,6 +49212,31 @@ class _HddLane:
         return total
 
 
+def _gcmon():
+    """V1.2.56 量 Python 整理記憶體（垃圾回收）每次花多久：第 2 代（全部掃一遍）每次都記、其他超過 0.05 秒才記.
+    存在 sys 上（熱更新共用一份、不會重複裝）。回呼只做幾個加法，不會拖慢."""
+    import gc as _gc
+    S = getattr(sys, '_tlm_gcmon', None)
+    if isinstance(S, dict) and S.get('ver', 0) >= 1: return S
+    S = {'ver': 1, 'ev': deque(maxlen=400), 't0': 0.0, 'n': [0, 0, 0], 's': [0.0, 0.0, 0.0], 'mx': [0.0, 0.0, 0.0], 'since': time.time(), 'frozen': 0.0, 'fz_n': 0}
+    def cb(phase, info, S=S, pc=time.perf_counter):
+        if phase == 'start': S['t0'] = pc(); return
+        d = pc() - S['t0']; g = min(2, int(info.get('generation') or 0))
+        if g == 2 or d >= 0.05:
+            S['n'][g] += 1; S['s'][g] += d
+            if d > S['mx'][g]: S['mx'][g] = d
+            if d >= 0.05 or g == 2:
+                try: tn = threading.current_thread().name
+                except Exception: tn = '?'
+                S['ev'].append((time.time(), round(d, 3), g, int(info.get('collected') or 0), tn))
+    try:
+        old = getattr(sys, '_tlm_gccb', None)
+        if old is not None and old in _gc.callbacks: _gc.callbacks.remove(old)
+        _gc.callbacks.append(cb); sys._tlm_gccb = cb; sys._tlm_gcmon = S
+    except Exception: pass
+    return S
+
+
 class _FreezeWatch:
     """V0.5.53 records every moment the window stops answering for more than 3 seconds: when, how long, and what
     the window was doing (Python stack) -> LOG\\ui_freeze_log.txt. One per program (survives hot updates).
@@ -49181,6 +49248,8 @@ class _FreezeWatch:
 
     @staticmethod
     def get():
+        try: _gcmon()
+        except Exception: pass
         app = QApplication.instance(); w = getattr(app, '_tlm_freeze_watch', None) if app is not None else None
         if w is None or getattr(w, 'VER', 1) < _FreezeWatch.VER:
             old = w; w = _FreezeWatch()
@@ -49194,11 +49263,45 @@ class _FreezeWatch:
     def tick(self): self.beat = time.time()
 
     def _stack(self):
+        # V1.2.56 LOG 11/28 晚上卡住的 43 次全部「沒有堆疊」（畫面執行緒停在 Qt 裡）→ 每次取樣再附上：那段時間 Python 有沒有在整理記憶體
+        # （垃圾回收：記憶體 5～7 GB 時一次可能好幾秒，所有執行緒都要等）、其他執行緒誰在跑。放在這裡（每次取樣都重新找這個函式）→ 輕量更新也馬上有
         try:
             fr = sys._current_frames().get(self.main.ident)
-            return ''.join(traceback.format_stack(fr)[-12:]) if fr is not None else ''
+            out = ''.join(traceback.format_stack(fr)[-12:]) if fr is not None else ''
         except Exception:
             return ''
+        try:
+            gcs = [e for e in self._gc_during(self.beat, time.time()) if e[1] >= 0.2]
+            if gcs: out += '  ~~ 那段時間 Python 在整理記憶體（垃圾回收）：' + '、'.join(f'第 {g} 代 {d:.2f} 秒（{tn}，收掉 {n:,} 個）' for _t, d, g, n, tn in gcs[-4:]) + '\n'
+            if time.time() - self.beat >= 2.5: out += ''.join(f'  ~~ 其他執行緒在跑：{b}\n' for b in self._busy_threads())
+        except Exception: pass
+        return out
+
+    _IDLE_RE = re.compile(r'sleep\(|\.wait\(|\.acquire\(|select\(|recv|\.read\(|readinto|accept\(|\.join\(|communicate\(|poll\(|readline\(|serve_forever|_run_once|getaddrinfo|urlopen|connect\(|\.result\(|get\(timeout|\.get\(\)|waitForReadyRead|run_until_complete|run_forever')
+
+    _IDLE_FN = frozenset(('select', 'poll', 'wait', '_wait_for_tstate_lock', 'sleep', 'run_forever', '_run_once', 'accept', 'recv', 'recv_into', 'readinto', 'read', 'readline',
+                          'get', 'acquire', 'join', 'serve_forever', '_worker', 'communicate', '_communicate', 'wait_for', '_recv', 'getaddrinfo', 'create_connection', '_poll', 'result'))
+
+    def _busy_threads(self):
+        """V1.2.56 卡住那一刻，其他執行緒有誰不是在等（睡覺、等網路、等鎖）：[名字: 函式:行 › … ｜ 那一行]."""
+        out = []
+        try:
+            import linecache
+            nm = {t.ident: t.name for t in threading.enumerate()}; me = threading.get_ident()
+            for tid, fr in list(sys._current_frames().items()):
+                if tid in (self.main.ident, me) or fr is None: continue
+                try: ln = linecache.getline(fr.f_code.co_filename, fr.f_lineno).strip()
+                except Exception: ln = ''
+                if (ln and self._IDLE_RE.search(ln)) or (not ln and fr.f_code.co_name in self._IDLE_FN): continue      # 沒有原始碼（打包的標準函式庫）就看函式名字
+                st = traceback.extract_stack(fr)[-4:]
+                out.append(f"{nm.get(tid, tid)}: " + ' › '.join(f'{x.name}:{x.lineno}' for x in st) + f' ｜ {ln[:110]}')
+        except Exception: pass
+        return out[:6]
+
+    @staticmethod
+    def _gc_during(t0, t1):
+        S = getattr(sys, '_tlm_gcmon', None) or {}
+        return [e for e in list(S.get('ev') or ()) if e[0] >= t0 - 0.5 and e[0] - e[1] <= t1 + 0.5]
 
     def _loop(self):
         cur = None; small = None
