@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.56"
+APP_VERSION = "1.2.57"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -44,16 +44,18 @@ except Exception: pass
 PORTABLE_SETTINGS_PATH = PACKAGE_DIR / "TikLiveMonitor_Settings.json"
 
 
+import datetime as _dtm                                                            # V1.2.57 函式裡的 import 每次都要經過 PySide6 的 feature_import（LOG：卡頓堆疊停在這裡 29 次）
+
+
 def fmt_real_sec(ts):
     if ts is None or ts == "":
         return "--:--:--"
-    import datetime
     try:
-        return datetime.datetime.fromtimestamp(float(ts)).strftime("%H:%M:%S")
+        return _dtm.datetime.fromtimestamp(float(ts)).strftime("%H:%M:%S")
     except Exception:
         try:
             text = str(ts).replace("Z", "+00:00")
-            dt = datetime.datetime.fromisoformat(text)
+            dt = _dtm.datetime.fromisoformat(text)
             return dt.astimezone().strftime("%H:%M:%S") if dt.tzinfo else dt.strftime("%H:%M:%S")
         except Exception:
             return "--:--:--"
@@ -14561,6 +14563,34 @@ try { NLConnect | Out-Null; Unset
     #   不動：還在 YouTube 排隊／上傳中／處理中的（不受時間限制）、直播／錄影中、⭐ 收藏、標 +1 待剪輯／+2 保存 的場次
     BG_TAKEOVER = (('TikLiveRetention', '_tlm_ret', 'on', '_ret_loop'), ('TikLiveCloudUpd', '_tlm_cloud', 'loop', '_cu_loop'))
 
+    def _upd_stale_tick(self):
+        """V1.2.57 開程式 5 分鐘後、之後每 6 小時（背景）：UPDATE\\*.zip 裡版本 ≤ 現在的 → 移到 UPDATE\\stale（不刪）。
+        啟動器重開時會把 UPDATE 裡的包照版本順序全部套用、不看是不是比現在舊；熱更新失敗那條路會把包放進 UPDATE，
+        之後如果又熱更新到更新的版本，下次重開就會被那個舊包「更新」回去."""
+        S = self.__dict__.setdefault('_upst', {'t': time.time() - 6 * 3600 + 300, 'run': False})
+        if S['run'] or time.time() - S['t'] < 6 * 3600 or getattr(self, '_handoff', False): return
+        S['t'] = time.time(); S['run'] = True
+        def run_():
+            import zipfile
+            try:
+                d = Path(PACKAGE_ROOT) / 'UPDATE'; cur = self._version_tuple(APP_VERSION); moved = []
+                if not d.is_dir(): return
+                for z in sorted(d.glob('*.zip')):
+                    if z.name.lower().startswith('tk_shell_'): continue
+                    try:
+                        with zipfile.ZipFile(z) as zf:
+                            m = json.loads(zf.read('manifest.json').decode('utf-8-sig')) if 'manifest.json' in zf.namelist() else {}
+                        if not m and not re.search(r'\d', z.stem): continue          # 看不出版本的不動
+                        v = str(m.get('version') or '') or z.stem
+                        if str(m.get('app') or 'TikLive') != 'TikLive' or self._version_tuple(v) > cur: continue
+                        sd = d / 'stale'; sd.mkdir(exist_ok=True); dst = sd / z.name; k = 1
+                        while dst.exists(): dst = sd / f'{z.stem}_{k}{z.suffix}'; k += 1
+                        os.replace(str(z), str(dst)); moved.append(f'{z.name}（V{v}）')
+                    except Exception: continue
+                if moved: self._wd_log(f"📦 UPDATE 資料夾裡有比現在（V{APP_VERSION}）舊或一樣的更新包，移到 UPDATE\\stale（重開程式才不會退回舊版）：{'、'.join(moved[:8])}")
+            finally: S['run'] = False
+        threading.Thread(target=run_, name='TikLiveUpdStale', daemon=True).start()
+
     def _gc_guard(self):
         """V1.2.56 每 60 秒（視窗執行緒，只看數字）：Python 整理記憶體（第 2 代＝全部物件掃一遍）1 小時內有 3 次超過 1.5 秒
         （或 2 次超過 3 秒）→ gc.freeze()：現在的物件放進「冷凍區」，之後的整理只掃新的（冷凍本身一瞬間）。
@@ -14607,10 +14637,20 @@ try { NLConnect | Out-Null; Unset
             g = getattr(getattr(f, '__func__', f), '__globals__', None)
             if not isinstance(g, dict) or g is me or 'MainWindow' not in g or 'APP_VERSION' not in g: continue
             old.setdefault(id(g), (g, []))[1].append(t)
+        try:                                                                    # V1.2.57 QApplication 上共用的物件（I/O 管控、卡頓紀錄…）是哪一版建的，也算進來
+            for k_ in [k_ for k_ in dir(app_) if k_.startswith('_tlm_')] if app_ is not None else []:
+                o_ = getattr(app_, k_, None); fn_ = getattr(type(o_), '__init__', None)
+                g = getattr(fn_, '__globals__', None)
+                if isinstance(g, dict) and g is not me and 'MainWindow' in g and 'APP_VERSION' in g: old.setdefault(id(g), (g, []))
+        except Exception: pass
         names = {n: (a, k, m) for n, a, k, m in self.BG_TAKEOVER}; ended = []; seen = []
         for g, ts in old.values():
-            ver = str(g.get('APP_VERSION') or '?'); seen.append(f"V{ver}：" + '、'.join(f'{n}×{c}' if c > 1 else n for n, c in Counter(t.name for t in ts).most_common(12)))
+            ver = str(g.get('APP_VERSION') or '?')
+            if ts: seen.append(f"V{ver}：" + '、'.join(f'{n}×{c}' if c > 1 else n for n, c in Counter(t.name for t in ts).most_common(12)))
             ca = g.get('_app_closing')
+            while callable(ca) and getattr(ca, '_tlm_end', None) is not None and int(getattr(ca, '_tlm_v', 1)) < 2:   # V1.2.57 1.2.55／56 裝的是比執行緒編號（結束後編號會重用）→ 拿掉換回原本的
+                try: ca = ca.__defaults__[0]; g['_app_closing'] = ca
+                except Exception: break
             if not callable(ca): continue
             for t in ts:
                 if t.name not in names or not t.is_alive(): continue
@@ -14619,14 +14659,19 @@ try { NLConnect | Out-Null; Unset
                     END = set()
                     def _app_closing(orig=ca, END=END):
                         try:
-                            if threading.get_ident() in END: return True
+                            if END and threading.current_thread() in END: return True   # 比執行緒物件（不比編號：結束後編號會被新的執行緒拿去用）
                         except Exception: pass
                         try: return orig()
                         except Exception: return False
-                    _app_closing._tlm_end = END; g['_app_closing'] = ca = _app_closing
-                END.add(t.ident); ended.append((t, ver))
+                    _app_closing._tlm_end = END; _app_closing._tlm_v = 2; g['_app_closing'] = ca = _app_closing
+                END.add(t); ended.append((t, ver))
         t0 = time.time()
         while any(t.is_alive() for t, _ in ended) and time.time() - t0 < 90: time.sleep(2)
+        for g, ts in old.values():                                              # 結束了的從名單拿掉
+            E_ = getattr(g.get('_app_closing'), '_tlm_end', None)
+            if E_:
+                for t in list(E_):
+                    if not t.is_alive(): E_.discard(t)
         gone = [(t.name, v) for t, v in ended if not t.is_alive()]; started = []
         for n, a, k, m in self.BG_TAKEOVER:                                     # 沒在跑就開（已經在跑的會自己跳過）
             st = getattr(app_, a, None) if app_ is not None else None
@@ -22893,7 +22938,7 @@ try { NLConnect | Out-Null; Unset
         if c.get('on', True):
             if n5 >= 30 and r5 >= 0.6 and lv < 2 and since >= 300: new = lv + 1
             elif lv == 2 and n10 >= 15 and r10 <= 0.25 and since >= 600 * 2 ** min(3, int(G.get('l1_fail') or 0)): new = 1   # V1.2.56 回「放慢」沒多久又被擋 → 下次在「大幅放慢」多等（10→20→40→80 分）
-            elif lv == 1 and n10 >= 15 and r10 <= 0.10 and since >= 1800 * 2 ** min(3, int(G.get('l0_fail') or 0)): new = 0    # TK_V1.0.98 回全速要更保守；V1.2.25 回全速沒多久又被擋，下次就等更久（30→60→120→240 分）
+            elif lv == 1 and n10 >= 15 and r10 <= 0.10 and since >= 1800 * 2 ** min(3, int(G.get('l0_fail') or 0)) and float(G.get('ramp') or 1.0) >= 0.95: new = 0   # V1.2.57 放慢那級要能全速跑（不被擋）才試全速    # TK_V1.0.98 回全速要更保守；V1.2.25 回全速沒多久又被擋，下次就等更久（30→60→120→240 分）
             if lv == 0 and since >= 7200: G['l0_fail'] = 0                          # V1.2.25 全速撐過 2 小時 → 重新算
             if lv <= 1 and since >= 7200: G['l1_fail'] = 0
         elif lv: new = 0
@@ -22916,10 +22961,21 @@ try { NLConnect | Out-Null; Unset
             except Exception: pass
         if int(G['level']) < 2 and c.get('on', True):                           # V1.2.33 回全速不一口氣：從 50% 開始，每分鐘拒絕 <15% 就 +10%，>30% 就 ×0.8（像網路塞車控制）
             rp_ = float(G.get('ramp') or 1.0); L_ = int(G['level'])              # V1.2.56 「大幅放慢 → 放慢」也一樣慢慢加（放慢這級每分鐘 +5%）
-            if lv > L_: rp_ = 0.5                                                # 剛往快的那級換
-            elif lv < L_: rp_ = 1.0                                              # 剛往慢的那級換（換級本身就是減速）
-            elif n5 >= 20 and r5 > 0.3: rp_ = max(0.45, rp_ * 0.8)
-            elif r5 < 0.15: rp_ = min(1.0, rp_ + (0.1 if L_ == 0 else 0.05))
+            base_ = float(c.get('rate', 80)) * _CG_LEVEL_RATE[L_]; ceil_ = float(G.get('ceil') or 0)
+            n1, r1 = _cg_ratio(G, 60)                                            # V1.2.57 LOG 11/28 20～22 點：每分鐘 17～18 次＝0 個 403；36 次＝每分鐘 17～36 個 403
+            if lv != L_: G['ramp_up'] = False                                    # 換級：上一級的「加速過」不算
+            if lv > L_: rp_ = min(0.5, max(0.45, 0.9 * ceil_ / base_)) if ceil_ else 0.5   # 剛往快的那級換
+            elif lv < L_: rp_ = min(1.0, max(0.45, 0.9 * ceil_ / base_)) if ceil_ else 1.0   # 剛往慢的那級換：學到的上限以下開始
+            elif (n1 >= 6 and r1 >= 0.25) or (n5 >= 20 and r5 > 0.3):           # V1.2.57 看最近 1 分鐘就退（5 分鐘的比例太慢，退的時候已經被擋好幾分鐘）
+                if now - float(G.get('dec_t') or 0) >= 115:                       # 退一次之後等 2 分鐘看效果（還在被擋的那幾分鐘不重複退、不把上限越記越低）
+                    now_r = base_ * rp_
+                    if G.get('ramp_up'): G['ceil'] = round(now_r if not ceil_ else 0.6 * ceil_ + 0.4 * now_r, 1)   # 加速之後才被擋：記住「這個速度開始被擋」
+                    G['ramp_up'] = False; G['dec_t'] = now; rp_ = max(0.45, rp_ * 0.85)
+            elif r5 < 0.15 and (n1 < 6 or r1 < 0.1):
+                st_ = 0.1 if L_ == 0 else 0.05
+                if ceil_ and base_ * rp_ >= 0.85 * ceil_: st_ = 0.02              # 快到學到的上限：慢慢試
+                if rp_ < 1.0: G['ramp_up'] = True
+                rp_ = min(1.0, rp_ + st_)
             G['ramp'] = round(rp_, 3)
         else: G['ramp'] = 1.0
         if int(G['level']) == 2 and since >= 1800 and r5 >= 0.6:
@@ -23793,7 +23849,7 @@ try { NLConnect | Out-Null; Unset
         except Exception: http_n = 0
         dl = [k for t, k in list(G['dis']) if now - t <= 600]
         return {'on': bool(c.get('on', True)), 'level': lv, 'level_name': _CG_LEVEL_NAME[lv], 'level_min': round((now - float(G['level_t'] or now)) / 60),
-                'rate': int(c.get('rate', 80)), 'rate_now': int(c.get('rate', 80) * _CG_LEVEL_RATE[lv] * (float(G.get('ramp') or 1.0) if lv < 2 else 1.0)), 'ramp': float(G.get('ramp') or 1.0) if lv < 2 else 1.0, 'l1_fail': int(G.get('l1_fail') or 0), 'att_min': att1, 'http_min': http_n,
+                'rate': int(c.get('rate', 80)), 'rate_now': int(c.get('rate', 80) * _CG_LEVEL_RATE[lv] * (float(G.get('ramp') or 1.0) if lv < 2 else 1.0)), 'ramp': float(G.get('ramp') or 1.0) if lv < 2 else 1.0, 'l1_fail': int(G.get('l1_fail') or 0), 'ceil': float(G.get('ceil') or 0), 'att_min': att1, 'http_min': http_n,
                 'block_pct': round(r5 * 100), 'n5': n5, 'res10': dict(res), 'q': [len(x) for x in G['q']], 'wait_avg': round(sum(waits) / len(waits)) if waits else 0,
                 'stale': len(G['stale']), 'stale_mult': int(c.get('stale_mult', 3)), 'stale_days': int(c.get('stale_days', 7)), 'dead': sum(1 for v in list(G['dead'].values()) if v >= 3), 'probe_n': int(G.get('probe_n') or 0), 'nows': sorted((G.get('nows') or {}).keys()), 'srooms': len((G.get('sroom') or {}).get('s') or ()) if (G.get('sroom') or {}).get('d') == int(time.time() // 86400) else 0, 'scap': max(0, int(G.get('sign_cap') or 0)), 'srsv': int(c.get('sign_reserve', 15)), 'l0_fail': int(G.get('l0_fail') or 0), 'l0_wait': 30 * 2 ** min(3, int(G.get('l0_fail') or 0)),
                 'api_first': bool(c.get('api_first', True)), 'route': {'api': rt('api'), 'html': rt('html')},
@@ -24019,6 +24075,8 @@ try { NLConnect | Out-Null; Unset
         try: self._bg_takeover_tick()                                           # V1.2.55 熱更新留下的舊版常駐迴圈交給新版
         except Exception: pass
         try: self._gc_guard()                                                   # V1.2.56 Python 整理記憶體一次卡太久 → 冷凍舊物件
+        except Exception: pass
+        try: self._upd_stale_tick()                                             # V1.2.57 UPDATE 資料夾裡比現在舊的更新包移走（重開才不會退回舊版）
         except Exception: pass
         try: self._ssd_heal_tick()                                              # V1.2.20 SSD 轉好沒排隊的放回排隊
         except Exception: pass
@@ -25846,15 +25904,15 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 f_ = lambda L: f'{sum(L) * 100 // len(L)}%（{len(L)} 次）' if L else '—'
                 o.append(f"    現在 15 分鐘：輕量 API 成功 {f_(rt_['api'])}、整頁抓取成功 {f_(rt_['html'])}；放慢等級 {int(G_['level'])}" +
                          (f"；回全速沒多久又被擋 {G_.get('l0_fail')} 次" if G_.get('l0_fail') else '') + (f"；偷試另一種查法 {G_.get('probe_n')} 次" if G_.get('probe_n') else '') +
-                         (f"；慢慢加速 {float(G_.get('ramp') or 1) * 100:.0f}%" if int(G_['level']) < 2 and float(G_.get('ramp') or 1) < 1 else '') + (f"；回放慢沒多久又被擋 {G_.get('l1_fail')} 次" if G_.get('l1_fail') else '') +
+                         (f"；慢慢加速 {float(G_.get('ramp') or 1) * 100:.0f}%" if int(G_['level']) < 2 and float(G_.get('ramp') or 1) < 1 else '') + (f"；學到每分鐘約 {float(G_.get('ceil')):.0f} 次開始被擋" if G_.get('ceil') else '') + (f"；回放慢沒多久又被擋 {G_.get('l1_fail')} 次" if G_.get('l1_fail') else '') +
                          (f"；今天用了簽章 {len((G_.get('sroom') or {}).get('s') or ())}" + (f"/{G_.get('sign_cap')}" if int(G_.get('sign_cap') or 0) > 0 else '') + " 個直播間" if (G_.get('sroom') or {}).get('d') == int(time.time() // 86400) else '') +
                          (f"；只錄影片中 {len(G_.get('nows') or {})} 位" if G_.get('nows') else ''))
         except Exception: pass
         try:                                                                    # V1.2.22 現在的主程式：記憶體、執行緒（最多的是哪幾種）
             import collections as _co
             rss = 0
-            try:
-                import psutil; rss = psutil.Process().memory_info().rss
+            try:                                                                # V1.2.57 EXE 裡沒有 psutil（LOG 一直寫 0.0 GB）→ 跟資源異常同一個量法
+                rss = int(((self._anom_store().get('rss') or [(0, 0)])[-1])[1] or 0)
             except Exception: pass
             top_ = _co.Counter(_thr_kind(t.name) for t in threading.enumerate()).most_common(4)
             o.append(f'🖥 現在：主程式記憶體 {rss / 1e9:.1f} GB、執行緒 {threading.active_count()} 個（最多：' + '、'.join(f'{k}×{v}' for k, v in top_) + '）')
