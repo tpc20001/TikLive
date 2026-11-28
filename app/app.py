@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.26"
+APP_VERSION = "1.2.27"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -23955,10 +23955,21 @@ try { NLConnect | Out-Null; Unset
                 elif now - first[0] >= 2 * 3600 and rss - first[1] > 1.5e9: self._anom('rss_grow', 'warn', '主程式記憶體一直增加', f'{(now - first[0]) / 3600:.1f} 小時內從 {first[1] / 1e9:.1f} GB 漲到 {rss / 1e9:.1f} GB', '可能有東西沒有釋放；請把 LOG 給 Claude。')
             except Exception: pass
             nt = threading.active_count()
-            if nt > 300:                                                        # V1.2.16 順便記「哪一種執行緒最多」（之前 LOG 只看得到 307 個，不知道是誰）
+            try: lim_ = 160 + len(self.engines) + 4 * (len(self.video_recorders) + len(self.experiment_recorders))   # V1.2.27 每位監控的主播本來就有 1 條（TikLiveEngine）、每個錄影幾條 → 照數量算，不再固定 300（11/27：114 位監控＋25 位直播 → 306 條是正常的）
+            except Exception: lim_ = 300
+            if nt > max(300, lim_):                                             # V1.2.16 順便記「哪一種執行緒最多」（之前 LOG 只看得到 307 個，不知道是誰）
                 import collections as _co
                 top_ = _co.Counter(re.sub(r'[-_ ]?\d+$', '', t.name or '?') for t in threading.enumerate()).most_common(6)
                 self._anom('threads', 'warn', '執行緒數量異常', f'目前 {nt} 個執行緒：' + '、'.join(f'{k}×{v}' for k, v in top_), '可能有工作卡住沒有結束；請把 LOG 給 Claude。')
+            try:                                                                # V1.2.27 扣掉監控／錄影本來就要的，其他的 2 小時內一直變多 → 有東西沒結束
+                oth_ = nt - (lim_ - 160)
+                th_ = st.setdefault('thr', []); th_.append((now, oth_)); st['thr'] = th_ = [x for x in th_ if now - x[0] <= 3 * 3600]
+                lo_ = min(v for t_, v in th_ if now - t_ <= 2 * 3600)
+                if now - th_[0][0] >= 2 * 3600 and oth_ - lo_ > 100:
+                    import collections as _co
+                    top_ = _co.Counter(re.sub(r'[-_ ]?\d+$', '', t.name or '?') for t in threading.enumerate()).most_common(6)
+                    self._anom('thr_grow', 'warn', '執行緒一直增加', f'扣掉監控、錄影本來就要的，2 小時內從 {lo_} 條變 {oth_} 條：' + '、'.join(f'{k}×{v}' for k, v in top_), '可能有工作卡住沒有結束；請把 LOG 給 Claude。')
+            except Exception: pass
             fz = getattr(self, '_freeze', None)
             if fz is not None:
                 stalls = list(getattr(fz, 'stalls', []) or [])
