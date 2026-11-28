@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.43"
+APP_VERSION = "1.2.44"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -23922,6 +23922,10 @@ try { NLConnect | Out-Null; Unset
             c, n = avg([h.get('cpu') for h in H])
             if c is not None and n >= 60 and c >= 90: self._anom('cpu', 'bad' if c >= 97 else 'warn', 'CPU 持續滿載', f'最近 5 分鐘 CPU 平均 {c:.0f}%', '可能是轉檔或太多路錄影同時進行；可先暫停「FLV 待處理」或開「回放加速」。')
             r, n = avg([h.get('ram') for h in H])
+            if r is not None and n >= 60 and r >= 90 and now - float(self.__dict__.get('_trim_t') or 0) > 1800:   # V1.2.44 記憶體快滿：先把自己可以重算的快取放掉（30 分鐘最多一次）
+                self._trim_t = now
+                try: self._mem_trim(f'最近 5 分鐘記憶體平均 {r:.0f}%')
+                except Exception: pass
             if r is not None and n >= 60 and r >= 92: self._anom('ram', 'bad', '記憶體快用完', f'最近 5 分鐘記憶體平均 {r:.0f}%', '關掉不用的程式；若一直往上漲，請重開 TikLive Monitor 並把這段時間的 LOG 給 Claude。')
             for L in sorted({k for h in H for k in (h.get('busy') or {})}):
                 b, n = avg([(h.get('busy') or {}).get(L) for h in H])
@@ -26251,6 +26255,24 @@ $r | ConvertTo-Json -Depth 4 -Compress
         try: (LOG_DIR / 'mem_diag.txt').open('a', encoding='utf-8').write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {json.dumps(r, ensure_ascii=False)}\n")
         except Exception: pass
         return r
+
+    def _mem_trim(self, why=''):
+        """V1.2.44 電腦記憶體快滿時：放掉可以重算的快取（回放資料、頁面壓縮、表格排序鍵…），再收一次年輕的垃圾；記下放掉多少."""
+        import gc as _gc
+        before = self._mem_rss(); n = 0
+        for k in ('_rpb_c', '_pg_enc', '_wph_c', '_hist_prefetch', '_smt_c', '_errc'):
+            v = self.__dict__.get(k)
+            if isinstance(v, dict) and v: n += len(v); v.clear()
+            elif v is not None and k == '_hist_prefetch': self.__dict__[k] = None; n += 1
+        try:
+            for px in self.findChildren(SearchSortProxy):
+                km = px.__dict__.pop('_km', None)
+                if km: n += len(km)
+        except Exception: pass
+        _gc.collect(1)
+        after = self._mem_rss()
+        self._wd_log(f'🧹 記憶體快滿（{why}）：放掉 {n:,} 項快取，主程式 {before / 1e6:,.0f} → {after / 1e6:,.0f} MB')
+        return before - after
 
     def _mem_reclaim(self):
         """熱更新留下的舊視窗：背景找出來 → 回畫面執行緒把它身上的東西全部放掉（Qt 物件一定要在畫面執行緒放）.
