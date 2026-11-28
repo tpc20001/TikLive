@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.23"
+APP_VERSION = "1.2.24"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -2294,6 +2294,12 @@ def _tab_fonts(bar):
 def _tab_live_size(bar):
     """V0.4.76: width fits the widest of '999 人 · 00:00:00' / '💎 999.9K ♥ 999.9K' (no fixed name width)."""
     # V0.5.09: every mode has the SAME height (the taller one), so switching never resizes the window
+    k_ = (bar.ui_scale, bar.font_scale, bar.collapsed, bar.photo, bar.gap, bar.logicalDpiY()); c_ = bar.__dict__.get('_tls')   # V1.2.24 每個分頁都要量一次字寬、量很多次（LOG：拿掉分頁卡 3～8 秒）→ 同樣大小記起來
+    if c_ and c_[0] == k_: return QSize(c_[1])
+    s_ = _tab_live_size0(bar); bar.__dict__['_tls'] = (k_, QSize(s_)); return s_
+
+
+def _tab_live_size0(bar):
     z = bar.ui_scale; small, bold = _tab_fonts(bar); fm = QFontMetrics(small)
     dc = round(bar.photo * z); h_col = int(dc + 2 * fm.height() + 12)
     d0 = round(40 * z); h_exp = int(max(d0 + 10, QFontMetrics(bold).height() + 2 * fm.height() + 10))
@@ -26174,7 +26180,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
                             if k.startswith('__') or k == '_handoff': continue
                             try: w.__dict__[k] = None; R['attrs'] += 1
                             except Exception: pass
-                    _gc.collect()
+                    _gc.collect(1 if self.isActiveWindow() else 2)              # V1.2.24 視窗在前面只收年輕的（LOG：全部收一次卡 4 秒），其他交給 Python 自己慢慢收
                 finally: done.set()
             self._ui_call.emit(strip); done.wait(120); del todo
             time.sleep(70); self.__dict__.pop('_memx_c', None); self._memx(); time.sleep(25)   # 等 tasklist 重新量
@@ -42632,10 +42638,11 @@ exit /b 1
         # V0.4.51: coalesce per-event UI work into one pass per 200 ms tick.
         vis_=self.isVisible() and not self.isMinimized()                         # V1.2.23 視窗縮小／藏起來：不捲表格（LOG：大表格捲到底一次卡 3 秒），回來再捲
         if self._pending_scroll and vis_:
-            views=list(self._pending_scroll); self._pending_scroll.clear()
-            for v in views:
-                try: v.scrollToBottom()
-                except Exception: pass
+            for v in list(self._pending_scroll):
+                try:
+                    if not v.isVisible(): continue                                 # V1.2.24 別的分頁的表格看不到 → 留著，切過去再捲
+                    self._pending_scroll.discard(v); v.scrollToBottom()
+                except Exception: self._pending_scroll.discard(v)
         if vis_ and self.__dict__.get('_tab_pending') and self.isActiveWindow():   # V1.2.23 下播換分頁時視窗不在前面 → 先不讀；切回來才讀那一場
             u_=self._tab_pending; self._tab_pending=None
             try:
