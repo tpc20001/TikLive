@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.38"
+APP_VERSION = "1.2.39"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -25659,7 +25659,10 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 rt_ = {m_: [ok_ for t_, ok_ in list(G_['route'][m_]) if n_ - t_ < 900] for m_ in ('api', 'html')}
                 f_ = lambda L: f'{sum(L) * 100 // len(L)}%（{len(L)} 次）' if L else '—'
                 o.append(f"    現在 15 分鐘：輕量 API 成功 {f_(rt_['api'])}、整頁抓取成功 {f_(rt_['html'])}；放慢等級 {int(G_['level'])}" +
-                         (f"；回全速沒多久又被擋 {G_.get('l0_fail')} 次" if G_.get('l0_fail') else '') + (f"；偷試另一種查法 {G_.get('probe_n')} 次" if G_.get('probe_n') else ''))
+                         (f"；回全速沒多久又被擋 {G_.get('l0_fail')} 次" if G_.get('l0_fail') else '') + (f"；偷試另一種查法 {G_.get('probe_n')} 次" if G_.get('probe_n') else '') +
+                         (f"；慢慢回全速 {float(G_.get('ramp') or 1) * 100:.0f}%" if not int(G_['level']) and float(G_.get('ramp') or 1) < 1 else '') +
+                         (f"；今天用了簽章 {len((G_.get('sroom') or {}).get('s') or ())}" + (f"/{G_.get('sign_cap')}" if int(G_.get('sign_cap') or 0) > 0 else '') + " 個直播間" if (G_.get('sroom') or {}).get('d') == int(time.time() // 86400) else '') +
+                         (f"；只錄影片中 {len(G_.get('nows') or {})} 位" if G_.get('nows') else ''))
         except Exception: pass
         try:                                                                    # V1.2.22 現在的主程式：記憶體、執行緒（最多的是哪幾種）
             import collections as _co
