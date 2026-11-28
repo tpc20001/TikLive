@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.30"
+APP_VERSION = "1.2.31"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -25445,7 +25445,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
     def _logup_info(self):
         """給網頁看（權杖只顯示有沒有設、最後 4 碼）."""
         d = self._logup_cfg(); tk = str(d.get('token') or '')
-        return {'ok': True, 'repo': d.get('repo'), 'auto': bool(d.get('auto')), 'has_token': bool(tk), 'tail': tk[-4:] if tk else '', 'last': d.get('last'), 'last_ok': d.get('last_ok'), 'msg': d.get('msg') or '',
+        return {'ok': True, 'repo': d.get('repo'), 'auto': bool(d.get('auto')), 'auto_bad': bool(d.get('auto_bad')), 'has_token': bool(tk), 'tail': tk[-4:] if tk else '', 'last': d.get('last'), 'last_ok': d.get('last_ok'), 'msg': d.get('msg') or '',
                 'run': bool(self.__dict__.get('_logup_run_f')), 'pc': self.pc_role_name()}
 
     def _logup_set(self, d):
@@ -25460,6 +25460,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
             if t and not re.fullmatch(r'(github_pat_|ghp_)[A-Za-z0-9_]{20,}', t): return {'ok': False, 'message': '權杖格式不對（應該是 github_pat_ 開頭的一長串）'}
             c['token'] = t
         if 'auto' in d: c['auto'] = bool(d.get('auto'))
+        if 'auto_bad' in d: c['auto_bad'] = bool(d.get('auto_bad'))           # V1.2.31 出大問題時自動上傳（你自己打勾才會開）
         self._logup_save(c); return {'ok': True, 'message': '存好了'}
 
     def _logup_api(self, method, path, body=None, token=''):
@@ -25522,6 +25523,18 @@ $r | ConvertTo-Json -Depth 4 -Compress
         self._logup_chk_t = time.time()
         c = self._logup_cfg()
         if not c.get('token') or self.__dict__.get('_logup_run_f'): return
+        now_ = time.time(); seen_ = float(self.__dict__.get('_logup_bad_seen') or now_); self._logup_bad_seen = now_
+        if c.get('auto_bad') and now_ - float(c.get('bad_t') or 0) > 6 * 3600:   # V1.2.31 出大問題（嚴重異常、畫面卡 30 秒以上）→ 傳最近 6 小時（6 小時最多一次）
+            try:
+                hit_ = None
+                for e_ in list(self._anom_store().get('ev') or []):
+                    if float(e_.get('last') or e_.get('t') or 0) <= seen_: continue
+                    m_ = re.search(r'沒有回應 (\d+) 秒', str(e_.get('detail') or ''))
+                    if e_.get('level') == 'bad' or (e_.get('key') == 'freeze' and m_ and int(m_.group(1)) >= 30): hit_ = e_; break
+                if hit_:
+                    c['bad_t'] = now_; self._logup_save(c)
+                    threading.Thread(target=self._logup_run, args=(6.0, '出問題自動：' + str(hit_.get('title') or '')[:30]), daemon=True, name='TikLiveLogUp').start(); return
+            except Exception: pass
         day = datetime.now().strftime('%Y-%m-%d')
         if c.get('auto') and 4 <= datetime.now().hour < 6 and c.get('auto_day') != day:
             c['auto_day'] = day; self._logup_save(c)
@@ -25606,6 +25619,12 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 for x in [head] + body:
                     if re.search(r'✖|失敗|錯誤|出錯|Error', x): C[norm(x.strip())] += 1
             if C: o.append('🔁 常常重複的失敗訊息：'); o += [f'    {v}×  {k}' for k, v in C.most_common(6) if v >= 3]
+        except Exception: pass
+        try:                                                                    # V1.2.31 這段時間「只錄影片」（簽章額度）、小米防誤觸各幾次
+            U2 = ents('update_log.txt'); nw_ = [h for t, h, b in U2 if '只錄影片（沒有留言' in h]
+            if nw_: o.append(f'📼 只錄影片（簽章額度用完／留給重點主播）：{len(nw_)} 場（' + '、'.join(sorted({m.group(1) for m in (re.search(r"（@([^）]+)）", h) for h in nw_) if m})[:8]) + '）')
+            pk_ = [h for t, h, b in U2 if '小米防誤觸畫面' in h or '畫面突然變暗' in h]
+            if pk_: o.append(f'📵 手機錄特效：小米防誤觸畫面（手機太靠近牆）自動關掉 {len(pk_)} 次' + ('；' + next((h.split('：', 1)[-1][:120] for t, h, b in U2 if '防誤觸相關設定' in h), '') if any('防誤觸相關設定' in h for t, h, b in U2) else ''))
         except Exception: pass
         try:
             et = Counter(x.get('etype') for x in E if x.get('type') == 'engine' and x.get('k') == 'retry')
