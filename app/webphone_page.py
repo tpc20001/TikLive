@@ -2240,7 +2240,7 @@ function shortAgo(t){t=String(t||"").split(" · 測：")[0];let m=t.match(/(\d[\
 function miniCard(r){         // 一列 2～3 位：大頭像（上面人數徽章）＋暱稱＋三個色塊
   const cls=r.grace!=null?"grace":r.section==="live"?"live":r.section==="stale"?"stale":"";
   const dots=(r.priority?'<i class="d p"></i>':"")+`<i class="d ${r.grace!=null?"g":r.live?"on":r.section==="stale"?"s":""}"></i>`;
-  const chips=r.live?`<span class="ch xt">${r.grace!=null?"⚠ 等待重連 "+Math.floor(r.grace/60)+":"+p2(r.grace%60):"⏱ "+esc(r.elapsed)}</span><span class="ch xd"><i>💎</i>${k(r.diamonds)}</span><span class="ch xl"><i>♥</i>${k(r.likes)}</span>`
+  const chips=r.live?`<span class="ch xt">${r.grace!=null?"⚠ 等待重連 "+Math.floor(r.grace/60)+":"+p2(r.grace%60):"⏱ "+esc(r.elapsed)}</span>${r.nows?'<span class="ch xo" title="簽章伺服器今天的額度用完：只錄影片，沒有留言／禮物">📼 只錄影片</span>':`<span class="ch xd"><i>💎</i>${k(r.diamonds)}</span><span class="ch xl"><i>♥</i>${k(r.likes)}</span>`}`
     :`<span class="ch xo">${esc(shortAgo(r.text))}</span><span class="ch xo">${p2(r.sessions||0)} 場</span>`;
   return `<div class="c mini ${cls} ${r.priority?"pri":""}" data-u="${esc(r.u)}" data-live="${r.live?1:0}" title="${esc(r.name)} @${esc(r.u)}">
 <div class="mrow"><div class="ma">${avHtml(r.u,r.avatar,r.name,r.av)}${r.live?`<b class="sk-v">${(r.viewers||0).toLocaleString()} 人</b>`:""}${r.rec?'<span class="mrec" title="錄影中"></span>':""}</div>
@@ -2248,7 +2248,7 @@ function miniCard(r){         // 一列 2～3 位：大頭像（上面人數徽�
 function stackCard(r){        // 一列 4 位：跟電腦版收合卡一樣（頭像＋人數徽章、時間、鑽石／按讚）
   const cls=r.grace!=null?"grace":r.section==="live"?"live":r.section==="stale"?"stale":"";
   const dots=(r.priority?'<i class="d p"></i>':"")+`<i class="d ${r.grace!=null?"g":r.live?"on":r.section==="stale"?"s":""}"></i>`;
-  const body=r.live?`<div class="mch skc"><span class="ch xt">${r.grace!=null?"⚠ "+Math.floor(r.grace/60)+":"+p2(r.grace%60):esc(r.elapsed)}</span><span class="ch xd"><i>💎</i>${k(r.diamonds)}</span><span class="ch xl"><i>♥</i>${k(r.likes)}</span></div>`
+  const body=r.live?`<div class="mch skc"><span class="ch xt">${r.grace!=null?"⚠ "+Math.floor(r.grace/60)+":"+p2(r.grace%60):esc(r.elapsed)}</span>${r.nows?'<span class="ch xo" title="簽章額度用完：只錄影片">📼</span>':`<span class="ch xd"><i>💎</i>${k(r.diamonds)}</span><span class="ch xl"><i>♥</i>${k(r.likes)}</span>`}</div>`
     :`<div class="mch skc"><span class="ch xo">${esc(shortAgo(r.text))}</span><span class="ch xo">${p2(r.sessions||0)} 場</span></div>`;
   return `<div class="c sk ${cls} ${r.priority?"pri":""}" data-u="${esc(r.u)}" data-live="${r.live?1:0}" title="${esc(r.name)} @${esc(r.u)}">
 <span class="sk-d">${dots}</span>${r.rec?'<span class="sk-rec" title="錄影中"></span>':""}<div class="sk-a">${avHtml(r.u,r.avatar,r.name,r.av)}${r.live?`<b class="sk-v">${(r.viewers||0).toLocaleString()} 人</b>`:""}</div>${body}</div>`;}

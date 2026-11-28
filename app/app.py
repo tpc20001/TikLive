@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.33"
+APP_VERSION = "1.2.34"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -29428,7 +29428,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
                         'likes':(self._engine_stat(u,'like_room_total') or self._engine_stat(u,'likes')) if live else 0,
                         'priority':u in self.priority_streamers,'avatar':bool(ai.get('avatar')),'av':int(ai.get('avatar_mt') or 0)%1000000007,
                         'rec':u in getattr(self,'video_recorders',{}),'sessions':getattr(self,'_session_counts',{}).get(u,0),'sid':int(sid or 0),
-                        'nv':u in getattr(self,'novideo_streamers',()),
+                        'nv':u in getattr(self,'novideo_streamers',()),'nows':bool(live and getattr(self.engines.get(u),'_tlm_nows',False)),
                         'grace':(max(0,int(g['until']-now)) if g is not None else None),
                         'hlh':self._hlh_of(u) if live else None})                 # V0.7.42.029 精彩預告
         return {'time':datetime.now().strftime('%H:%M:%S'),'rooms':out,'tier_days':list(self._tier_days())}
