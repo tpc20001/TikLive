@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.18"
+APP_VERSION = "1.2.19"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -18247,7 +18247,7 @@ try { NLConnect | Out-Null; Unset
             return nv(cur) == nv(F['app.py'])
         except Exception: return False
 
-    def _upd_light_apply(self):
+    def _upd_light_apply(self, why='只改了網頁，直接換檔'):
         """換好檔之後：網頁的模組下次用到就重新載入、版本號改成新的；不重建視窗."""
         global APP_VERSION, _APP_SRC_SHA
         import hashlib
@@ -18259,20 +18259,52 @@ try { NLConnect | Out-Null; Unset
         except Exception: pass
         self.__dict__.pop('_wph_c', None); self.__dict__.pop('_pg_enc', None)
         self._web_upd = {'state': 'done', 'from': old, 'to': APP_VERSION, 't': time.time(), 'core': False, 'via_web': True, 'light': True}
-        self._web_update_log(f'⚡ 輕量更新 V{old} → V{APP_VERSION}：只改了網頁，直接換檔，電腦程式畫面不用重整')
-        try: self.statusBar().showMessage(f'已更新至 V{APP_VERSION}（輕量更新：只改網頁，畫面沒有重整）· 監控與錄音持續進行中')
+        self._web_update_log(f'⚡ 輕量更新 V{old} → V{APP_VERSION}：{why}，電腦程式畫面不用重整')
+        try: self.statusBar().showMessage(f'已更新至 V{APP_VERSION}（⚡ 輕量更新，畫面沒有重整）· 監控與錄音持續進行中')
         except Exception: pass
         try: self.upd_current.setText(f'目前版本：V{APP_VERSION}')
         except Exception: pass
 
+    def _upd_pyplan(self):
+        """V1.2.19 背景：電腦程式（app.py）只改了函式內容 → 算出要換哪些函式（解析兩份 3 MB 的程式約 5 秒，所以不在畫面執行緒做）."""
+        try:
+            import hashlib
+            pkg = getattr(self, '_upd_pkg', None) or {}; F = pkg.get('files') or {}
+            if pkg.get('core_changed') or 'app.py' not in F or self.__dict__.get('_light_off'): return None, '核心有改'
+            cur = (self._app_code_dir() / 'app.py').read_bytes()
+            if hashlib.sha256(cur).hexdigest() != _APP_SRC_SHA: return None, '磁碟上的 app.py 跟跑著的不一樣'
+            return _pylight_plan(cur.decode('utf-8'), F['app.py'].decode('utf-8'))
+        except Exception as ex: return None, f'算不出來：{ex}'
+
+    def _upd_pylight_apply(self, plan):
+        """V1.2.19 套用：舊函式直接換新的程式碼（按鈕、計時器接著的也一起換），新函式加進去；然後跟網頁輕量更新一樣收尾."""
+        r = _pylight_apply(globals(), plan)
+        if r: self._web_update_log(f'⚡ 輕量更新做不到（{r}）→ 改用一般熱更新'); return False
+        n1, n2 = len(plan['swap']), len(plan['add'])
+        self._upd_light_apply(why=f'改了 {n1} 個函式' + (f'、新增 {n2} 個' if n2 else '') + '，直接換掉程式碼')
+        return True
+
     def _web_update_go(self):
+        pkg_ = getattr(self, '_upd_pkg', None)
+        if pkg_ is not None and not pkg_.get('_pl_done') and not self._upd_light_check():   # V1.2.19 先在背景算「能不能只換函式」，算完再回來
+            if not pkg_.get('_pl_run'):
+                pkg_['_pl_run'] = True
+                def job_(pk=pkg_):
+                    try: pk['_pl'] = self._upd_pyplan()
+                    except Exception as ex: pk['_pl'] = (None, str(ex))
+                    finally:
+                        pk['_pl_done'] = True; self._ui_call.emit(self._web_update_go)
+                threading.Thread(target=job_, daemon=True, name='TikLiveUpdPlan').start()
+            return
         self._upd_via_web=True
         try:
-            light_ = self._upd_light_check()
+            light_ = self._upd_light_check(); pl_ = (pkg_ or {}).get('_pl') or (None, '')
+            if pkg_ is not None and pl_[0] is None and pl_[1]: self._web_update_log(f'這版要一般熱更新：{pl_[1]}')
             if not self._updater_apply(confirm=False):
                 self._web_upd=dict(self._web_upd,state='failed',message=getattr(self,'_upd_err','') or '寫入檔案失敗，已還原，監控沒有受到影響')
                 self._web_update_log('手機安裝失敗：'+self._web_upd['message']); return
             if light_: self._upd_light_apply(); return                          # V1.2.18
+            if pl_[0] is not None and self._upd_pylight_apply(pl_[0]): return     # V1.2.19 只換函式
             if self._hot_reload(announce=True) is None:
                 self._web_upd=dict(self._web_upd,state='failed',message=getattr(self,'_upd_err','') or '新版無法熱更新，已還原目前版本；更新包已放進 UPDATE 資料夾，下次重開程式時套用')
                 self._web_update_log('手機安裝失敗：'+self._web_upd['message'])
@@ -46434,6 +46466,97 @@ def _curwin(default):
         w = getattr(QApplication.instance(), '_tlm_window', None)
         return w if w is not None else default
     except Exception: return default
+
+
+def _pylight_plan(old_src, new_src):
+    """V1.2.19 只改了 Python 函式內容的版本：算出要換哪些函式的程式碼（不重建畫面）.
+    回傳 (plan, why)：plan＝{'swap': [(qualname, code)], 'add': [(qualname, code)]}；不行就 plan=None、why＝原因."""
+    import ast
+    def isver(n): return isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name) and n.targets[0].id == 'APP_VERSION'
+    def sig(f):
+        b = f.body; f.body = []
+        try: return ast.dump(f)
+        finally: f.body = b
+    def bod(f): return ast.dump(ast.Module(body=f.body, type_ignores=[]))
+    FD = (ast.FunctionDef, ast.AsyncFunctionDef)
+    NOREL = ('__init__', 'build_ui', 'apply_theme_stylesheet')
+    def ui_only(name): return name in NOREL or name.startswith(('page_', 'build_', '_build', 'make_'))
+    try: O = ast.parse(old_src); N = ast.parse(new_src)
+    except SyntaxError as ex: return None, f'語法：{ex}'
+    swap, add = [], []
+    def walk(ob, nb, pre):
+        onames = {x.name for x in ob if isinstance(x, FD + (ast.ClassDef,))}
+        i = j = 0
+        while i < len(ob) or j < len(nb):
+            o = ob[i] if i < len(ob) else None; n = nb[j] if j < len(nb) else None
+            if o is not None and n is not None and isinstance(o, FD) and isinstance(n, FD) and o.name == n.name:
+                if type(o) is not type(n) or sig(o) != sig(n): return f'{pre}{o.name} 的參數／裝飾改了'
+                if bod(o) != bod(n):
+                    if ui_only(n.name): return f'{pre}{n.name} 只在開程式／建畫面時跑'
+                    swap.append(pre + n.name)
+                i += 1; j += 1; continue
+            if o is not None and n is not None and isinstance(o, ast.ClassDef) and isinstance(n, ast.ClassDef) and o.name == n.name:
+                if [ast.dump(x) for x in o.bases + o.keywords + o.decorator_list] != [ast.dump(x) for x in n.bases + n.keywords + n.decorator_list]: return f'{o.name} 類別定義改了'
+                r = walk(o.body, n.body, pre + o.name + '.')
+                if r: return r
+                i += 1; j += 1; continue
+            if n is not None and isinstance(n, FD) and n.name not in onames:
+                dec = [ast.unparse(d) for d in n.decorator_list]
+                if any(d not in ('staticmethod', 'classmethod') for d in dec) or len(dec) > 1: return f'新函式 {pre}{n.name} 有特別的裝飾'
+                if pre.count('.') > 1: return f'新函式 {pre}{n.name} 在太裡面'
+                if ui_only(n.name): return f'{pre}{n.name} 只在開程式／建畫面時跑'
+                add.append((pre + n.name, dec[0] if dec else '', [ast.unparse(d) for d in n.args.defaults],
+                            {a.arg: ast.unparse(d) for a, d in zip(n.args.kwonlyargs, n.args.kw_defaults) if d is not None})); j += 1; continue
+            if o is not None and n is not None and ast.dump(o) == ast.dump(n): i += 1; j += 1; continue
+            return f'{pre or "最外層"}有不是函式的地方改了（第 {getattr(n or o, "lineno", "?")} 行附近）'
+        return None
+    r = walk([x for x in O.body if not isver(x)], [x for x in N.body if not isver(x)], '')
+    if r: return None, r
+    if not swap and not add: return {'swap': [], 'add': []}, '沒有 Python 改動'
+    try: code = compile(new_src, 'app.py', 'exec')
+    except Exception as ex: return None, f'編譯：{ex}'
+    Q = {}
+    def coll(c, depth):
+        for k in c.co_consts:
+            if hasattr(k, 'co_qualname') and depth < 3:
+                Q.setdefault(k.co_qualname, k)
+                if '<locals>' not in k.co_qualname: coll(k, depth + 1)
+    coll(code, 0)
+    try:
+        return {'swap': [(q, Q[q]) for q in swap], 'add': [(q, Q[q], dc, df, kw) for q, dc, df, kw in add]}, ''
+    except KeyError as ex: return None, f'找不到 {ex}'
+
+
+def _pylight_apply(G, plan):
+    """把 plan 套到正在跑的模組（G＝globals()）：舊函式物件直接換 __code__（按鈕／計時器接著的也會用新的）；新函式加進去.
+    先全部檢查過才動手；有一個不行就整個不做，回傳原因."""
+    import types
+    todo = []
+    for q, c in plan['swap']:
+        parts = q.split('.'); obj = G.get(parts[0])
+        if obj is None: return f'找不到 {q}'
+        if len(parts) == 2:
+            obj = obj.__dict__.get(parts[1]) if isinstance(obj, type) else None
+            if isinstance(obj, (staticmethod, classmethod)): obj = obj.__func__
+        if not isinstance(obj, types.FunctionType): return f'{q} 不是一般函式'
+        if obj.__code__.co_freevars != c.co_freevars: return f'{q} 的閉包變數不一樣'
+        todo.append((obj, c))
+    adds = []
+    for q, c, dc, df, kw in plan['add']:
+        if c.co_freevars: return f'新函式 {q} 有閉包（super 之類）'
+        parts = q.split('.')
+        if len(parts) == 2 and not isinstance(G.get(parts[0]), type): return f'找不到類別 {parts[0]}'
+        try:
+            f = types.FunctionType(c, G, parts[-1], tuple(eval(x, G) for x in df) or None)
+            if kw: f.__kwdefaults__ = {k: eval(v, G) for k, v in kw.items()}
+        except Exception as ex: return f'新函式 {q} 的預設值：{ex}'
+        f.__qualname__ = q
+        adds.append((parts, staticmethod(f) if dc == 'staticmethod' else classmethod(f) if dc == 'classmethod' else f))
+    for obj, c in todo: obj.__code__ = c
+    for parts, f in adds:
+        if len(parts) == 1: G[parts[0]] = f
+        else: setattr(G[parts[0]], parts[1], f)
+    return ''
 
 
 try:                                                                            # V1.2.18 跑著的這份 app.py 的指紋（輕量更新用：確認磁碟上的還是同一份）
