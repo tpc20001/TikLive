@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.45"
+APP_VERSION = "1.2.46"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -22250,7 +22250,9 @@ try { NLConnect | Out-Null; Unset
             L = [c for t, _u, c in list(self.__dict__.get('_conn_log') or []) if now - t < 900]
             bad = sum(1 for c in L if c in ('ROOM', 'RATE', 'BLOCK', 'SIGN'))
             okn = sum(1 for x in (self.__dict__.get('_conn') or {}).values() if x.get('ok_t') and now - x['ok_t'] < 1800)
-            if bad >= 60 and okn == 0:
+            try: si_ = self._smart_info() or {}; hot_ = max(int(si_.get('hot') or 0), int(si_.get('hot_all') or 0)) if si_.get('on') and si_.get('n') else 1   # V1.2.46 現在本來就沒人會開播（半夜冷門、沒人在熱區）→ 30 分鐘沒新連上很正常，不提醒
+            except Exception: hot_ = 1
+            if bad >= 60 and okn == 0 and hot_ > 0:
                 H.update(conn='bad', conn_msg=f'15 分鐘內 {bad} 次找不到直播間／被限制，30 分鐘內沒有新連上的')
                 self._anom('connfail', 'warn', '一直連不上新的直播', H['conn_msg'], '多半是 TikTok 暫時限制：先停止監控 10～15 分鐘；如果另一台電腦同一個網路能連，就按「重新啟動主程式」。')
             else: H.update(conn='ok', conn_msg='')
