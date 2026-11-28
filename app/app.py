@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.31"
+APP_VERSION = "1.2.32"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -37710,6 +37710,14 @@ $r | ConvertTo-Json -Depth 4 -Compress
         try: time.sleep(0.8); self._pfx_pocket(adb, ser)                        # V1.2.28 一亮起來就看有沒有跳小米「請勿蓋住聽筒區域」
         except Exception: pass
 
+    def _pfx_winlog(self, adb, ser, why):
+        """V1.2.32 記下手機現在有哪些視窗（名字），下次 LOG 就知道那層畫面是哪個系統視窗（之後可以直接用名字認）."""
+        try:
+            rc, o = self._pfx_sh(adb, ser, 'dumpsys window windows | grep -E "Window #|mCurrentFocus|mFocusedApp"', 12)
+            names = re.findall(r'Window\{[0-9a-f]+ u\d+ ([^}]+)\}', o)
+            self._pfx_log(f'（{why}）手機現在的視窗：' + '、'.join(dict.fromkeys(n.strip() for n in names))[:600])
+        except Exception: pass
+
     def _pfx_pocket(self, adb, ser, xml=None):
         """V1.2.28 小米防誤觸：手機上方的距離感應器被擋住（太靠近牆）→ 整個畫面蓋一層「請勿蓋住聽筒區域，或按下音量+」，錄影也錄到這層.
         讀畫面上的字（uiautomator，連系統的浮動視窗一起讀）→ 看到就按「音量+」關掉、音量調回原本的；順便把防誤觸關掉（找得到那個設定才關）."""
@@ -37722,6 +37730,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
         self._pfx_sh(adb, ser, 'input keyevent KEYCODE_VOLUME_UP', 8); time.sleep(0.8)
         if v0 is not None: self._pfx_vol(adb, ser, v0)
         S = self._pfx_S(); S['pocket_n'] = int(S.get('pocket_n') or 0) + 1; S['pocket_t'] = time.time()
+        if not S.get('pocket_win'): S['pocket_win'] = 1; self._pfx_winlog(adb, ser, '防誤觸')
         msg = f'📵 小米防誤觸畫面（{hit[:20]}：手機上方感應器被擋住，可能太靠近牆）→ 按「音量+」關掉'
         try:
             if self._pfx_cfg().get('no_pocket', True) and not S.get('pocket_off'):   # 把防誤觸本身關掉（之後就不會再跳）
@@ -37793,6 +37802,7 @@ $r | ConvertTo-Json -Depth 4 -Compress
                 if pm_ > 40 and 10 <= sh[0] < pm_ * 0.45 and fg_ in self.PFX_PKGS and now - float(cur.get('pk_t') or 0) > 600 and now - float(self._pfx_S().get('pocket_t') or 0) > 30:
                     cur['pk_t'] = now; v0_ = self._pfx_vol(adb, ser); self._pfx_sh(adb, ser, 'input keyevent KEYCODE_VOLUME_UP', 8); time.sleep(0.8)
                     if v0_ is not None: self._pfx_vol(adb, ser, v0_)
+                    if not self._pfx_S().get('dim_win'): self._pfx_S()['dim_win'] = 1; self._pfx_winlog(adb, ser, '變暗')
                     sh2 = self._pfx_shot(adb, ser)
                     self._pfx_log(f'畫面突然變暗（亮度 {pm_:.0f} → {sh[0]:.0f}，可能是小米防誤觸）→ 按音量+' + (f'，亮度回到 {sh2[0]:.0f}' if sh2 else ''))
                     if sh2 is not None: sh = sh2
@@ -39021,6 +39031,12 @@ $r | ConvertTo-Json -Depth 4 -Compress
                         if not self._pfx_switch('手動'): self._pfx_log('沒有另一個可以用的帳號（沒有小米分身，或在休息）')
                     elif a == 'bright': self._pfx_bright(adb, ser, int(v or 50))
                     elif a == 'volup':                                           # V1.2.28 關掉小米防誤觸畫面（音量調回原本的）
+                        self._pfx_winlog(adb, ser, '手動按音量+之前')                # V1.2.32 你按的時候多半那層畫面還在：記下它是哪個視窗
+                        try:
+                            rcx_, xx_ = self._pfx_sh(adb, ser, 'rm -f /sdcard/tlm_ui3.xml; uiautomator dump --windows /sdcard/tlm_ui3.xml >/dev/null 2>&1; cat /sdcard/tlm_ui3.xml', 25)
+                            tx_ = [t for t in re.findall(r'(?:text|content-desc)="([^"]{1,60})"', xx_ or '') if t.strip()]
+                            self._pfx_log('（手動按音量+之前）畫面上的字：' + ('、'.join(tx_[:15])[:300] if tx_ else ('讀不到' if '<hierarchy' not in (xx_ or '') else '沒有字')))
+                        except Exception: pass
                         v0_ = self._pfx_vol(adb, ser); self._pfx_sh(adb, ser, 'input keyevent KEYCODE_VOLUME_UP', 8); time.sleep(0.8)
                         if v0_ is not None: self._pfx_vol(adb, ser, v0_)
                     time.sleep(1.5 if a != 'tiktok' else 4)
