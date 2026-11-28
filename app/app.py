@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.59"
+APP_VERSION = "1.2.60"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -14597,6 +14597,8 @@ try { NLConnect | Out-Null; Unset
         冷凍區裡互相指來指去、沒人用的不會被收 → 每天 4:30 拿出來全部整理一次再冷凍；熱更新放掉舊視窗前也先拿出來."""
         import gc as _gc
         S = _gcmon(); now = time.time()
+        try: self._fw_adopt()
+        except Exception: pass
         if not S.get('frozen'):
             big = [e for e in list(S['ev']) if e[2] == 2 and now - e[0] <= 3600 and e[1] >= 1.5]
             if len(big) >= 3 or sum(1 for e in big if e[1] >= 3) >= 2:
@@ -14605,6 +14607,17 @@ try { NLConnect | Out-Null; Unset
         elif now - float(S['frozen']) >= 18 * 3600 and datetime.now().hour == 4 and datetime.now().minute >= 30:
             t0 = time.perf_counter(); fz = _gc.get_freeze_count(); _gc.unfreeze(); n_ = _gc.collect(2); d = time.perf_counter() - t0; _gc.freeze(); S['frozen'] = time.time()
             self._wd_log(f'🧊 每天一次：冷凍的 {fz:,} 個物件全部整理一次（收掉 {n_:,} 個，花 {d:.1f} 秒），再冷凍')
+
+    def _fw_adopt(self):
+        """V1.2.60 卡頓紀錄器（_FreezeWatch）一個程式只有一個，VER 一樣就一直沿用開程式時最早那個模組建的那個 →
+        1.2.56 改的取樣（記垃圾回收、其他執行緒在跑什麼）輕量更新／熱更新後其實沒用到。把新版的取樣函式掛到它身上
+        （實例屬性，舊的迴圈下一次取樣就會用到；不換掉紀錄器本身，計時的心跳不受影響）."""
+        import types as _ty
+        w = getattr(QApplication.instance(), '_tlm_freeze_watch', None)
+        if w is None or getattr(w, 'dead', False): return
+        if getattr(getattr(w, '_stack', None), '__func__', None) is _FreezeWatch._stack: return
+        w._IDLE_RE = _FreezeWatch._IDLE_RE; w._IDLE_FN = _FreezeWatch._IDLE_FN; w._gc_during = _FreezeWatch._gc_during
+        w._busy_threads = _ty.MethodType(_FreezeWatch._busy_threads, w); w._stack = _ty.MethodType(_FreezeWatch._stack, w)
 
     def _gc_unfreeze(self, why=''):
         """冷凍中 → 拿出來（下一次 Python 自己整理時會全部掃一遍，可以收掉舊視窗）."""
