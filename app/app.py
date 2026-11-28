@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.27"
+APP_VERSION = "1.2.28"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -37680,6 +37680,37 @@ $r | ConvertTo-Json -Depth 4 -Compress
         """V1.1.69 叫醒螢幕：能用的都試（沒開安全設定時按鍵會被擋，其他照樣有用）."""
         for c in ('input keyevent KEYCODE_WAKEUP', 'cmd power wakeup', 'svc power stayon usb', 'settings put system screen_off_timeout 2147483647', 'wm dismiss-keyguard'):
             self._pfx_sh(adb, ser, c, 8)
+        try: time.sleep(0.8); self._pfx_pocket(adb, ser)                        # V1.2.28 一亮起來就看有沒有跳小米「請勿蓋住聽筒區域」
+        except Exception: pass
+
+    def _pfx_pocket(self, adb, ser, xml=None):
+        """V1.2.28 小米防誤觸：手機上方的距離感應器被擋住（太靠近牆）→ 整個畫面蓋一層「請勿蓋住聽筒區域，或按下音量+」，錄影也錄到這層.
+        讀畫面上的字（uiautomator，連系統的浮動視窗一起讀）→ 看到就按「音量+」關掉、音量調回原本的；順便把防誤觸關掉（找得到那個設定才關）."""
+        if xml is None:
+            rc, xml = self._pfx_sh(adb, ser, 'rm -f /sdcard/tlm_ui2.xml; uiautomator dump --windows /sdcard/tlm_ui2.xml >/dev/null 2>&1; [ -s /sdcard/tlm_ui2.xml ] || uiautomator dump /sdcard/tlm_ui2.xml >/dev/null 2>&1; cat /sdcard/tlm_ui2.xml', 25)
+        R = re.compile(r'蓋住聽筒|盖住听筒|遮擋聽筒|遮挡听筒|遮住聽筒|遮住听筒|cover the earpiece|cover the earphone|防誤觸|防误触', re.I)
+        hit = next((t for t in re.findall(r'(?:text|content-desc)="([^"]{1,80})"', xml or '') if R.search(t)), '')
+        if not hit: return False
+        v0 = self._pfx_vol(adb, ser)
+        self._pfx_sh(adb, ser, 'input keyevent KEYCODE_VOLUME_UP', 8); time.sleep(0.8)
+        if v0 is not None: self._pfx_vol(adb, ser, v0)
+        S = self._pfx_S(); S['pocket_n'] = int(S.get('pocket_n') or 0) + 1; S['pocket_t'] = time.time()
+        msg = f'📵 小米防誤觸畫面（{hit[:20]}：手機上方感應器被擋住，可能太靠近牆）→ 按「音量+」關掉'
+        try:
+            if self._pfx_cfg().get('no_pocket', True) and not S.get('pocket_off'):   # 把防誤觸本身關掉（之後就不會再跳）
+                rc2, o2 = self._pfx_sh(adb, ser, 'settings list system | grep -iE "pocket|proxim"; settings list secure | grep -iE "pocket|proxim"', 12)
+                self._pfx_log('防誤觸相關設定：' + (' / '.join(x.strip() for x in o2.splitlines() if '=' in x)[:300] or '（沒找到）'))
+                for ln in o2.splitlines():
+                    k_, _, v_ = ln.strip().partition('=')
+                    if k_ in ('enable_screen_on_proximity_sensor', 'pocket_mode', 'pocket_mode_enabled', 'pocket_mode_enable', 'is_pocket_mode_enabled') and v_.strip() == '1':
+                        for ns_ in ('system', 'secure'):
+                            rc3, o3 = self._pfx_sh(adb, ser, f'settings get {ns_} {k_}', 8)
+                            if o3.strip() == '1':
+                                self._pfx_sh(adb, ser, f'settings put {ns_} {k_} 0', 8); S['pocket_off'] = f'{ns_} {k_}'
+                                msg += f'；已把防誤觸關掉（{ns_} {k_} 1→0）'
+        except Exception: pass
+        self._pfx_log(msg)
+        return True
 
     def _pfx_shot(self, adb, ser, keep=None):
         """手機現在的畫面（screencap，不用按鍵）→ 存一張給頁面看；回 (平均亮度, 變化量, 36x80 灰階)；拿不到回 None."""
@@ -37706,8 +37737,11 @@ $r | ConvertTo-Json -Depth 4 -Compress
 
     def _pfx_ui_err(self, adb, ser):
         """V1.1.72 讀手機畫面上的文字（uiautomator，不按任何東西），有錯誤訊息就回那段字；讀不到回空字串."""
-        rc, out = self._pfx_sh(adb, ser, 'uiautomator dump /sdcard/tlm_ui.xml >/dev/null 2>&1; cat /sdcard/tlm_ui.xml', 20)
+        rc, out = self._pfx_sh(adb, ser, 'rm -f /sdcard/tlm_ui.xml; uiautomator dump --windows /sdcard/tlm_ui.xml >/dev/null 2>&1; [ -s /sdcard/tlm_ui.xml ] || uiautomator dump /sdcard/tlm_ui.xml >/dev/null 2>&1; cat /sdcard/tlm_ui.xml', 25)   # V1.2.28 連系統浮動視窗一起讀
         if '<hierarchy' not in out: return ''
+        try:
+            if self._pfx_pocket(adb, ser, out): return ''                       # V1.2.28 小米防誤觸畫面：已經按音量+關掉
+        except Exception: pass
         for t in re.findall(r'(?:text|content-desc)="([^"]{1,60})"', out):
             if self.PFX_ERR_RE.search(t): return t[:30]
         return ''
@@ -37727,6 +37761,15 @@ $r | ConvertTo-Json -Depth 4 -Compress
         fg_, act_ = self._pfx_fg(adb, ser); cur['act'] = act_                    # V1.1.72 現在真的在直播間嗎（Activity 名稱有 Live）
         etx = self._pfx_ui_err(adb, ser) if fg_ in self.PFX_PKGS else ''        # 畫面上的錯誤訊息（發生錯誤、請稍後再試…）
         if sh is not None:
+            try:                                                                # V1.2.28 畫面突然暗到不到一半、但不是黑的：可能是小米防誤觸那層（字讀不到時的備案）→ 按一次音量+（10 分鐘最多一次）
+                pm_ = float(cur.get('w_m') or 0)
+                if pm_ > 40 and 10 <= sh[0] < pm_ * 0.45 and fg_ in self.PFX_PKGS and now - float(cur.get('pk_t') or 0) > 600 and now - float(self._pfx_S().get('pocket_t') or 0) > 30:
+                    cur['pk_t'] = now; v0_ = self._pfx_vol(adb, ser); self._pfx_sh(adb, ser, 'input keyevent KEYCODE_VOLUME_UP', 8); time.sleep(0.8)
+                    if v0_ is not None: self._pfx_vol(adb, ser, v0_)
+                    sh2 = self._pfx_shot(adb, ser)
+                    self._pfx_log(f'畫面突然變暗（亮度 {pm_:.0f} → {sh[0]:.0f}，可能是小米防誤觸）→ 按音量+' + (f'，亮度回到 {sh2[0]:.0f}' if sh2 else ''))
+                    if sh2 is not None: sh = sh2
+            except Exception: pass
             m, sd, v = sh; v = v[36 * 6:]; pv = cur.get('w_pv'); cur['w_pv'] = v   # 卡住比對不算最上面的狀態列（時間、網速會變）
             if m < 10 and sd < 6: st = 'black'
             elif etx: st = 'error'
@@ -38950,16 +38993,19 @@ $r | ConvertTo-Json -Depth 4 -Compress
                     elif a == 'acct':
                         if not self._pfx_switch('手動'): self._pfx_log('沒有另一個可以用的帳號（沒有小米分身，或在休息）')
                     elif a == 'bright': self._pfx_bright(adb, ser, int(v or 50))
+                    elif a == 'volup':                                           # V1.2.28 關掉小米防誤觸畫面（音量調回原本的）
+                        v0_ = self._pfx_vol(adb, ser); self._pfx_sh(adb, ser, 'input keyevent KEYCODE_VOLUME_UP', 8); time.sleep(0.8)
+                        if v0_ is not None: self._pfx_vol(adb, ser, v0_)
                     time.sleep(1.5 if a != 'tiktok' else 4)
                     S['info_t'] = 0; S['dev_t'] = 0
                     if a != 'sleep':
                         sh_ = self._pfx_shot(adb, ser)
                         if sh_ is not None: S['shot'] = {'t': time.time(), 'st': 'black' if (sh_[0] < 10 and sh_[1] < 6) else ('ok' if S.get('cur') else 'idle'), 'm': round(sh_[0], 1)}
                     else: S['shot'] = {'t': time.time(), 'st': 'sleep'}
-                    self._pfx_log({'wake': '手動：亮屏', 'sleep': '手動：熄屏', 'home': '手動：回桌面', 'tiktok': '手動：開 TikTok', 'bright': f'手動：亮度 {v}%', 'shot': '手動：截一張'}.get(a, a))
+                    self._pfx_log({'wake': '手動：亮屏', 'sleep': '手動：熄屏', 'home': '手動：回桌面', 'tiktok': '手動：開 TikTok', 'bright': f'手動：亮度 {v}%', 'shot': '手動：截一張', 'volup': '手動：按音量+（關掉防誤觸畫面）'}.get(a, a))
                 except Exception as e: self._pfx_log(f'手動控制失敗：{e!r}')
             threading.Thread(target=run_, daemon=True, name='TikLivePfxCtl').start()
-            return {'ok': True, 'message': {'wake': '☀ 亮屏', 'sleep': '🌙 熄屏', 'home': '🏠 回桌面', 'tiktok': '▶ 開 TikTok', 'bright': f'亮度 {d.get("v")}%', 'shot': '📷 截一張'}.get(a, a) + '（1～4 秒後畫面會更新）'}
+            return {'ok': True, 'message': {'wake': '☀ 亮屏', 'sleep': '🌙 熄屏', 'home': '🏠 回桌面', 'tiktok': '▶ 開 TikTok', 'bright': f'亮度 {d.get("v")}%', 'shot': '📷 截一張', 'volup': '🔊 音量+'}.get(a, a) + '（1～4 秒後畫面會更新）'}
         if op == 'idle_off': cfg['idle_off'] = bool(d.get('on')); self._pfx_cfg_save(cfg); return {'ok': True, 'message': '已存'}
         if op == 'test':
             T = self._pfx_tools(); dev = S.get('dev') or {}
