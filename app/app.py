@@ -35,7 +35,7 @@ from core import DB_PATH, LOG_DIR, PACKAGE_ROOT, PACKAGE_DATA_DIR, APP_VERSION, 
 PACKAGE_DIR = PACKAGE_DATA_DIR
 # V0.4.54: the program version lives here, so a UI-only update leaves core.py byte-identical
 # (and is therefore a full hot update). core.APP_VERSION is the core/engine version.
-APP_VERSION = "1.2.60"
+APP_VERSION = "1.2.61"
 STREAMER_FILE = PACKAGE_DIR / "TikLiveMonitor_Config.json"
 MOBILE_SNAPSHOT_PATH = PACKAGE_DIR / "TikLiveMobileSnapshot.json"
 try:                                                         # V0.6.43 每 10 秒寫一次 → C 槽
@@ -23872,7 +23872,7 @@ try { NLConnect | Out-Null; Unset
         return {'on': bool(c.get('on', True)), 'level': lv, 'level_name': _CG_LEVEL_NAME[lv], 'level_min': round((now - float(G['level_t'] or now)) / 60),
                 'rate': int(c.get('rate', 80)), 'rate_now': int(c.get('rate', 80) * _CG_LEVEL_RATE[lv] * (float(G.get('ramp') or 1.0) if lv < 2 else 1.0)), 'ramp': float(G.get('ramp') or 1.0) if lv < 2 else 1.0, 'l1_fail': int(G.get('l1_fail') or 0), 'ceil': float(G.get('ceil') or 0), 'att_min': att1, 'http_min': http_n,
                 'block_pct': round(r5 * 100), 'n5': n5, 'res10': dict(res), 'q': [len(x) for x in G['q']], 'wait_avg': round(sum(waits) / len(waits)) if waits else 0,
-                'stale': len(G['stale']), 'stale_mult': int(c.get('stale_mult', 3)), 'stale_days': int(c.get('stale_days', 7)), 'dead': sum(1 for v in list(G['dead'].values()) if v >= 3), 'probe_n': int(G.get('probe_n') or 0), 'nows': sorted((G.get('nows') or {}).keys()), 'srooms': len((G.get('sroom') or {}).get('s') or ()) if (G.get('sroom') or {}).get('d') == int(time.time() // 86400) else 0, 'scap': max(0, int(G.get('sign_cap') or 0)), 'srsv': int(c.get('sign_reserve', 15)), 'l0_fail': int(G.get('l0_fail') or 0), 'l0_wait': 30 * 2 ** min(3, int(G.get('l0_fail') or 0)),
+                'stale': len(G['stale']), 'stale_mult': int(c.get('stale_mult', 3)), 'stale_days': int(c.get('stale_days', 7)), 'dead': sum(1 for v in list(G['dead'].values()) if v >= 3), 'probe_n': int(G.get('probe_n') or 0), 'nows': sorted((G.get('nows') or {}).keys()), 'srooms': len((G.get('sroom') or {}).get('s') or ()) if (G.get('sroom') or {}).get('d') == int(time.time() // 86400) else 0, 'scap': max(0, int(G.get('sign_cap') or 0)) or (100 if G.get('sign_hit') else 0), 'scap_guess': int(G.get('sign_cap') or 0) <= 0 and bool(G.get('sign_hit')), 'srsv': int(c.get('sign_reserve', 15)), 'l0_fail': int(G.get('l0_fail') or 0), 'l0_wait': 30 * 2 ** min(3, int(G.get('l0_fail') or 0)),
                 'api_first': bool(c.get('api_first', True)), 'route': {'api': rt('api'), 'html': rt('html')},
                 'sign': {'day': S.get('day'), 'n': int(S.get('n') or 0), 'ok': int(S.get('ok') or 0), 'lim': int(S.get('lim') or 0),
                          'limited': bool(S.get('lim_t') and now - float(S['lim_t']) < 900), 'waiting': sum(1 for t in list(G['sign_err'].values()) if now - t < 3600)},
@@ -25930,6 +25930,13 @@ $r | ConvertTo-Json -Depth 4 -Compress
                          (f"；慢慢加速 {float(G_.get('ramp') or 1) * 100:.0f}%" if int(G_['level']) < 2 and float(G_.get('ramp') or 1) < 1 else '') + (f"；學到每分鐘約 {float(G_.get('ceil')):.0f} 次開始被擋" if G_.get('ceil') else '') + (f"；回放慢沒多久又被擋 {G_.get('l1_fail')} 次" if G_.get('l1_fail') else '') +
                          (f"；今天用了簽章 {len((G_.get('sroom') or {}).get('s') or ())}" + (f"/{G_.get('sign_cap')}" if int(G_.get('sign_cap') or 0) > 0 else '') + " 個直播間" if (G_.get('sroom') or {}).get('d') == int(time.time() // 86400) else '') +
                          (f"；只錄影片中 {len(G_.get('nows') or {})} 位" if G_.get('nows') else ''))
+            RH_ = [x for x in list(G_.get('rh') or ()) if t0 <= x[0] <= t1]      # V1.2.61 每一級：每分鐘實際查幾次、被拒幾成（1.2.57 起的加速／退速調得對不對）
+            if RH_:
+                pl_ = []
+                for lv_ in (0, 1, 2):
+                    X = [x for x in RH_ if x[1] == lv_]
+                    if X: pl_.append(f"{('正常', '放慢', '大幅放慢')[lv_]} {len(X)} 分鐘：每分鐘查 {sum(x[4] for x in X) / len(X):.0f} 次、被拒 {sum(x[4] * x[5] for x in X) / max(1, sum(x[4] for x in X)) * 100:.0f}%")
+                o.append('    各級實際：' + '；'.join(pl_) + (f"；學到的上限 每分鐘 {RH_[-1][3]:.0f} 次" if RH_[-1][3] else ''))
         except Exception: pass
         try:                                                                    # V1.2.22 現在的主程式：記憶體、執行緒（最多的是哪幾種）
             import collections as _co
@@ -49012,9 +49019,12 @@ def _cg_patch():
             except Exception: rid_ = ''
             try:
                 if not G.get('sign_cap'):
-                    try: G['sign_cap'] = int(json.loads((Path(PACKAGE_ROOT) / '_DB_SSD' / 'cg_sign_cap.json').read_text(encoding='utf-8')).get('cap') or 0)
+                    try:
+                        j_ = json.loads((Path(PACKAGE_ROOT) / '_DB_SSD' / 'cg_sign_cap.json').read_text(encoding='utf-8'))
+                        G['sign_cap'] = int(j_.get('cap') or 0) or -1; G['sign_hit'] = float(j_.get('hit') or 0)
                     except Exception: G['sign_cap'] = -1
                 cap_ = int(G.get('sign_cap') or 0); rsv_ = int(G['cfg'].get('sign_reserve', 15))
+                if cap_ <= 0 and G.get('sign_hit'): cap_ = 100                    # V1.2.61 還沒學到一天幾個、但以前撞過額度 → 先當免費版的 100 個（不然要等一整天從早上 8 點算起才學得到，這段時間重點主播沒有保留）
                 box_ = getattr(LiveEngine, '_tlm_cv').get(); u_ = str(getattr((box_ or {}).get('eng'), 'username', '') or '').lower()
                 if cap_ > 20 and rsv_ > 0 and rid_ and rid_ not in D['s'] and len(D['s']) >= cap_ - rsv_ and u_ and u_ not in (G.get('vip') or set()):
                     G.setdefault('sign_saved', set()).add(u_)
@@ -49032,7 +49042,15 @@ def _cg_patch():
             except Exception as ex:
                 if ('rooms_day' in str(ex) or 'daily_rooms' in str(ex)) and D.get('full') and len(D['s']) >= 20 and len(D['s']) != int(G.get('sign_cap') or 0):   # V1.2.30 學到一天幾個直播間（存起來，重開也記得）
                     G['sign_cap'] = len(D['s'])
-                    try: (Path(PACKAGE_ROOT) / '_DB_SSD' / 'cg_sign_cap.json').write_text(json.dumps({'cap': len(D['s']), 't': time.time()}), encoding='utf-8')
+                    try: (Path(PACKAGE_ROOT) / '_DB_SSD' / 'cg_sign_cap.json').write_text(json.dumps({'cap': len(D['s']), 't': time.time(), 'hit': time.time()}), encoding='utf-8')
+                    except Exception: pass
+                elif ('rooms_day' in str(ex) or 'daily_rooms' in str(ex)) and not G.get('sign_hit'):   # V1.2.61 沒有從換日開始算（學不到數字）也記下「撞過額度」
+                    G['sign_hit'] = time.time()
+                    try:
+                        p_ = Path(PACKAGE_ROOT) / '_DB_SSD' / 'cg_sign_cap.json'
+                        try: j_ = json.loads(p_.read_text(encoding='utf-8'))
+                        except Exception: j_ = {}
+                        j_['hit'] = G['sign_hit']; p_.write_text(json.dumps(j_), encoding='utf-8')
                     except Exception: pass
                 if 'SignatureRateLimit' in type(ex).__name__ or 'RATE_LIMIT' in str(ex) or any(n_ in ('SignAPIError', 'WebcastBlockedError') for n_ in [c_.__name__ for c_ in type(ex).__mro__]):   # V1.2.28 記下來：外面改成只錄影片；V1.2.49 簽章伺服器連不上／回錯誤（不是額度）也一樣
                     try:
